@@ -1,4 +1,4 @@
-# UG Hustle - Setup Guide
+# White Market - Setup Guide
 
 This guide will help you connect the frontend to the backend.
 
@@ -16,7 +16,7 @@ This guide will help you connect the frontend to the backend.
 1. Go to [supabase.com](https://supabase.com) and sign in
 2. Click "New Project"
 3. Fill in the details:
-   - **Name**: ug-hustle
+   - **Name**: white-market
    - **Database Password**: Create a strong password (save this!)
    - **Region**: Select one close to Ghana (e.g., EU or US)
 4. Wait for the project to be created

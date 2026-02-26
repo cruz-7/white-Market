@@ -1,6 +1,4 @@
-
-
-# UG Hustle – Verified Student Services & Gig Marketplace
+# White Market – Verified Student Services & Gig Marketplace
 
 ## Overview
 A full-stack, mobile-first marketplace exclusively for University of Ghana students to offer and hire services — powered by Lovable Cloud (Supabase) for authentication, database, storage, and real-time messaging.
@@ -104,4 +102,3 @@ A full-stack, mobile-first marketplace exclusively for University of Ghana stude
 - **Trust-heavy** — verification badges, checkmarks, progress indicators everywhere
 - **UG-authentic** — warm, community-driven tone; simple language, not corporate
 - **Clean & clear** — no clutter, generous whitespace, obvious CTAs
-

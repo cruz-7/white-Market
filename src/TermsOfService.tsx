@@ -26,7 +26,7 @@ export default function TermsOfService() {
                 1. Acceptance of Terms
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>Welcome to UG Hustle. By accessing and using our platform, you accept and agree to be bound by the terms and provision of this agreement:</p>
+                <p>Welcome to White Market. By accessing and using our platform, you accept and agree to be bound by the terms and provision of this agreement:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>You must be a University of Ghana student or authorized user</li>
                   <li>You agree to provide accurate and complete information</li>
@@ -40,10 +40,10 @@ export default function TermsOfService() {
             <section className="bg-white rounded-lg shadow-sm p-6 border">
               <h2 className="text-xl font-semibold flex items-center gap-2 mb-4">
                 <Shield className="h-5 w-5 text-teal-600" />
-                2. UG Hustle for Students
+                2. White Market for Students
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>UG Hustle is an exclusive platform for University of Ghana students to offer and hire services:</p>
+                <p>White Market is an exclusive platform for University of Ghana students to offer and hire services:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>Verification:</strong> All service providers must verify their UG student status</li>
                   <li><strong>UG Email Required:</strong> Registration requires a valid ug.edu.gh email address</li>
@@ -62,7 +62,7 @@ export default function TermsOfService() {
                 3. Service Provider Obligations
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>As a service provider on UG Hustle, you agree to:</p>
+                <p>As a service provider on White Market, you agree to:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Provide accurate descriptions of your services</li>
                   <li>Deliver services as promised or agreed upon</li>
@@ -81,7 +81,7 @@ export default function TermsOfService() {
                 4. Buyer Responsibilities
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>As a buyer using UG Hustle services, you agree to:</p>
+                <p>As a buyer using White Market services, you agree to:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Provide accurate information when requesting services</li>
                   <li>Make timely payments for services rendered</li>
@@ -99,7 +99,7 @@ export default function TermsOfService() {
                 5. Payments & Financial Terms
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>UG Hustle uses Mobile Money for all transactions:</p>
+                <p>White Market uses Mobile Money for all transactions:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>Payment Method:</strong> All payments are processed via Mobile Money (MTN, Vodafone, AirtelTigo)</li>
                   <li><strong>Escrow System:</strong> Payments are held until service is completed</li>
@@ -108,7 +108,7 @@ export default function TermsOfService() {
                   <li><strong>Refunds:</strong> Available only if service is not delivered as agreed</li>
                 </ul>
                 <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mt-4">
-                  <p className="text-sm text-amber-800"><strong>Important:</strong> Never make payments outside of UG Hustle's platform. Doing so violates our terms and may result in loss of funds.</p>
+                  <p className="text-sm text-amber-800"><strong>Important:</strong> Never make payments outside of White Market's platform. Doing so violates our terms and may result in loss of funds.</p>
                 </div>
               </div>
             </section>
@@ -119,7 +119,7 @@ export default function TermsOfService() {
                 6. Prohibited Activities
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>The following activities are strictly prohibited on UG Hustle:</p>
+                <p>The following activities are strictly prohibited on White Market:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Sharing account credentials with others</li>
                   <li>Creating multiple accounts to evade restrictions</li>
@@ -146,10 +146,10 @@ export default function TermsOfService() {
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>Step 1:</strong> Contact the other party directly to resolve</li>
                   <li><strong>Step 2:</strong> If unresolved, open a dispute within 7 days</li>
-                  <li><strong>Step 3:</strong> UG Hustle admin will review evidence</li>
+                  <li><strong>Step 3:</strong> White Market admin will review evidence</li>
                   <li><strong>Step 4:</strong> Decision will be made based on available evidence</li>
                 </ul>
-                <p className="mt-4">UG Hustle reserves the right to:</p>
+                <p className="mt-4">White Market reserves the right to:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Mediate disputes and make final decisions</li>
                   <li>Refund payments in case of fraud or non-delivery</li>
@@ -175,11 +175,11 @@ export default function TermsOfService() {
             <section className="bg-white rounded-lg shadow-sm p-6 border">
               <h2 className="text-xl font-semibold mb-4">9. Intellectual Property</h2>
               <div className="space-y-4 text-slate-600">
-                <p>Content and materials on UG Hustle:</p>
+                <p>Content and materials on White Market:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>Your Content:</strong> You retain ownership of content you post</li>
-                  <li><strong>Platform Content:</strong> UG Hustle logos and branding are proprietary</li>
-                  <li><strong>License:</strong> You grant UG Hustle license to use your content for the platform</li>
+                  <li><strong>Platform Content:</strong> White Market logos and branding are proprietary</li>
+                  <li><strong>License:</strong> You grant White Market license to use your content for the platform</li>
                   <li><strong>Copyright:</strong> Respect copyright when posting others' content</li>
                 </ul>
               </div>
@@ -188,13 +188,13 @@ export default function TermsOfService() {
             <section className="bg-white rounded-lg shadow-sm p-6 border">
               <h2 className="text-xl font-semibold mb-4">10. Limitation of Liability</h2>
               <div className="space-y-4 text-slate-600">
-                <p>UG Hustle provides the platform "as is":</p>
+                <p>White Market provides the platform "as is":</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>We are not responsible for service quality between users</li>
                   <li>We do not guarantee uninterrupted platform availability</li>
                   <li>Users are responsible for verifying other users' identities</li>
                   <li>We are not liable for any financial losses due to user disputes</li>
-                  <li>Maximum liability is limited to the amount you paid to UG Hustle</li>
+                  <li>Maximum liability is limited to the amount you paid to White Market</li>
                 </ul>
               </div>
             </section>
@@ -249,10 +249,10 @@ export default function TermsOfService() {
               <div className="space-y-4 text-slate-600">
                 <p>For questions about these Terms of Service:</p>
                 <div className="bg-slate-100 p-4 rounded-lg">
-                  <p><strong>UG Hustle Support Team</strong></p>
+                  <p><strong>White Market Support Team</strong></p>
                   <p>University of Ghana, Legon</p>
                   <p>Accra, Ghana</p>
-                  <p>Email: support@ughustle.com</p>
+                  <p>Email: support@whitemarket.com</p>
                   <p>Phone: +233 20 000 0000</p>
                 </div>
               </div>

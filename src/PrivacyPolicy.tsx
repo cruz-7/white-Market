@@ -82,7 +82,7 @@ export default function PrivacyPolicy() {
                 4. Your Rights
               </h2>
               <div className="space-y-4 text-slate-600">
-                <p>As a user of UG Hustle, you have the following rights:</p>
+                <p>As a user of White Market, you have the following rights:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>Access:</strong> Request a copy of your personal data</li>
                   <li><strong>Correction:</strong> Request correction of inaccurate data</li>
@@ -90,7 +90,7 @@ export default function PrivacyPolicy() {
                   <li><strong>Data Portability:</strong> Request data in machine-readable format</li>
                   <li><strong>Opt-Out:</strong> Opt out of marketing communications</li>
                 </ul>
-                <p className="mt-4">Contact: <strong>privacy@ughustle.com</strong></p>
+                <p className="mt-4">Contact: <strong>support@whitemarket.com</strong></p>
               </div>
             </section>
 
@@ -143,10 +143,10 @@ export default function PrivacyPolicy() {
               <div className="space-y-4 text-slate-600">
                 <p>Questions about this Privacy Policy:</p>
                 <div className="bg-slate-100 p-4 rounded-lg">
-                  <p><strong>UG Hustle Privacy Team</strong></p>
+                  <p><strong>White Market Privacy Team</strong></p>
                   <p>University of Ghana, Legon</p>
                   <p>Accra, Ghana</p>
-                  <p>Email: privacy@ughustle.com</p>
+                  <p>Email: support@whitemarket.com</p>
                 </div>
               </div>
             </section>
