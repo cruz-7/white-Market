@@ -45,6 +45,12 @@ import {
 } from "./data";
 import { supabase } from "./supabase-client";
 import Index from "./Index";
+import { authApi, productsApi, ordersApi, userApi } from "./api";
+import PrivacyPolicy from "./PrivacyPolicy";
+import TermsOfService from "./TermsOfService";
+import FAQ from "./FAQ";
+import ReportIssue from "./ReportIssue";
+import BuyerProtection from "./BuyerProtection";
 
 declare global {
   interface Window {
@@ -170,6 +176,11 @@ function App() {
       <Route path="/dashboard" element={<DashboardRouter />} />
       <Route path="/admin" element={<AdminDashboard />} />
       <Route path="/profile-setup" element={<ProfileSetupPage />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
+      <Route path="/faq" element={<FAQ />} />
+      <Route path="/report" element={<ReportIssue />} />
+      <Route path="/buyer-protection" element={<BuyerProtection />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -408,7 +419,10 @@ function AuthPage() {
                 </Button>
 
                 <p className="text-center text-xs text-slate-500">
-                  By continuing, you agree to White Market Terms and Privacy Policy.
+                  By continuing, you agree to{" "}
+                  <Link to="/terms" className="underline hover:text-primary">Terms of Service</Link>{" "}
+                  and{" "}
+                  <Link to="/privacy" className="underline hover:text-primary">Privacy Policy</Link>.
                 </p>
               </form>
             </CardContent>
@@ -1585,8 +1599,8 @@ function ProfileSetupPage() {
               <Lock className="mt-0.5 h-4 w-4 text-emerald-700" />
               <p>
                 <span className="font-semibold text-slate-900">We protect your data.</span> Your info is encrypted and never shared without permission.{" "}
-                <a className="font-medium text-primary underline" href="#" onClick={(e) => e.preventDefault()}>Privacy Policy</a> and{" "}
-                <a className="font-medium text-primary underline" href="#" onClick={(e) => e.preventDefault()}>Terms</a>.
+                <Link to="/privacy" className="font-medium text-primary underline">Privacy Policy</Link> and{" "}
+                <Link to="/terms" className="font-medium text-primary underline">Terms</Link>.
               </p>
             </div>
           </div>

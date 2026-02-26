@@ -3,5 +3,6 @@ dist/
 .vite/
 .env
 .env.*
+backend/.env
 !.env.example
 *.log
