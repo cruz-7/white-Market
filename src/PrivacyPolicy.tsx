@@ -1,15 +1,24 @@
-import { Shield, Lock, Eye, Database, Mail, User, ChevronRight } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Shield, Lock, Eye, Database, Mail, User, ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import MobileBottomNav from "./MobileBottomNav";
 
 export default function PrivacyPolicy() {
+  const navigate = useNavigate();
+  
   return (
     <>
       <div className="min-h-screen bg-slate-50">
         <Navbar />
         <main className="container mx-auto max-w-4xl py-8 px-4">
+          <button 
+            onClick={() => navigate(-1)} 
+            className="mb-6 inline-flex items-center gap-2 rounded-lg border border-transparent px-2 py-1 text-sm text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to home
+          </button>
+          
           <div className="flex items-center gap-2 mb-6">
             <Shield className="h-6 w-6 text-teal-600" />
             <h1 className="text-2xl font-bold">Privacy Policy</h1>
@@ -153,10 +162,10 @@ export default function PrivacyPolicy() {
           </div>
 
           <div className="mt-8 pt-6 border-t">
-            <Link to="/" className="inline-flex items-center text-teal-600 hover:underline">
-              <ChevronRight className="h-4 w-4 mr-1" />
+            <button onClick={() => navigate("/")} className="inline-flex items-center gap-2 text-teal-600 hover:underline">
+              <ArrowLeft className="h-4 w-4" />
               Back to Home
-            </Link>
+            </button>
           </div>
         </main>
         <Footer />
