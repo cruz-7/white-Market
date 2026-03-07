@@ -44,6 +44,6 @@ npm run check
 ## Production Notes
 
 - Set `NODE_ENV=production` in backend.
-- Set `FRONTEND_URL`, `PAYSTACK_SECRET_KEY`, `PAYMENT_WEBHOOK_SECRET`, and `SUPABASE_*` env vars.
+- Set `FRONTEND_URL`, `PAYSTACK_SECRET_KEY`, and `SUPABASE_*` env vars.
 - Test/debug routes are disabled in production by default.
 - Simulated wallet top-up is blocked in production unless `ALLOW_SIMULATED_WALLET_TOPUP=true`.

@@ -34,7 +34,6 @@ function validateRequiredEnv(isProduction) {
     "SUPABASE_ANON_KEY",
     "FRONTEND_URL",
     "PAYSTACK_SECRET_KEY",
-    "PAYMENT_WEBHOOK_SECRET",
   ];
   const missing = requiredEnv.filter((key) => !process.env[key]);
   if (missing.length > 0) {

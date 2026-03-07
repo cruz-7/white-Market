@@ -72,10 +72,12 @@ function validateTransactionMatchesOrder(transaction, order) {
   return null;
 }
 
-async function markOrderPaid(orderId, paymentReference = null) {
+const COMMISSION_RATE = 0.10;
+
+async function markOrderPaid(orderId, paymentReference = null, buyerId = null) {
   const { data: order, error: fetchError } = await supabase
     .from("orders")
-    .select("id, status")
+    .select("id, status, seller_id, amount")
     .eq("id", orderId)
     .single();
 
@@ -109,7 +111,40 @@ async function markOrderPaid(orderId, paymentReference = null) {
     return { ok: false, status: 400, error: updateError.message };
   }
 
-  return { ok: true, alreadyPaid: false };
+  // Calculate commission and seller earnings (10% commission)
+  const orderAmount = Number(order.amount) || 0;
+  const commission = orderAmount * COMMISSION_RATE;
+  const sellerEarnings = orderAmount - commission;
+
+  // Credit seller's pending earnings with their share (90%)
+  if (order.seller_id) {
+    // Get current wallet
+    const { data: wallet } = await supabase
+      .from("wallets")
+      .select("pending_earnings")
+      .eq("user_id", order.seller_id)
+      .single();
+
+    const currentPending = Number(wallet?.pending_earnings) || 0;
+    const newPending = currentPending + sellerEarnings;
+
+    await supabase
+      .from("wallets")
+      .update({ pending_earnings: newPending, updated_at: new Date().toISOString() })
+      .eq("user_id", order.seller_id);
+
+    // Record seller earnings as pending balance movement.
+    await supabase.from("wallet_transactions").insert({
+      user_id: order.seller_id,
+      type: "pending",
+      amount: sellerEarnings,
+      description: `Order payment - ${orderAmount} GHS (${(COMMISSION_RATE * 100).toFixed(0)}% commission applied)`,
+      reference_id: orderId,
+      balance_after: newPending,
+    });
+  }
+
+  return { ok: true, alreadyPaid: false, commission, sellerEarnings };
 }
 
 async function getOrCreateWallet(userId) {
@@ -347,7 +382,7 @@ paymentsRouter.get("/verify/:reference", requireAuth, async (req, res) => {
 });
 
 paymentsRouter.post("/webhook", async (req, res) => {
-  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+  const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
   const signature = req.headers["x-paystack-signature"];
   const rawBody = req.body;
 
@@ -355,11 +390,11 @@ paymentsRouter.post("/webhook", async (req, res) => {
     return res.status(400).json({ error: "Webhook expects raw JSON body" });
   }
 
-  if (!secret) {
-    return res.status(500).json({ error: "PAYMENT_WEBHOOK_SECRET is not configured" });
+  if (!paystackSecret) {
+    return res.status(500).json({ error: "PAYSTACK_SECRET_KEY is not configured" });
   }
 
-  const computed = createHmac("sha512", secret).update(rawBody).digest("hex");
+  const computed = createHmac("sha512", paystackSecret).update(rawBody).digest("hex");
   if (!safeEqualHex(signature, computed)) {
     return res.status(401).json({ error: "Invalid webhook signature" });
   }

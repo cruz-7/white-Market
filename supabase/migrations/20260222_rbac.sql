@@ -1,7 +1,17 @@
 -- RBAC foundation for White Market
 -- Assumption: Supabase Auth is source of truth for authentication.
 
-create type if not exists public.app_role as enum ('user', 'seller', 'admin');
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where t.typname = 'app_role' and n.nspname = 'public'
+  ) then
+    create type public.app_role as enum ('user', 'seller', 'admin');
+  end if;
+end $$;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,

@@ -6,7 +6,6 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "service-role-test-key";
 process.env.SUPABASE_ANON_KEY ||= "anon-test-key";
 process.env.FRONTEND_URL ||= "https://allowed.example.com";
 process.env.PAYSTACK_SECRET_KEY ||= "paystack-test-key";
-process.env.PAYMENT_WEBHOOK_SECRET ||= "webhook-test-secret";
 
 const { createApp } = await import("../../src/index.js");
 
@@ -120,8 +119,8 @@ test("production CORS blocks unknown browser origins", async () => {
 });
 
 test("production mode fails fast when required env vars are missing", () => {
-  const previous = process.env.PAYMENT_WEBHOOK_SECRET;
-  delete process.env.PAYMENT_WEBHOOK_SECRET;
+  const previous = process.env.PAYSTACK_SECRET_KEY;
+  delete process.env.PAYSTACK_SECRET_KEY;
 
   try {
     assert.throws(
@@ -129,6 +128,6 @@ test("production mode fails fast when required env vars are missing", () => {
       /Missing required environment variables for production/,
     );
   } finally {
-    process.env.PAYMENT_WEBHOOK_SECRET = previous;
+    process.env.PAYSTACK_SECRET_KEY = previous;
   }
 });

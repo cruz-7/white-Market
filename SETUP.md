@@ -34,7 +34,6 @@ ALLOWED_EMAIL_DOMAINS=st.ug.edu.gh,ug.edu.gh
 
 PAYSTACK_SECRET_KEY=...
 PAYSTACK_CALLBACK_URL=http://localhost:5173/payments/callback
-PAYMENT_WEBHOOK_SECRET=...
 
 ENABLE_TEST_ROUTES=true
 ALLOW_SIMULATED_WALLET_TOPUP=true
@@ -74,7 +73,7 @@ npm run check
 ```
 
 1. Set `NODE_ENV=production`.
-2. Set non-empty `FRONTEND_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, `PAYMENT_WEBHOOK_SECRET`.
+2. Set non-empty `FRONTEND_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`.
 3. Set `ENABLE_TEST_ROUTES=false`.
 4. Keep `ALLOW_SIMULATED_WALLET_TOPUP` unset or `false`.
 5. Configure your Paystack webhook to `POST /payments/webhook`.

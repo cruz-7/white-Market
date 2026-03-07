@@ -1,4 +1,4 @@
-﻿-- Wallet tables and RLS for White Market
+-- Wallet tables and RLS for White Market
 create table if not exists public.wallets (
   user_id uuid primary key references auth.users(id) on delete cascade,
   balance numeric(12,2) not null default 0.00,
@@ -21,23 +21,27 @@ create table if not exists public.wallet_transactions (
 alter table public.wallets enable row level security;
 alter table public.wallet_transactions enable row level security;
 
-create policy if not exists "wallets_select_own"
+drop policy if exists "wallets_select_own" on public.wallets;
+create policy "wallets_select_own"
 on public.wallets
 for select
 using (auth.uid() = user_id);
 
-create policy if not exists "wallets_update_own"
+drop policy if exists "wallets_update_own" on public.wallets;
+create policy "wallets_update_own"
 on public.wallets
 for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
-create policy if not exists "wallet_transactions_select_own"
+drop policy if exists "wallet_transactions_select_own" on public.wallet_transactions;
+create policy "wallet_transactions_select_own"
 on public.wallet_transactions
 for select
 using (auth.uid() = user_id);
 
-create policy if not exists "wallet_transactions_insert_own"
+drop policy if exists "wallet_transactions_insert_own" on public.wallet_transactions;
+create policy "wallet_transactions_insert_own"
 on public.wallet_transactions
 for insert
 with check (auth.uid() = user_id);
