@@ -14,11 +14,15 @@ interface ApiResponse<T = any> {
   error?: string;
 }
 
+function resolveApiUrl(endpoint: string): string {
+  return API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-  const url = API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
+  const url = resolveApiUrl(endpoint);
   
   // Get token from localStorage
   const userJson = localStorage.getItem("wm_user");
@@ -444,5 +448,38 @@ export function getApiBaseUrl(): string {
 }
 
 export const healthApi = {
-  check: () => fetchApi<{ status: string }>("/health"),
+  check: async (): Promise<ApiResponse<{ status: string }>> => {
+    const primary = await fetchApi<{ status?: string }>("/health");
+    if (primary.data?.status === "ok") {
+      return { data: { status: "ok" } };
+    }
+
+    // Fallback for environments still running older backend builds without /health.
+    try {
+      const probe = await fetch(resolveApiUrl("/protected/me"), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      const contentType = probe.headers.get("content-type") || "";
+
+      // 401 JSON means backend auth middleware responded correctly.
+      if ((probe.status === 401 || probe.status === 200) && contentType.includes("application/json")) {
+        return { data: { status: "ok" } };
+      }
+    } catch {
+      // continue to next fallback
+    }
+
+    try {
+      const root = await fetch(resolveApiUrl("/"), { method: "GET" });
+      const text = await root.text();
+      if (root.ok && text.includes("White Market backend is running")) {
+        return { data: { status: "ok" } };
+      }
+    } catch {
+      // swallow and return primary failure
+    }
+
+    return { error: primary.error || "Backend health check failed" };
+  },
 };
