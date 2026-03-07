@@ -3,6 +3,7 @@ import { Button } from "./button";
 import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import { supabase } from "./supabase-client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,7 +54,10 @@ const Navbar = () => {
     };
   }, []);
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut().catch(() => {});
+    }
     localStorage.removeItem("wm_user");
     setUser(null);
     setIsAdmin(false);
@@ -108,7 +112,7 @@ const Navbar = () => {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
+                  <DropdownMenuItem onClick={() => void handleSignOut()} className="text-destructive">
                     <LogOut className="h-4 w-4 mr-2" /> Sign Out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -143,7 +147,7 @@ const Navbar = () => {
                     <ShieldCheck className="h-3.5 w-3.5" /> Admin Panel
                   </Link>
                 )}
-                <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => { handleSignOut(); setOpen(false); }}>
+                <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => { void handleSignOut(); setOpen(false); }}>
                   <LogOut className="h-4 w-4" /> Sign Out
                 </Button>
               </>

@@ -112,7 +112,7 @@ create table if not exists public.payouts (
   created_at timestamp with time zone default now()
 );
 
-alter table public.payouts disable row level security;
+alter table public.payouts enable row level security;
 
 -- ============================================================================
 -- 010: Add Paystack recipient code field to users table
@@ -150,7 +150,7 @@ create table if not exists public.wallet_transactions (
 );
 
 -- Drop existing trigger if it exists (to handle re-runs)
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_auth_user_created_wallet ON auth.users;
 
 -- Create function to auto-create wallet on user signup
 create or replace function public.handle_new_user()
@@ -162,7 +162,7 @@ begin
 end;
 $$ language plpgsql security definer;
 
-create trigger on_auth_user_created
+create trigger on_auth_user_created_wallet
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
@@ -173,8 +173,8 @@ from public.users
 where not exists (select 1 from public.wallets where user_id = users.id)
 on conflict (user_id) do nothing;
 
-alter table public.wallets disable row level security;
-alter table public.wallet_transactions disable row level security;
+alter table public.wallets enable row level security;
+alter table public.wallet_transactions enable row level security;
 
 -- ============================================================================
 -- MIGRATION COMPLETE!

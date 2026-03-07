@@ -1,10 +1,13 @@
 /**
  * API Service Layer
  * Connects frontend to the Express backend
- * Base URL: http://localhost:5000
+ * Base URL:
+ * - Dev default: http://localhost:5000
+ * - Production default: relative paths (same origin/reverse proxy)
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
 
 interface ApiResponse<T = any> {
   data?: T;
@@ -15,11 +18,18 @@ async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
   
   // Get token from localStorage
   const userJson = localStorage.getItem("wm_user");
-  const token = userJson ? JSON.parse(userJson).access_token : null;
+  let token: string | null = null;
+  if (userJson) {
+    try {
+      token = JSON.parse(userJson).access_token || null;
+    } catch {
+      token = null;
+    }
+  }
   
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -36,7 +46,7 @@ async function fetchApi<T>(
       headers,
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       return { error: data.error || `HTTP ${response.status}: Request failed` };
@@ -181,7 +191,7 @@ export interface CreateOrderParams {
 }
 
 export interface UpdateOrderStatusParams {
-  status: "pending" | "paid" | "cancelled";
+  status: "cancelled";
 }
 
 export const ordersApi = {
@@ -196,6 +206,9 @@ export const ordersApi = {
 
   getSales: () =>
     fetchApi<Order[]>("/orders/sales"),
+
+  getById: (id: string) =>
+    fetchApi<Order & { buyer?: { full_name?: string }; seller?: { full_name?: string } }>(`/orders/${id}`),
 
   updateStatus: (id: string, params: UpdateOrderStatusParams) =>
     fetchApi<{ message: string; order: Order }>(`/orders/${id}/status`, {
@@ -225,8 +238,60 @@ export const paymentsApi = {
       body: JSON.stringify(params),
     }),
 
+  walletPay: (order_id: string) =>
+    fetchApi<{ message: string; order_id: string; balance: number }>("/payments/wallet-pay", {
+      method: "POST",
+      body: JSON.stringify({ order_id }),
+    }),
+
   verify: (reference: string) =>
     fetchApi<{ message: string; order_id: string }>(`/payments/verify/${reference}`),
+};
+
+// ==================== MESSAGES API ====================
+
+export interface Conversation {
+  id: string;
+  product_id: string;
+  product_title: string;
+  product_image_url: string;
+  buyer_id: string;
+  seller_id: string;
+  buyer_name: string;
+  seller_name: string;
+  updated_at: string;
+  unread_count: number;
+  last_message?: ChatMessage | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  text?: string | null;
+  image_url?: string | null;
+  created_at: string;
+  status: "sent" | "delivered" | "read";
+}
+
+export const messagesApi = {
+  getConversations: () =>
+    fetchApi<{ conversations: Conversation[] }>("/messages/conversations"),
+
+  upsertConversation: (params: { product_id: string; buyer_id?: string }) =>
+    fetchApi<{ conversation: { id: string } }>("/messages/conversations/upsert", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+
+  getConversationMessages: (conversationId: string) =>
+    fetchApi<{ messages: ChatMessage[] }>(`/messages/conversations/${conversationId}/messages`),
+
+  sendMessage: (params: { conversation_id: string; text?: string; image_url?: string }) =>
+    fetchApi<{ message: ChatMessage }>("/messages", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 };
 
 // ==================== USER API ====================
@@ -244,31 +309,31 @@ export interface UserProfile {
 
 export const userApi = {
   getProfile: () =>
-    fetchApi<UserProfile>("/profile"),
+    fetchApi<UserProfile>("/protected/profile"),
 
   updateProfile: (data: Partial<UserProfile>) =>
-    fetchApi<{ message: string }>("/profile", {
+    fetchApi<{ message: string }>("/protected/profile", {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
   getWallet: () =>
-    fetchApi<{ balance: number; pending_earnings: number }>("/wallet"),
+    fetchApi<{ balance: number; pending_earnings: number }>("/protected/wallet"),
 
   topUp: (amount: number) =>
-    fetchApi<{ message: string }>("/wallet/topup", {
+    fetchApi<{ message: string }>("/protected/wallet/topup", {
       method: "POST",
       body: JSON.stringify({ amount }),
     }),
 
   withdraw: (amount: number, momo_number?: string) =>
-    fetchApi<{ message: string }>("/wallet/withdraw", {
+    fetchApi<{ message: string }>("/protected/wallet/withdraw", {
       method: "POST",
       body: JSON.stringify({ amount, momo_number }),
     }),
 
   getTransactions: () =>
-    fetchApi<any[]>("/wallet/transactions"),
+    fetchApi<any[]>("/protected/wallet/transactions"),
 };
 
 // ==================== ADMIN API ====================
@@ -294,9 +359,13 @@ export const adminApi = {
 // ==================== UTILITY ====================
 
 export function isApiConfigured(): boolean {
-  return true;
+  return Boolean(import.meta.env.VITE_API_URL || import.meta.env.DEV);
 }
 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
+
+export const healthApi = {
+  check: () => fetchApi<{ status: string }>("/health"),
+};

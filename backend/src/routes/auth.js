@@ -1,7 +1,22 @@
 import { Router } from "express";
 import { supabase, supabasePublic } from "../lib/supabaseClient.js";
+import { requireAdmin } from "../middleware/requireAdmin.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 const authRouter = Router();
+const allowedEmailDomains = (process.env.ALLOWED_EMAIL_DOMAINS || "")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+
+function isAllowedDomain(email) {
+  if (allowedEmailDomains.length === 0) {
+    return true;
+  }
+
+  const [, domain = ""] = String(email).toLowerCase().split("@");
+  return allowedEmailDomains.includes(domain);
+}
 
 authRouter.post("/signup", async (req, res) => {
   const { email, password, full_name } = req.body || {};
@@ -10,39 +25,52 @@ authRouter.post("/signup", async (req, res) => {
     return res.status(400).json({ error: "email and password are required" });
   }
 
-  const { data, error } = await supabase.auth.admin.createUser({
-    email,
+  if (!supabasePublic) {
+    return res.status(500).json({ error: "SUPABASE_ANON_KEY is not configured in backend/.env" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!isAllowedDomain(normalizedEmail)) {
+    return res.status(400).json({ error: "Email domain is not allowed" });
+  }
+
+  const { data, error } = await supabasePublic.auth.signUp({
+    email: normalizedEmail,
     password,
-    email_confirm: true,
+    options: {
+      data: {
+        full_name: full_name || null,
+      },
+    },
   });
 
   if (error) return res.status(400).json({ error: error.message });
 
   const user = data.user;
-  if (!user) {
-    return res.status(500).json({ error: "User creation returned no user object" });
+  if (user) {
+    const { error: profileError } = await supabase.from("users").upsert(
+      {
+        id: user.id,
+        email: normalizedEmail,
+        full_name: full_name || null,
+        role: "user",
+      },
+      { onConflict: "id" },
+    );
+
+    if (profileError) {
+      return res.status(400).json({ error: profileError.message });
+    }
   }
 
-  const { error: confirmError } = await supabase.auth.admin.updateUserById(user.id, {
-    email_confirm: true,
+  return res.status(201).json({
+    message: data.session
+      ? "User created successfully"
+      : "Signup initiated. Please check your email to confirm your account.",
+    user,
+    access_token: data.session?.access_token,
   });
-  if (confirmError) {
-    await supabase.auth.admin.deleteUser(user.id);
-    return res.status(400).json({ error: confirmError.message });
-  }
-
-  const { error: profileError } = await supabase.from("users").insert({
-    id: user.id,
-    email,
-    full_name: full_name || null,
-  });
-
-  if (profileError) {
-    await supabase.auth.admin.deleteUser(user.id);
-    return res.status(400).json({ error: profileError.message });
-  }
-
-  return res.status(201).json({ message: "User created successfully", user });
 });
 
 authRouter.post("/login", async (req, res) => {
@@ -52,7 +80,12 @@ authRouter.post("/login", async (req, res) => {
     return res.status(400).json({ error: "email and password are required" });
   }
 
-  const { data, error } = await supabasePublic.auth.signInWithPassword({ email, password });
+  if (!supabasePublic) {
+    return res.status(500).json({ error: "SUPABASE_ANON_KEY is not configured in backend/.env" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const { data, error } = await supabasePublic.auth.signInWithPassword({ email: normalizedEmail, password });
 
   if (error) return res.status(401).json({ error: error.message });
 
@@ -62,29 +95,35 @@ authRouter.post("/login", async (req, res) => {
   });
 });
 
-// Admin endpoint to confirm user email
-authRouter.post("/confirm-email", async (req, res) => {
-  const { email } = req.body || {};
+// Admin-only endpoint to confirm user email.
+authRouter.post("/confirm-email", requireAuth, requireAdmin, async (req, res) => {
+  const { user_id, email } = req.body || {};
+  let targetUserId = user_id;
 
-  if (!email) {
-    return res.status(400).json({ error: "email is required" });
+  if (!targetUserId && !email) {
+    return res.status(400).json({ error: "user_id or email is required" });
   }
 
-  // First get the user by email
-  const { data: users, error: listError } = await supabase.auth.admin.listUsers();
-  
-  if (listError) {
-    return res.status(400).json({ error: listError.message });
+  if (!targetUserId) {
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const { data: profile, error: profileError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (profileError) {
+      return res.status(400).json({ error: profileError.message });
+    }
+
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    targetUserId = profile.id;
   }
 
-  const user = users.users.find(u => u.email === email);
-  
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  // Confirm the email
-  const { error: confirmError } = await supabase.auth.admin.updateUserById(user.id, {
+  const { error: confirmError } = await supabase.auth.admin.updateUserById(targetUserId, {
     email_confirm: true,
   });
 
@@ -92,7 +131,6 @@ authRouter.post("/confirm-email", async (req, res) => {
     return res.status(400).json({ error: confirmError.message });
   }
 
-  return res.json({ message: "Email confirmed successfully", user });
+  return res.json({ message: "Email confirmed successfully", user_id: targetUserId });
 });
 export default authRouter;
-

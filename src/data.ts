@@ -1,4 +1,4 @@
-export type UserRole = "user" | "seller" | "admin";
+export type UserRole = "user" | "seller" | "admin" | "banned";
 
 export type LocalUser = {
   id: string;
@@ -7,6 +7,7 @@ export type LocalUser = {
   role: UserRole;
   avatar_url?: string;
   momo_number?: string;
+  created_at?: string;
 };
 
 export type Product = {
@@ -31,7 +32,15 @@ export type Product = {
   listed_at: string;
 };
 
-export type OrderStatus = "pending" | "confirmed" | "shipped" | "delivered" | "completed" | "disputed";
+export type OrderStatus =
+  | "pending"
+  | "paid"
+  | "cancelled"
+  | "confirmed"
+  | "shipped"
+  | "delivered"
+  | "completed"
+  | "disputed";
 
 export type Order = {
   id: string;
@@ -209,6 +218,9 @@ export function getActivities() { return read<any[]>(KEYS.activities, []); }
 
 export function saveProducts(products: Product[]) { write(KEYS.products, products); }
 export function saveOrders(orders: Order[]) { write(KEYS.orders, orders); }
+export function saveUsers(users: LocalUser[]) { write(KEYS.users, users); }
+export function saveConversations(conversations: Conversation[]) { write(KEYS.conversations, conversations); }
+export function saveMessages(messages: Message[]) { write(KEYS.messages, messages); }
 
 export function getWallet(userId: string): Wallet {
   const wallets = read<Wallet[]>(KEYS.wallets, []);
@@ -220,7 +232,7 @@ export function getWallet(userId: string): Wallet {
   return created;
 }
 
-function saveWallet(wallet: Wallet) {
+export function saveWallet(wallet: Wallet) {
   const wallets = read<Wallet[]>(KEYS.wallets, []);
   const idx = wallets.findIndex((w) => w.user_id === wallet.user_id);
   if (idx > -1) wallets[idx] = wallet;
@@ -230,6 +242,12 @@ function saveWallet(wallet: Wallet) {
 
 export function getWalletTransactions(userId: string) {
   return read<WalletTransaction[]>(KEYS.walletTransactions, []).filter((t) => t.user_id === userId).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+}
+
+export function saveWalletTransactions(userId: string, transactions: WalletTransaction[]) {
+  const all = read<WalletTransaction[]>(KEYS.walletTransactions, []);
+  const others = all.filter((item) => item.user_id !== userId);
+  write(KEYS.walletTransactions, [...others, ...transactions]);
 }
 
 function addWalletTransaction(tx: Omit<WalletTransaction, "id" | "created_at">) {

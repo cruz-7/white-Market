@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabaseClient.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
 const ordersRouter = Router();
-const ORDER_STATUSES = new Set(["pending", "paid", "cancelled"]);
+const ORDER_STATUSES = new Set(["cancelled"]);
 
 ordersRouter.post("/", requireAuth, async (req, res) => {
   const { product_id } = req.body || {};
@@ -21,6 +21,10 @@ ordersRouter.post("/", requireAuth, async (req, res) => {
 
   if (productError || !product) {
     return res.status(404).json({ error: "Product not found" });
+  }
+
+  if (product.seller_id === buyer_id) {
+    return res.status(400).json({ error: "You cannot create an order for your own product" });
   }
 
   const { data: insertedOrder, error: orderError } = await supabase.from("orders").insert({
@@ -46,7 +50,7 @@ ordersRouter.patch("/:id/status", requireAuth, async (req, res) => {
   const { status } = req.body || {};
 
   if (!ORDER_STATUSES.has(status)) {
-    return res.status(400).json({ error: "Invalid status. Use pending, paid, or cancelled" });
+    return res.status(400).json({ error: "Invalid status. Only cancelled is allowed on this endpoint" });
   }
 
   const { data: order, error: orderError } = await supabase
@@ -69,16 +73,6 @@ ordersRouter.patch("/:id/status", requireAuth, async (req, res) => {
     return res.json({ message: "Order status unchanged", order });
   }
 
-  // Allowed flow: pending -> paid -> cancelled, and pending -> cancelled.
-  if (order.status === "pending" && status === "paid" && !isBuyer) {
-    return res.status(403).json({ error: "Only buyer can mark pending order as paid" });
-  }
-  if (order.status === "pending" && !["paid", "cancelled"].includes(status)) {
-    return res.status(400).json({ error: "Pending order can only become paid or cancelled" });
-  }
-  if (order.status === "paid" && status !== "cancelled") {
-    return res.status(400).json({ error: "Paid order can only become cancelled" });
-  }
   if (order.status === "cancelled") {
     return res.status(400).json({ error: "Cancelled order cannot be updated" });
   }
@@ -100,7 +94,7 @@ ordersRouter.patch("/:id/status", requireAuth, async (req, res) => {
 ordersRouter.get("/my-orders", requireAuth, async (req, res) => {
   const primary = await supabase
     .from("orders")
-    .select("*, products(title, image_url)")
+    .select("*, products(title, image_url), users!orders_seller_id_fkey(full_name)")
     .eq("buyer_id", req.user.id);
 
   if (!primary.error) {
@@ -109,7 +103,7 @@ ordersRouter.get("/my-orders", requireAuth, async (req, res) => {
 
   const fallback = await supabase
     .from("orders")
-    .select("*, products!orders_product_id_fkey(title, image_url)")
+    .select("*, products!orders_product_id_fkey(title, image_url), users!orders_seller_id_fkey(full_name)")
     .eq("buyer_id", req.user.id);
 
   if (fallback.error) {
@@ -122,7 +116,7 @@ ordersRouter.get("/my-orders", requireAuth, async (req, res) => {
 ordersRouter.get("/sales", requireAuth, async (req, res) => {
   const primary = await supabase
     .from("orders")
-    .select("*, products(title)")
+    .select("*, products(title, image_url), users!orders_buyer_id_fkey(full_name)")
     .eq("seller_id", req.user.id);
 
   if (!primary.error) {
@@ -131,7 +125,7 @@ ordersRouter.get("/sales", requireAuth, async (req, res) => {
 
   const fallback = await supabase
     .from("orders")
-    .select("*, products!orders_product_id_fkey(title)")
+    .select("*, products!orders_product_id_fkey(title, image_url), users!orders_buyer_id_fkey(full_name)")
     .eq("seller_id", req.user.id);
 
   if (fallback.error) {
@@ -139,6 +133,40 @@ ordersRouter.get("/sales", requireAuth, async (req, res) => {
   }
 
   return res.json(fallback.data);
+});
+
+ordersRouter.get("/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  const primary = await supabase
+    .from("orders")
+    .select(
+      "*, products(title, image_url), buyer:users!orders_buyer_id_fkey(full_name), seller:users!orders_seller_id_fkey(full_name)",
+    )
+    .eq("id", id)
+    .single();
+
+  const result = primary.error
+    ? await supabase
+        .from("orders")
+        .select(
+          "*, products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name), seller:users!orders_seller_id_fkey(full_name)",
+        )
+        .eq("id", id)
+        .single()
+    : primary;
+
+  if (result.error || !result.data) {
+    return res.status(404).json({ error: "Order not found" });
+  }
+
+  const order = result.data;
+  const isParticipant = order.buyer_id === req.user.id || order.seller_id === req.user.id || req.user.role === "admin";
+  if (!isParticipant) {
+    return res.status(403).json({ error: "Not allowed to view this order" });
+  }
+
+  return res.json(order);
 });
 
 export default ordersRouter;

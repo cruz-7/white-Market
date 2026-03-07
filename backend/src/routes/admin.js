@@ -7,30 +7,47 @@ const router = express.Router()
 
 // DASHBOARD STATS
 router.get("/stats", requireAuth, requireAdmin, async (req, res) => {
-  const { count: users } = await supabase
+  const { count: users, error: usersError } = await supabase
     .from("users")
     .select("*", { count: "exact", head: true })
 
-  const { count: products } = await supabase
+  const { count: products, error: productsError } = await supabase
     .from("products")
     .select("*", { count: "exact", head: true })
 
-  const { count: orders } = await supabase
+  const { count: orders, error: ordersError } = await supabase
     .from("orders")
     .select("*", { count: "exact", head: true })
 
-  const { data: revenue } = await supabase
+  const { data: revenue, error: revenueError } = await supabase
     .from("orders")
     .select("amount")
     .eq("status", "paid")
 
+  if (usersError || productsError || ordersError || revenueError) {
+    return res.status(400).json({
+      error:
+        usersError?.message ||
+        productsError?.message ||
+        ordersError?.message ||
+        revenueError?.message ||
+        "Failed to load admin stats",
+    })
+  }
+
   const totalRevenue = revenue?.reduce((sum, o) => sum + Number(o.amount), 0) || 0
   const commission = totalRevenue * 0.1
+  const totalUsers = users || 0
+  const totalProducts = products || 0
+  const totalOrders = orders || 0
 
   res.json({
-    users,
-    products,
-    orders,
+    users: totalUsers,
+    products: totalProducts,
+    orders: totalOrders,
+    totalUsers,
+    totalProducts,
+    totalOrders,
     totalRevenue,
     commission
   })
@@ -71,6 +88,27 @@ router.patch("/unban-user/:id", requireAuth, requireAdmin, async (req, res) => {
   }
   
   res.json({ message: "User unbanned" })
+})
+
+// UPDATE USER ROLE
+router.patch("/users/:id/role", requireAuth, requireAdmin, async (req, res) => {
+  const { role } = req.body || {}
+  const allowedRoles = new Set(["user", "seller", "admin", "banned"])
+
+  if (!allowedRoles.has(role)) {
+    return res.status(400).json({ error: "Invalid role" })
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({ role })
+    .eq("id", req.params.id)
+
+  if (error) {
+    return res.status(400).json({ error: error.message })
+  }
+
+  return res.json({ message: "User role updated" })
 })
 
 // GET ALL USERS (with role info)

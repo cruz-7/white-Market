@@ -15,13 +15,22 @@ export async function requireAuth(req, res, next) {
   }
 
   // fetch role from users table
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("users")
     .select("role")
     .eq("id", data.user.id)
-    .single()
+    .single();
 
   req.user = data.user;
   req.user.role = profile?.role || "user";
+
+  if (profileError && profileError.code !== "PGRST116") {
+    console.error("Failed to load user role:", profileError.message);
+  }
+
+  if (req.user.role === "banned") {
+    return res.status(403).json({ message: "Account is banned" });
+  }
+
   return next();
 }

@@ -158,7 +158,7 @@ create table if not exists public.payouts (
 );
 
 -- Disable RLS for now
-alter table public.payouts disable row level security;
+alter table public.payouts enable row level security;
 
 -- ============================================================================
 -- 010: Add Paystack recipient code field to users table
@@ -209,9 +209,9 @@ end;
 $$ language plpgsql security definer;
 
 -- Drop existing trigger if it exists (to handle re-runs)
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_auth_user_created_wallet ON auth.users;
 
-create trigger on_auth_user_created
+create trigger on_auth_user_created_wallet
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
@@ -230,8 +230,8 @@ $$ language plpgsql security definer;
 select public.create_missing_wallets();
 
 -- Disable RLS on wallets for development
-alter table public.wallets disable row level security;
-alter table public.wallet_transactions disable row level security;
+alter table public.wallets enable row level security;
+alter table public.wallet_transactions enable row level security;
 
 -- ============================================================================
 -- MIGRATION COMPLETE!

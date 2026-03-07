@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { upload } from "../middleware/upload.js";
 
 const productsRouter = Router();
+const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 productsRouter.post("/upload-image", requireAuth, upload.single("image"), async (req, res) => {
   const file = req.file;
@@ -12,9 +13,18 @@ productsRouter.post("/upload-image", requireAuth, upload.single("image"), async 
     return res.status(400).json({ error: "No image uploaded" });
   }
 
-  const originalExt = file.originalname.split(".").pop();
-  const fileExt = originalExt && originalExt.length <= 10 ? originalExt : "jpg";
-  const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.${fileExt}`;
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
+    return res.status(400).json({ error: "Only JPEG, PNG, WEBP, and GIF images are allowed" });
+  }
+
+  const extensionByType = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+  };
+  const fileExt = extensionByType[file.mimetype] || "jpg";
+  const fileName = `${req.user.id}/${Date.now()}-${Math.round(Math.random() * 1e9)}.${fileExt}`;
 
   const { error } = await supabase.storage
     .from("product-images")

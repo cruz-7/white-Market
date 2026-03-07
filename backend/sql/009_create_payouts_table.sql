@@ -10,5 +10,5 @@ create table if not exists public.payouts (
   created_at timestamp with time zone default now()
 );
 
--- Disable RLS for now
-alter table public.payouts disable row level security;
+-- Keep RLS enabled for hosted environments.
+alter table public.payouts enable row level security;

@@ -18,8 +18,6 @@ import {
   LocalUser,
   Message,
   Order,
-  creditPendingEarnings,
-  debitWallet,
   getActivities,
   getConversations,
   getMessages,
@@ -28,24 +26,33 @@ import {
   getUsers,
   getWallet,
   getWalletTransactions,
-  markConversationRead,
   recordActivity,
-  releasePendingEarnings,
+  saveConversations,
   saveOrders,
   saveProducts,
-  seedData,
-  sendMessage,
-  setTyping,
+  saveUsers,
+  saveWallet,
+  saveWalletTransactions,
   subscribeDataChange,
   timeAgo,
-  topUpWallet,
-  upsertConversationForProduct,
+  saveMessages,
   upsertUser,
-  withdrawWallet,
 } from "./data";
 import { supabase } from "./supabase-client";
 import Index from "./Index";
-import { authApi, productsApi, ordersApi, userApi } from "./api";
+import {
+  authApi,
+  productsApi,
+  ordersApi,
+  userApi,
+  messagesApi,
+  paymentsApi,
+  healthApi,
+  type Product as ApiProduct,
+  type Order as ApiOrder,
+  type Conversation as ApiConversation,
+  type ChatMessage,
+} from "./api";
 import PrivacyPolicy from "./PrivacyPolicy";
 import TermsOfService from "./TermsOfService";
 import FAQ from "./FAQ";
@@ -126,10 +133,126 @@ function statDelta(index: number) {
   return deltas[index % deltas.length];
 }
 
-function App() {
+function toLocalProduct(product: ApiProduct) {
+  return {
+    id: product.id,
+    title: product.title,
+    price: Number(product.price || 0),
+    sellerId: product.seller_id,
+    sellerName: product.users?.full_name || "Seller",
+    category: product.category || "General",
+    image: product.image_url || "https://via.placeholder.com/640x360?text=White+Market",
+    is_active: product.is_active ?? true,
+    stock_status: "in_stock" as const,
+    views: 0,
+    rating: 4.5,
+    reviews: 0,
+    eta: "Same day",
+    delivery_type: "Pickup or Delivery" as const,
+    condition: "New" as const,
+    verified_seller: true,
+    seller_sales: 0,
+    response_time: "~15 min",
+    listed_at: product.created_at || new Date().toISOString(),
+  };
+}
+
+function toLocalOrder(
+  order: ApiOrder & {
+    buyer?: { full_name?: string };
+    seller?: { full_name?: string };
+    users?: { full_name?: string };
+  },
+  currentUser: LocalUser,
+) {
+  const buyerName = order.buyer?.full_name || order.users?.full_name || (order.buyer_id === currentUser.id ? currentUser.full_name : "Buyer");
+  const sellerName = order.seller?.full_name || order.users?.full_name || (order.seller_id === currentUser.id ? currentUser.full_name : "Seller");
+
+  return {
+    id: order.id,
+    productId: order.product_id,
+    productTitle: order.products?.title || "Product",
+    productImage: order.products?.image_url || "https://via.placeholder.com/320?text=Product",
+    buyerId: order.buyer_id,
+    buyerName,
+    sellerId: order.seller_id,
+    sellerName,
+    amount: Number(order.amount || 0),
+    status: order.status,
+    created_at: order.created_at || new Date().toISOString(),
+  } as Order;
+}
+
+function toLocalConversation(conversation: ApiConversation) {
+  return {
+    id: conversation.id,
+    productId: conversation.product_id,
+    productTitle: conversation.product_title,
+    productImage: conversation.product_image_url || "https://via.placeholder.com/120?text=Product",
+    buyerId: conversation.buyer_id,
+    sellerId: conversation.seller_id,
+    buyerName: conversation.buyer_name,
+    sellerName: conversation.seller_name,
+    updated_at: conversation.updated_at,
+  };
+}
+
+function toLocalMessage(message: ChatMessage) {
+  return {
+    id: message.id,
+    conversationId: message.conversation_id,
+    senderId: message.sender_id,
+    text: message.text || undefined,
+    imageUrl: message.image_url || undefined,
+    created_at: message.created_at,
+    status: message.status,
+  };
+}
+
+function useBackendGuard() {
+  const [isBackendReady, setBackendReady] = useState(true);
+  const [checked, setChecked] = useState(false);
+
   useEffect(() => {
-    seedData();
+    let cancelled = false;
+
+    const check = async () => {
+      const result = await healthApi.check();
+      if (cancelled) return;
+      setBackendReady(Boolean(result.data?.status === "ok"));
+      setChecked(true);
+    };
+
+    check();
+    const interval = window.setInterval(check, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
+
+  return { isBackendReady, checked };
+}
+
+function BackendUnavailablePage() {
+  return (
+    <AppScaffold>
+      <section className="container py-12">
+        <Card className="mx-auto max-w-xl">
+          <CardContent className="space-y-3 p-6">
+            <h1 className="page-title">Backend Unavailable</h1>
+            <p className="body-text">The API is currently unreachable. Please try again shortly.</p>
+            <Button asChild><Link to="/">Return Home</Link></Button>
+          </CardContent>
+        </Card>
+      </section>
+    </AppScaffold>
+  );
+}
+
+function App() {
+  const currentUser = useCurrentUser();
+  const { isBackendReady, checked } = useBackendGuard();
 
   useEffect(() => {
     if (!supabase) return;
@@ -137,10 +260,16 @@ function App() {
     const syncFromSupabase = async () => {
       const { data: sessionData } = await supabase.auth.getSession();
       const authUser = sessionData.session?.user;
-      if (!authUser) return;
+      if (!authUser) {
+        if (import.meta.env.PROD) {
+          localStorage.removeItem("wm_user");
+          window.dispatchEvent(new Event("wm-auth-change"));
+        }
+        return;
+      }
 
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("role, full_name")
         .eq("id", authUser.id)
         .maybeSingle();
@@ -150,7 +279,7 @@ function App() {
         id: authUser.id,
         email: authUser.email || existing?.email || "",
         full_name: (profile as any)?.full_name || existing?.full_name || authUser.user_metadata?.full_name || "User",
-        role: ((profile as any)?.role as LocalUser["role"]) || existing?.role || "user",
+        role: ((profile as any)?.role as LocalUser["role"]) || "user",
         avatar_url: (authUser.user_metadata?.avatar_url as string | undefined) || existing?.avatar_url,
       };
 
@@ -164,23 +293,107 @@ function App() {
     return () => { sub.subscription.unsubscribe(); };
   }, []);
 
+  useEffect(() => {
+    if (!currentUser || !isBackendReady) return;
+    let cancelled = false;
+
+    const syncBackendData = async () => {
+      const [productsRes, myOrdersRes, salesRes, walletRes, txRes, conversationsRes] = await Promise.all([
+        productsApi.getAll(),
+        ordersApi.getMyOrders(),
+        ordersApi.getSales(),
+        userApi.getWallet(),
+        userApi.getTransactions(),
+        messagesApi.getConversations(),
+      ]);
+
+      if (cancelled) return;
+
+      if (productsRes.data) {
+        saveProducts(productsRes.data.map(toLocalProduct));
+      }
+
+      const allOrders = [...(myOrdersRes.data || []), ...(salesRes.data || [])];
+      if (allOrders.length > 0) {
+        const deduped = Array.from(new Map(allOrders.map((item) => [item.id, item])).values());
+        saveOrders(deduped.map((order) => toLocalOrder(order as any, currentUser)));
+      }
+
+      if (walletRes.data) {
+        saveWallet({
+          user_id: currentUser.id,
+          balance: Number(walletRes.data.balance || 0),
+          pending_earnings: Number(walletRes.data.pending_earnings || 0),
+          currency: "GHS",
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      if (txRes.data) {
+        const tx = txRes.data.map((item: any) => ({
+          id: item.id,
+          user_id: item.user_id,
+          type: item.type,
+          amount: Number(item.amount || 0),
+          description: item.description || "",
+          reference_id: item.reference_id || undefined,
+          balance_after: Number(item.balance_after || 0),
+          created_at: item.created_at || new Date().toISOString(),
+        }));
+        saveWalletTransactions(currentUser.id, tx);
+      }
+
+      if (conversationsRes.data) {
+        const localConversations = conversationsRes.data.conversations.map(toLocalConversation);
+        saveConversations(localConversations);
+
+        const allMessages: Message[] = [];
+        await Promise.all(
+          localConversations.map(async (conversation) => {
+            const conversationMessages = await messagesApi.getConversationMessages(conversation.id);
+            if (!conversationMessages.data) return;
+            allMessages.push(...conversationMessages.data.messages.map(toLocalMessage));
+          }),
+        );
+        saveMessages(allMessages.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at)));
+      }
+    };
+
+    syncBackendData();
+    const interval = window.setInterval(syncBackendData, 25000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentUser?.id, isBackendReady]);
+
+  const backendElement = (element: React.ReactElement) => {
+    if (!checked) {
+      return <SimplePage title="Connecting" message="Checking backend availability..." />;
+    }
+    if (!isBackendReady) {
+      return <BackendUnavailablePage />;
+    }
+    return element;
+  };
+
   return (
     <Routes>
       <Route path="/" element={<Index />} />
-      <Route path="/marketplace" element={<MarketplacePage />} />
-      <Route path="/product/:id" element={<ProductDetailPage />} />
-      <Route path="/checkout/:orderId" element={<CheckoutPage />} />
-      <Route path="/messages" element={<MessagesPage />} />
-      <Route path="/orders" element={<OrdersPage />} />
-      <Route path="/auth" element={<AuthPage />} />
-      <Route path="/dashboard" element={<DashboardRouter />} />
-      <Route path="/admin" element={<AdminDashboard />} />
-      <Route path="/profile-setup" element={<ProfileSetupPage />} />
+      <Route path="/marketplace" element={backendElement(<MarketplacePage />)} />
+      <Route path="/product/:id" element={backendElement(<ProductDetailPage />)} />
+      <Route path="/checkout/:orderId" element={backendElement(<CheckoutPage />)} />
+      <Route path="/messages" element={backendElement(<MessagesPage />)} />
+      <Route path="/orders" element={backendElement(<OrdersPage />)} />
+      <Route path="/auth" element={backendElement(<AuthPage />)} />
+      <Route path="/dashboard" element={backendElement(<DashboardRouter />)} />
+      <Route path="/admin" element={backendElement(<AdminDashboard />)} />
+      <Route path="/profile-setup" element={backendElement(<ProfileSetupPage />)} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/faq" element={<FAQ />} />
-      <Route path="/report" element={<ReportIssue />} />
-      <Route path="/buyer-protection" element={<BuyerProtection />} />
+      <Route path="/report" element={backendElement(<ReportIssue />)} />
+      <Route path="/buyer-protection" element={backendElement(<BuyerProtection />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -220,7 +433,7 @@ function AuthPage() {
         if (!error && data.user) {
           const authUser = data.user;
           const { data: profile } = await supabase
-            .from("profiles")
+            .from("users")
             .select("role, full_name")
             .eq("id", authUser.id)
             .maybeSingle();
@@ -245,13 +458,7 @@ function AuthPage() {
         return;
       }
 
-      // Fallback for local demo mode.
-      const existing = getUsers().find((u) => u.email.toLowerCase() === normalizedEmail);
-      if (!existing) return toast.error("Account not found. Switch to Sign Up.");
-      localStorage.setItem("wm_user", JSON.stringify(existing));
-      window.dispatchEvent(new Event("wm-auth-change"));
-      toast.success("Signed in successfully");
-      navigate("/dashboard");
+      toast.error("Authentication service is not configured.");
       return;
     }
 
@@ -278,7 +485,7 @@ function AuthPage() {
       }
 
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("role, full_name")
         .eq("id", data.user.id)
         .maybeSingle();
@@ -303,13 +510,7 @@ function AuthPage() {
       return;
     }
 
-    // Fallback for local demo mode.
-    const user: LocalUser = { id: crypto.randomUUID(), full_name: fullName.trim(), email: normalizedEmail, role };
-    upsertUser(user);
-    localStorage.setItem("wm_user", JSON.stringify(user));
-    window.dispatchEvent(new Event("wm-auth-change"));
-    toast.success("Account created successfully");
-    navigate("/dashboard");
+    toast.error("Authentication service is not configured.");
   };
 
   return (
@@ -468,42 +669,39 @@ function MarketplacePage() {
     return `Popular ${categoryName.toLowerCase()} listing from a campus seller.`;
   };
 
-  const createOrder = (productId: string) => {
+  const createOrder = async (productId: string) => {
     if (!user) return navigate("/auth?role=user");
     const product = allProducts.find((p) => p.id === productId);
     if (!product || product.stock_status === "out_of_stock") return;
-    const order: Order = {
-      id: `o${Date.now()}`,
-      productId: product.id,
-      productTitle: product.title,
-      productImage: product.image,
-      buyerId: user.id,
-      buyerName: user.full_name,
-      sellerId: product.sellerId,
-      sellerName: product.sellerName,
-      amount: product.price,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
-    saveOrders([order, ...getOrders()]);
+    const created = await ordersApi.create({ product_id: product.id });
+    if (created.error || !created.data) {
+      toast.error(created.error || "Failed to create order");
+      return;
+    }
+
+    const fullOrder = await ordersApi.getById(created.data.order_id);
+    if (fullOrder.data) {
+      const localOrder = toLocalOrder(fullOrder.data as any, user);
+      const nextOrders = [localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)];
+      saveOrders(nextOrders);
+    }
+
     toast.success(`${product.title} added to cart`);
-    navigate(`/checkout/${order.id}`);
+    navigate(`/checkout/${created.data.order_id}`);
   };
 
-  const messageSeller = (productId: string) => {
+  const messageSeller = async (productId: string) => {
     if (!user) return navigate("/auth?role=user");
     const product = allProducts.find((p) => p.id === productId);
     if (!product) return;
-    const conv = upsertConversationForProduct({
-      productId: product.id,
-      productTitle: product.title,
-      productImage: product.image,
-      buyerId: user.id,
-      sellerId: product.sellerId,
-      buyerName: user.full_name,
-      sellerName: product.sellerName,
-    });
-    navigate(`/messages?c=${conv.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent(`/product/${product.id}`)}`);
+    const response = await messagesApi.upsertConversation({ product_id: product.id });
+    if (response.error || !response.data?.conversation?.id) {
+      toast.error(response.error || "Failed to open conversation");
+      return;
+    }
+    navigate(
+      `/messages?c=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent(`/product/${product.id}`)}`,
+    );
   };
 
   return (
@@ -649,38 +847,34 @@ function ProductDetailPage() {
   const product = getProducts().find((p) => p.id === id);
   if (!product) return <Navigate to="/marketplace" replace />;
 
-  const createOrder = () => {
+  const createOrder = async () => {
     if (!user) return navigate("/auth?role=user");
-    const order: Order = {
-      id: `o${Date.now()}`,
-      productId: product.id,
-      productTitle: product.title,
-      productImage: product.image,
-      buyerId: user.id,
-      buyerName: user.full_name,
-      sellerId: product.sellerId,
-      sellerName: product.sellerName,
-      amount: product.price,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
-    saveOrders([order, ...getOrders()]);
-    recordActivity(`${user.full_name} placed order ${order.id}`, "wallet");
-    navigate(`/checkout/${order.id}`);
+    const created = await ordersApi.create({ product_id: product.id });
+    if (created.error || !created.data) {
+      toast.error(created.error || "Failed to create order");
+      return;
+    }
+
+    const fullOrder = await ordersApi.getById(created.data.order_id);
+    if (fullOrder.data) {
+      const localOrder = toLocalOrder(fullOrder.data as any, user);
+      saveOrders([localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)]);
+      recordActivity(`${user.full_name} placed order ${localOrder.id}`, "wallet");
+    }
+
+    navigate(`/checkout/${created.data.order_id}`);
   };
 
-  const openMessage = () => {
+  const openMessage = async () => {
     if (!user) return navigate("/auth?role=user");
-    const conv = upsertConversationForProduct({
-      productId: product.id,
-      productTitle: product.title,
-      productImage: product.image,
-      buyerId: user.id,
-      sellerId: product.sellerId,
-      buyerName: user.full_name,
-      sellerName: product.sellerName,
-    });
-    navigate(`/messages?c=${conv.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent("/marketplace")}`);
+    const response = await messagesApi.upsertConversation({ product_id: product.id });
+    if (response.error || !response.data?.conversation?.id) {
+      toast.error(response.error || "Failed to open conversation");
+      return;
+    }
+    navigate(
+      `/messages?c=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent("/marketplace")}`,
+    );
   };
 
   return (
@@ -729,6 +923,32 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
   const [method, setMethod] = useState("paystack");
   const [tab, setTab] = useState<"overview" | "transactions">("overview");
 
+  const refreshWalletData = async () => {
+    const [walletRes, txRes] = await Promise.all([userApi.getWallet(), userApi.getTransactions()]);
+    if (walletRes.data) {
+      saveWallet({
+        user_id: user.id,
+        balance: Number(walletRes.data.balance || 0),
+        pending_earnings: Number(walletRes.data.pending_earnings || 0),
+        currency: "GHS",
+        updated_at: new Date().toISOString(),
+      });
+    }
+    if (txRes.data) {
+      const mapped = txRes.data.map((item: any) => ({
+        id: item.id,
+        user_id: item.user_id,
+        type: item.type,
+        amount: Number(item.amount || 0),
+        description: item.description || "",
+        reference_id: item.reference_id || undefined,
+        balance_after: Number(item.balance_after || 0),
+        created_at: item.created_at || new Date().toISOString(),
+      }));
+      saveWalletTransactions(user.id, mapped);
+    }
+  };
+
   const handleTopUp = async () => {
     const value = Number(amount);
     if (!value || value <= 0) return;
@@ -750,8 +970,13 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
           email: user.email,
           amount: Math.round(value * 100),
           currency: "GHS",
-          callback: () => {
-            topUpWallet(user.id, value, "Paystack top up");
+          callback: async () => {
+            const result = await userApi.topUp(value);
+            if (result.error) {
+              toast.error(result.error);
+              return;
+            }
+            await refreshWalletData();
             toast.success(`GHS ${value.toFixed(2)} added to your wallet`);
             setOpenTopUp(false);
             setAmount("");
@@ -760,17 +985,23 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
         return;
       }
     }
-    topUpWallet(user.id, value, "Simulated wallet top up");
+    const result = await userApi.topUp(value);
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+    await refreshWalletData();
     toast.success(`GHS ${value.toFixed(2)} added to your wallet`);
     setOpenTopUp(false);
     setAmount("");
   };
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
     const value = Number(amount);
     if (!value || value <= 0) return;
-    const ok = withdrawWallet(user.id, value, "MoMo withdrawal request");
-    if (!ok) return toast.error("Insufficient wallet balance");
+    const result = await userApi.withdraw(value, user.momo_number);
+    if (result.error) return toast.error(result.error);
+    await refreshWalletData();
     toast.success("Withdrawal request submitted");
     setOpenWithdraw(false);
     setAmount("");
@@ -792,7 +1023,6 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
         <div className="mb-4 flex gap-2">
           <Button onClick={() => setOpenTopUp(true)}>Top Up</Button>
           <Button variant="outline" onClick={() => setOpenWithdraw(true)}>Withdraw</Button>
-          {sellerMode && wallet.pending_earnings > 0 && <Button variant="outline" onClick={() => releasePendingEarnings(user.id)}>Release Pending</Button>}
         </div>
 
         {!sellerMode && wallet.balance <= 0 && (
@@ -864,39 +1094,52 @@ function SellerDashboard() {
     return { day: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }), revenue: orders.filter((o) => o.created_at.startsWith(key)).reduce((s, o) => s + o.amount, 0) };
   });
 
-  const addNewProduct = () => {
-    const newProduct = {
-      id: `p${Date.now()}`,
+  const refreshProductsFromApi = async () => {
+    const result = await productsApi.getAll();
+    if (result.data) {
+      saveProducts(result.data.map(toLocalProduct));
+    }
+  };
+
+  const addNewProduct = async () => {
+    const created = await productsApi.create({
       title: "New Campus Listing",
+      description: "Update this listing details from your dashboard.",
       price: 40,
-      sellerId: user.id,
-      sellerName: user.full_name,
-      category: "Accessories",
-      image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80",
-      is_active: true,
-      stock_status: "in_stock" as const,
-      views: 0,
-      rating: 5,
-      reviews: 0,
-      eta: "Same day",
-      delivery_type: "Pickup or Delivery" as const,
-      condition: "New" as const,
-      verified_seller: true,
-      seller_sales: 0,
-      response_time: "~10 min",
-      listed_at: new Date().toISOString(),
-    };
-    saveProducts([newProduct, ...getProducts()]);
-    toast.success("New product draft created");
+      image_url: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80",
+    });
+    if (created.error) {
+      toast.error(created.error);
+      return;
+    }
+    await refreshProductsFromApi();
+    toast.success("New product created");
   };
 
-  const toggleProductVisibility = (productId: string) => {
-    saveProducts(getProducts().map((p) => (p.id === productId ? { ...p, is_active: !p.is_active } : p)));
-    toast.success("Listing visibility updated");
+  const toggleProductVisibility = async (productId: string) => {
+    const target = products.find((item) => item.id === productId);
+    if (!target) return;
+    if (target.is_active) {
+      const removed = await productsApi.delete(productId);
+      if (removed.error) {
+        toast.error(removed.error);
+        return;
+      }
+      await refreshProductsFromApi();
+      toast.success("Listing hidden");
+      return;
+    }
+
+    toast.info("Re-enable by creating a new listing for now.");
   };
 
-  const deleteProduct = (productId: string) => {
-    saveProducts(getProducts().filter((p) => p.id !== productId));
+  const deleteProduct = async (productId: string) => {
+    const removed = await productsApi.delete(productId);
+    if (removed.error) {
+      toast.error(removed.error);
+      return;
+    }
+    await refreshProductsFromApi();
     toast.success("Product deleted");
   };
 
@@ -1046,23 +1289,20 @@ function StudentDashboard() {
   const recommendations = searched.filter((p) => !wishlist.includes(p.id) && !recentlyViewed.some((rv) => rv.id === p.id) && !seenSellers.has(p.sellerId)).slice(0, 4);
   const hasAnyData = orders.length > 0 || wishlist.length > 0;
 
-  const onQuickAdd = (productId: string) => {
+  const onQuickAdd = async (productId: string) => {
     const product = allProducts.find((p) => p.id === productId);
     if (!product) return;
-    const order: Order = {
-      id: `o${Date.now()}`,
-      productId: product.id,
-      productTitle: product.title,
-      productImage: product.image,
-      buyerId: user.id,
-      buyerName: user.full_name,
-      sellerId: product.sellerId,
-      sellerName: product.sellerName,
-      amount: product.price,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
-    saveOrders([order, ...getOrders()]);
+    const created = await ordersApi.create({ product_id: product.id });
+    if (created.error || !created.data) {
+      toast.error(created.error || "Failed to add order");
+      return;
+    }
+
+    const orderData = await ordersApi.getById(created.data.order_id);
+    if (orderData.data) {
+      const localOrder = toLocalOrder(orderData.data as any, user);
+      saveOrders([localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)]);
+    }
     toast.success(`${product.title} added to your active orders`);
   };
 
@@ -1210,6 +1450,7 @@ function AdminDashboard() {
   const user = useCurrentUser();
   const [tab, setTab] = useState<"users" | "products" | "orders" | "disputes">("users");
   if (!user) return <Navigate to="/auth" replace />;
+  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
   const users = getUsers();
   const products = getProducts();
   const orders = getOrders();
@@ -1301,17 +1542,73 @@ function CheckoutPage() {
   const user = useCurrentUser();
   const navigate = useNavigate();
   const { orderId } = useParams();
+  const [loading, setLoading] = useState(false);
+  const [order, setOrder] = useState<Order | null>(() => getOrders().find((item) => item.id === orderId) || null);
   if (!user) return <Navigate to="/auth" replace />;
-  const order = getOrders().find((o) => o.id === orderId);
+  useEffect(() => {
+    if (!orderId) return;
+    const existing = getOrders().find((item) => item.id === orderId) || null;
+    if (existing) {
+      setOrder(existing);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchOrder = async () => {
+      const result = await ordersApi.getById(orderId);
+      if (!cancelled && result.data) {
+        const localOrder = toLocalOrder(result.data as any, user);
+        setOrder(localOrder);
+        saveOrders([localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)]);
+      }
+    };
+    fetchOrder();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, user.id]);
+
   if (!order) return <Navigate to="/orders" replace />;
   const wallet = getWallet(user.id);
   const shortfall = Math.max(0, order.amount - wallet.balance);
 
-  const payNow = () => {
-    const ok = debitWallet(user.id, order.amount, `Order payment #${order.id}`, order.id);
-    if (!ok) return toast.error(`Insufficient balance. Shortfall: GHS ${shortfall.toFixed(2)}`);
-    saveOrders(getOrders().map((o) => (o.id === order.id ? { ...o, status: "confirmed" as const } : o)));
-    creditPendingEarnings(order.sellerId, order.amount, order.id);
+  const payNow = async () => {
+    setLoading(true);
+    const result = await paymentsApi.walletPay(order.id);
+    setLoading(false);
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    saveOrders(getOrders().map((item) => (item.id === order.id ? { ...item, status: "paid" as const } : item)));
+    await Promise.all([userApi.getWallet(), userApi.getTransactions()]).then(([walletRes, txRes]) => {
+      if (walletRes.data) {
+        saveWallet({
+          user_id: user.id,
+          balance: Number(walletRes.data.balance || 0),
+          pending_earnings: Number(walletRes.data.pending_earnings || 0),
+          currency: "GHS",
+          updated_at: new Date().toISOString(),
+        });
+      }
+      if (txRes.data) {
+        saveWalletTransactions(
+          user.id,
+          txRes.data.map((item: any) => ({
+            id: item.id,
+            user_id: item.user_id,
+            type: item.type,
+            amount: Number(item.amount || 0),
+            description: item.description || "",
+            reference_id: item.reference_id || undefined,
+            balance_after: Number(item.balance_after || 0),
+            created_at: item.created_at || new Date().toISOString(),
+          })),
+        );
+      }
+    });
+
     recordActivity(`Order #${order.id} paid via wallet`, "wallet");
     toast.success("Order paid with wallet successfully");
     navigate("/orders");
@@ -1326,7 +1623,7 @@ function CheckoutPage() {
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Order Summary</p><p className="section-title">{order.productTitle}</p><p className="mt-3 text-2xl font-bold text-primary">GHS {order.amount.toFixed(2)}</p><p className="mt-2 text-sm text-slate-500">Seller: {order.sellerName}</p></CardContent></Card>
-          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow}>Pay with Wallet</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => topUpWallet(user.id, shortfall + 10, "Top up from checkout")}>Top Up to Continue</Button></>}</CardContent></Card>
+          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}</CardContent></Card>
         </div>
       </section>
     </AppScaffold>
@@ -1350,6 +1647,7 @@ function MessagesPage() {
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState(prefill);
   const [uploadingImage, setUploadingImage] = useState<string | undefined>(undefined);
+  const [sending, setSending] = useState(false);
   const conversations = getConversations().filter((c) => c.buyerId === user?.id || c.sellerId === user?.id);
   const messages = getMessages();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1357,7 +1655,25 @@ function MessagesPage() {
 
   useEffect(() => { if (prefill) setDraft(prefill); }, [prefill]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [selectedId, messages.length]);
-  useEffect(() => { if (selectedId && user) markConversationRead(selectedId, user.id); }, [selectedId, user]);
+  useEffect(() => {
+    if (!selectedId || !user) return;
+    let cancelled = false;
+
+    const refreshMessages = async () => {
+      const response = await messagesApi.getConversationMessages(selectedId);
+      if (cancelled || !response.data) return;
+
+      const localMessages = response.data.messages.map(toLocalMessage);
+      const merged = [...getMessages().filter((item) => item.conversationId !== selectedId), ...localMessages]
+        .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+      saveMessages(merged);
+    };
+
+    refreshMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, user?.id]);
   useEffect(() => {
     if (!supabase) return;
     const channel = supabase.channel("wm-messages").on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
@@ -1376,19 +1692,43 @@ function MessagesPage() {
   const selected = filtered.find((c) => c.id === selectedId) || filtered[0];
   const conversationMessages = selected ? messages.filter((m) => m.conversationId === selected.id) : [];
 
-  const onSend = () => {
-    if (!selected || (!draft.trim() && !uploadingImage)) return;
-    sendMessage({ conversationId: selected.id, senderId: user.id, text: draft.trim(), imageUrl: uploadingImage });
+  const onSend = async () => {
+    if (!selected || (!draft.trim() && !uploadingImage) || sending) return;
+
+    const text = draft.trim();
+    const imageUrl = uploadingImage;
+
+    setSending(true);
+    const response = await messagesApi.sendMessage({
+      conversation_id: selected.id,
+      text: text || undefined,
+      image_url: imageUrl,
+    });
+    setSending(false);
+
+    if (response.error || !response.data?.message) {
+      toast.error(response.error || "Failed to send message");
+      return;
+    }
+
+    const sent = toLocalMessage(response.data.message);
+    const merged = [...getMessages().filter((item) => item.id !== sent.id), sent]
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+    saveMessages(merged);
+    saveConversations(
+      getConversations().map((item) =>
+        item.id === selected.id
+          ? { ...item, updated_at: sent.created_at, typingBy: undefined }
+          : item,
+      ),
+    );
+
     setDraft("");
     setUploadingImage(undefined);
   };
 
   const onDraftChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    if (!selected) return;
     setDraft(e.target.value);
-    setTyping(selected.id, user.id, true);
-    window.clearTimeout((onDraftChange as any).typingTimer);
-    (onDraftChange as any).typingTimer = window.setTimeout(() => setTyping(selected.id, user.id, false), 800);
   };
 
   const onImagePick = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1424,8 +1764,8 @@ function MessagesPage() {
           {selected && (!isMobile || selectedId) ? (
             <div className="flex h-[76vh] flex-col">
               <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})}><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
-              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}{selected.typingBy && selected.typingBy !== user.id && <p className="text-xs text-gray-500">typing...</p>}</div>
-              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={!draft.trim() && !uploadingImage}><Send className="h-4 w-4" /></Button></div></div>
+              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
+              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)}><Send className="h-4 w-4" /></Button></div></div>
             </div>
           ) : <div className="grid h-[76vh] place-items-center text-gray-500">Select a conversation</div>}
         </div>
@@ -1677,7 +2017,7 @@ function ProfileSetupPage() {
                         {showError("fullName") && <p className="mt-1 text-xs text-red-600">{validation.fullName}</p>}
                       </div>
                       <div>
-                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Student ID * <CircleHelp className="h-3.5 w-3.5 text-slate-400" title="This helps us verify you are an active student." /></label>
+                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Student ID * <span title="This helps us verify you are an active student."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
                         <Input value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, studentId: true }))} aria-invalid={showError("studentId")} />
                         {showError("studentId") && <p className="mt-1 text-xs text-red-600">{validation.studentId}</p>}
                       </div>
@@ -1690,7 +2030,7 @@ function ProfileSetupPage() {
                         {showError("campus") && <p className="mt-1 text-xs text-red-600">{validation.campus}</p>}
                       </div>
                       <div>
-                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">WhatsApp Number * <CircleHelp className="h-3.5 w-3.5 text-slate-400" title="We'll send order and security updates here." /></label>
+                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">WhatsApp Number * <span title="We'll send order and security updates here."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
                         <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={showError("whatsapp")} />
                         {showError("whatsapp") && <p className="mt-1 text-xs text-red-600">{validation.whatsapp}</p>}
                       </div>
@@ -1774,7 +2114,7 @@ function ProfileSetupPage() {
                         {showError("momoNumber") && <p className="mt-1 text-xs text-red-600">{validation.momoNumber}</p>}
                       </div>
                       <div>
-                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Paystack ID <CircleHelp className="h-3.5 w-3.5 text-slate-400" title="Optional for faster top-ups and payouts." /></label>
+                        <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Paystack ID <span title="Optional for faster top-ups and payouts."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
                         <Input placeholder="Optional" value={form.paystackId} onChange={(e) => setForm((prev) => ({ ...prev, paystackId: e.target.value }))} />
                       </div>
                     </div>

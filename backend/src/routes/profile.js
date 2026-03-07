@@ -31,6 +31,10 @@ profileRouter.patch("/profile", requireAuth, async (req, res) => {
   if (whatsapp !== undefined) updateData.whatsapp = whatsapp;
   if (role !== undefined && req.user.role === "admin") updateData.role = role;
 
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({ error: "No valid profile fields provided" });
+  }
+
   const { data, error } = await supabase
     .from("users")
     .update(updateData)
@@ -89,8 +93,13 @@ profileRouter.get("/wallet/transactions", requireAuth, async (req, res) => {
 // Top up wallet (simulated for now)
 profileRouter.post("/wallet/topup", requireAuth, async (req, res) => {
   const { amount } = req.body || {};
+  const amountNumber = Number(amount);
 
-  if (!amount || amount <= 0) {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_SIMULATED_WALLET_TOPUP !== "true") {
+    return res.status(403).json({ error: "Simulated wallet top up is disabled in production" });
+  }
+
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
     return res.status(400).json({ error: "Valid amount is required" });
   }
 
@@ -105,7 +114,7 @@ profileRouter.post("/wallet/topup", requireAuth, async (req, res) => {
     return res.status(400).json({ error: walletError.message });
   }
 
-  const newBalance = (wallet?.balance || 0) + amount;
+  const newBalance = Number(wallet?.balance || 0) + amountNumber;
 
   if (wallet) {
     const { error: updateError } = await supabase
@@ -121,7 +130,7 @@ profileRouter.post("/wallet/topup", requireAuth, async (req, res) => {
       .from("wallets")
       .insert({
         user_id: req.user.id,
-        balance: amount,
+        balance: amountNumber,
         pending_earnings: 0,
         currency: "GHS"
       });
@@ -135,7 +144,7 @@ profileRouter.post("/wallet/topup", requireAuth, async (req, res) => {
   await supabase.from("wallet_transactions").insert({
     user_id: req.user.id,
     type: "credit",
-    amount,
+    amount: amountNumber,
     description: "Wallet top up",
     balance_after: newBalance
   });
@@ -146,8 +155,9 @@ profileRouter.post("/wallet/topup", requireAuth, async (req, res) => {
 // Withdraw from wallet
 profileRouter.post("/wallet/withdraw", requireAuth, async (req, res) => {
   const { amount, momo_number } = req.body || {};
+  const amountNumber = Number(amount);
 
-  if (!amount || amount <= 0) {
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
     return res.status(400).json({ error: "Valid amount is required" });
   }
 
@@ -162,11 +172,11 @@ profileRouter.post("/wallet/withdraw", requireAuth, async (req, res) => {
     return res.status(404).json({ error: "Wallet not found" });
   }
 
-  if (wallet.balance < amount) {
+  if (wallet.balance < amountNumber) {
     return res.status(400).json({ error: "Insufficient balance" });
   }
 
-  const newBalance = wallet.balance - amount;
+  const newBalance = wallet.balance - amountNumber;
 
   const { error: updateError } = await supabase
     .from("wallets")
@@ -181,7 +191,7 @@ profileRouter.post("/wallet/withdraw", requireAuth, async (req, res) => {
   await supabase.from("wallet_transactions").insert({
     user_id: req.user.id,
     type: "withdrawal",
-    amount,
+    amount: amountNumber,
     description: momo_number ? `Withdrawal to ${momo_number}` : "Withdrawal request",
     balance_after: newBalance
   });

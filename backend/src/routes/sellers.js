@@ -1,10 +1,20 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware/requireAuth.js";
+import { supabase } from "../lib/supabaseClient.js";
 
 const sellersRouter = Router();
 
-sellersRouter.get("/", requireAuth, (_req, res) => {
-  return res.json({ message: "Sellers route scaffolded" });
+sellersRouter.get("/", async (_req, res) => {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, full_name, momo_provider, created_at")
+    .eq("role", "seller")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.json({ sellers: data || [] });
 });
 
 export default sellersRouter;

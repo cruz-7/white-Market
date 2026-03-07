@@ -1,6 +1,7 @@
 import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { requireAdmin } from "../middleware/requireAdmin.js";
 
 const router = express.Router();
 
@@ -33,6 +34,9 @@ async function getOrCreateRecipient(sellerId, momoNumber, momoProvider, sellerNa
 
   // Create new recipient via Paystack API
   const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+  if (!paystackSecret) {
+    throw new Error("PAYSTACK_SECRET_KEY is not configured");
+  }
   
   const response = await fetch("https://api.paystack.co/transferrecipient", {
     method: "POST",
@@ -239,11 +243,8 @@ router.post("/create-recipient", requireAuth, async (req, res) => {
 /**
  * POST /payouts/send - Admin endpoint to send payout (requires admin role)
  */
-router.post("/send", requireAuth, async (req, res) => {
+router.post("/send", requireAuth, requireAdmin, async (req, res) => {
   try {
-    // Check if admin (you may need to implement admin check)
-    // For now, we'll skip admin check - implement based on your auth system
-
     const { payout_id } = req.body;
 
     if (!payout_id) {
@@ -289,6 +290,9 @@ router.post("/send", requireAuth, async (req, res) => {
 
     // Initiate transfer via Paystack
     const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+    if (!paystackSecret) {
+      return res.status(500).json({ error: "PAYSTACK_SECRET_KEY is not configured" });
+    }
     const amountMinor = Math.round(payout.amount * 100); // Convert to kobo
 
     const response = await fetch("https://api.paystack.co/transfer", {

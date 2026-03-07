@@ -12,4 +12,4 @@ if (!supabaseUrl || !serviceRoleKey) {
 }
 
 export const supabase = createClient(supabaseUrl, serviceRoleKey);
-export const supabasePublic = createClient(supabaseUrl, publishableKey || serviceRoleKey);
+export const supabasePublic = publishableKey ? createClient(supabaseUrl, publishableKey) : null;

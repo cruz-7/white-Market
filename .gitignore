@@ -1,8 +1,23 @@
+# Dependencies
 node_modules/
+backend/node_modules/
+
+# Build artifacts
 dist/
 .vite/
+
+# Environment and secrets
 .env
 .env.*
-backend/.env
 !.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Logs and local tunnel output
 *.log
+backend/ngrok.log
+
+# OS noise
+.DS_Store
+Thumbs.db
