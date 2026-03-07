@@ -1,7 +1,7 @@
 ﻿import { Link, useNavigate } from "react-router-dom";
 import { Button } from "./button";
 import { Badge } from "./badge";
-import { CheckCircle, Star, Shield, ArrowRight, Search, ShoppingBag, MessageSquare, Wallet, Users, Zap, Award, Camera, TrendingUp, Store } from "lucide-react";
+import { CheckCircle, Star, Shield, ArrowRight, Search, ShoppingBag, MessageSquare, Wallet, Users, Zap, Award, Camera, TrendingUp, Store, Flame } from "lucide-react";
 import { Card, CardContent } from "./card";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Input } from "./input";
@@ -43,6 +43,14 @@ const TRENDING = [
   { title: "Custom Beaded Bracelets", price: 15, seller: "Ama Beads", image: null },
   { title: "Laptop Stand (Adjustable)", price: 85, seller: "TechBro UG", image: null },
   { title: "Shea Butter Body Cream", price: 30, seller: "Glow By Efua", image: null },
+];
+
+const CAMPUS_TRENDING_TOPICS = [
+  { label: "Sneakers", search: "sneakers" },
+  { label: "Perfumes", search: "perfume" },
+  { label: "Food", search: "food" },
+  { label: "Thrift Clothes", search: "thrift clothes" },
+  { label: "Gadgets", search: "gadgets" },
 ];
 
 const Index = () => {
@@ -138,12 +146,43 @@ const Index = () => {
         </div>
       </section>
 
+      {/* Campus Trending */}
+      <section className="container pb-8">
+        <Card className="border-orange-200 bg-orange-50/60 shadow-sm">
+          <CardContent className="space-y-4 p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700">
+                  <Flame className="h-4 w-4" /> Trending Now
+                </p>
+                <h2 className="font-display text-2xl font-bold text-slate-900">🔥 Trending in Legon</h2>
+                <p className="text-sm text-slate-600">Students are browsing these categories the most this week.</p>
+              </div>
+              <Button asChild variant="outline" className="border-orange-300 text-orange-800 hover:bg-orange-100">
+                <Link to="/marketplace">See all listings</Link>
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {CAMPUS_TRENDING_TOPICS.map((topic) => (
+                <Link
+                  key={topic.label}
+                  to={`/marketplace?search=${encodeURIComponent(topic.search)}`}
+                  className="rounded-full border border-orange-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-orange-400 hover:text-orange-800"
+                >
+                  {topic.label}
+                </Link>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
       {/* Trending Products */}
       <section className="bg-muted/50 py-16">
         <div className="container">
           <div className="flex items-center justify-center gap-2 mb-2">
             <TrendingUp className="h-5 w-5 text-accent" />
-            <h2 className="font-display text-2xl font-bold text-center">Trending Products</h2>
+            <h2 className="font-display text-2xl font-bold text-center">Trending Products This Week</h2>
           </div>
           <p className="text-center text-muted-foreground mb-8">Popular picks from student sellers this week</p>
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">

@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth.js"
 import { requireAdmin } from "../middleware/requireAdmin.js"
 
 const router = express.Router()
+const ADMIN_ORDER_STATUSES = new Set(["pending", "paid", "cancelled"])
 
 // DASHBOARD STATS
 router.get("/stats", requireAuth, requireAdmin, async (req, res) => {
@@ -66,6 +67,10 @@ router.delete("/product/:id", requireAuth, requireAdmin, async (req, res) => {
 
 // BAN USER
 router.patch("/ban-user/:id", requireAuth, requireAdmin, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ error: "You cannot ban your own account" })
+  }
+
   const { error } = await supabase.from("users")
     .update({ role: "banned" })
     .eq("id", req.params.id)
@@ -99,6 +104,10 @@ router.patch("/users/:id/role", requireAuth, requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "Invalid role" })
   }
 
+  if (req.params.id === req.user.id && role !== "admin") {
+    return res.status(400).json({ error: "You cannot remove your own admin role" })
+  }
+
   const { error } = await supabase
     .from("users")
     .update({ role })
@@ -115,7 +124,7 @@ router.patch("/users/:id/role", requireAuth, requireAdmin, async (req, res) => {
 router.get("/users", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, role, created_at")
+    .select("id, full_name, email, role, created_at")
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -129,7 +138,7 @@ router.get("/users", requireAuth, requireAdmin, async (req, res) => {
 router.get("/products", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("products")
-    .select("*, users(email)")
+    .select("id, seller_id, title, price, image_url, category, is_active, created_at, seller:users!products_seller_id_fkey(full_name, email)")
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -143,7 +152,9 @@ router.get("/products", requireAuth, requireAdmin, async (req, res) => {
 router.get("/orders", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("orders")
-    .select("*, products(title), users!orders_buyer_id_fkey(email), users!orders_seller_id_fkey(email)")
+    .select(
+      "id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, product:products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name, email), seller:users!orders_seller_id_fkey(full_name, email)",
+    )
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -151,6 +162,37 @@ router.get("/orders", requireAuth, requireAdmin, async (req, res) => {
   }
   
   res.json(data)
+})
+
+// UPDATE ORDER STATUS (admin moderation control)
+router.patch("/orders/:id/status", requireAuth, requireAdmin, async (req, res) => {
+  const { status } = req.body || {}
+
+  if (!ADMIN_ORDER_STATUSES.has(status)) {
+    return res.status(400).json({ error: "Invalid status. Allowed: pending, paid, cancelled" })
+  }
+
+  const updateData = { status }
+  if (status === "paid") {
+    updateData.paid_at = new Date().toISOString()
+  } else {
+    updateData.paid_at = null
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update(updateData)
+    .eq("id", req.params.id)
+    .select(
+      "id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, product:products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name, email), seller:users!orders_seller_id_fkey(full_name, email)",
+    )
+    .single()
+
+  if (error) {
+    return res.status(400).json({ error: error.message })
+  }
+
+  return res.json({ message: "Order status updated", order: data })
 })
 
 export default router

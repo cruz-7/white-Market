@@ -338,14 +338,89 @@ export const userApi = {
 
 // ==================== ADMIN API ====================
 
+export type AdminUserRole = "user" | "seller" | "admin" | "banned";
+
+export interface AdminUser {
+  id: string;
+  full_name?: string | null;
+  email: string;
+  role: AdminUserRole;
+  created_at?: string;
+}
+
+export interface AdminProduct {
+  id: string;
+  seller_id: string;
+  title: string;
+  price: number;
+  image_url?: string | null;
+  category?: string | null;
+  is_active?: boolean;
+  created_at?: string;
+  seller?: {
+    full_name?: string | null;
+    email?: string | null;
+  };
+}
+
+export interface AdminOrder {
+  id: string;
+  product_id: string;
+  buyer_id: string;
+  seller_id: string;
+  amount: number;
+  status: "pending" | "paid" | "cancelled" | "disputed" | "confirmed";
+  created_at: string;
+  paid_at?: string | null;
+  product?: {
+    title?: string | null;
+    image_url?: string | null;
+  };
+  buyer?: {
+    full_name?: string | null;
+    email?: string | null;
+  };
+  seller?: {
+    full_name?: string | null;
+    email?: string | null;
+  };
+}
+
 export const adminApi = {
   getAllUsers: () =>
-    fetchApi<UserProfile[]>("/admin/users"),
+    fetchApi<AdminUser[]>("/admin/users"),
 
-  updateUserRole: (userId: string, role: string) =>
+  updateUserRole: (userId: string, role: AdminUserRole) =>
     fetchApi<{ message: string }>(`/admin/users/${userId}/role`, {
       method: "PATCH",
       body: JSON.stringify({ role }),
+    }),
+
+  banUser: (userId: string) =>
+    fetchApi<{ message: string }>(`/admin/ban-user/${userId}`, {
+      method: "PATCH",
+    }),
+
+  unbanUser: (userId: string) =>
+    fetchApi<{ message: string }>(`/admin/unban-user/${userId}`, {
+      method: "PATCH",
+    }),
+
+  getAllProducts: () =>
+    fetchApi<AdminProduct[]>("/admin/products"),
+
+  removeProduct: (productId: string) =>
+    fetchApi<{ message: string }>(`/admin/product/${productId}`, {
+      method: "DELETE",
+    }),
+
+  getAllOrders: () =>
+    fetchApi<AdminOrder[]>("/admin/orders"),
+
+  updateOrderStatus: (orderId: string, status: "pending" | "paid" | "cancelled") =>
+    fetchApi<{ message: string; order: AdminOrder }>(`/admin/orders/${orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
     }),
 
   getStats: () =>
@@ -353,6 +428,8 @@ export const adminApi = {
       totalUsers: number;
       totalOrders: number;
       totalRevenue: number;
+      totalProducts?: number;
+      commission?: number;
     }>("/admin/stats"),
 };
 

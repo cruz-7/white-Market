@@ -1,7 +1,7 @@
 ﻿
 import { ChangeEvent, FormEvent, useEffect, useState, useRef } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, GraduationCap, ImagePlus, Info, Lock, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, Flame, GraduationCap, ImagePlus, Info, Lock, Megaphone, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 
@@ -45,9 +45,14 @@ import {
   productsApi,
   ordersApi,
   userApi,
+  adminApi,
   messagesApi,
   paymentsApi,
   healthApi,
+  type AdminUser,
+  type AdminProduct,
+  type AdminOrder,
+  type AdminUserRole,
   type Product as ApiProduct,
   type Order as ApiOrder,
   type Conversation as ApiConversation,
@@ -58,6 +63,8 @@ import TermsOfService from "./TermsOfService";
 import FAQ from "./FAQ";
 import ReportIssue from "./ReportIssue";
 import BuyerProtection from "./BuyerProtection";
+import AddProduct from "./AddProduct";
+import SellerProfile from "./SellerProfile";
 
 declare global {
   interface Window {
@@ -392,8 +399,10 @@ function App() {
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/faq" element={<FAQ />} />
-      <Route path="/report" element={backendElement(<ReportIssue />)} />
+<Route path="/report" element={backendElement(<ReportIssue />)} />
       <Route path="/buyer-protection" element={backendElement(<BuyerProtection />)} />
+      <Route path="/add-product" element={backendElement(<AddProduct />)} />
+      <Route path="/seller/:id" element={backendElement(<SellerProfile />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -637,18 +646,29 @@ function AuthPage() {
 function MarketplacePage() {
   useDataRefresh();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const user = useCurrentUser();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [category, setCategory] = useState("All");
+  const [searchQuery, setSearchQuery] = useState(() => params.get("search") || "");
+  const [category, setCategory] = useState(() => params.get("category") || "All");
   const [sort, setSort] = useState("popular");
   const [showVerification, setShowVerification] = useState(false);
 
+  const paramsSearch = params.get("search") || "";
+  const paramsCategory = params.get("category") || "All";
+
+  useEffect(() => {
+    setSearchQuery(paramsSearch);
+    setCategory(paramsCategory);
+  }, [paramsSearch, paramsCategory]);
+
   const allProducts = getProducts().filter((p) => p.is_active);
   const categories = ["All", ...Array.from(new Set(allProducts.map((p) => p.category)))];
+  const selectedCategory = categories.includes(category) ? category : "All";
+  const campusTrendingTopics = ["Sneakers", "Perfumes", "Food", "Thrift Clothes", "Gadgets"];
   const filtered = allProducts.filter((p) => {
     const q = searchQuery.toLowerCase();
     const matchesQuery = p.title.toLowerCase().includes(q) || p.sellerName.toLowerCase().includes(q);
-    const matchesCategory = category === "All" || p.category === category;
+    const matchesCategory = selectedCategory === "All" || p.category === selectedCategory;
     return matchesQuery && matchesCategory;
   });
 
@@ -658,6 +678,9 @@ function MarketplacePage() {
     if (sort === "newest") return +new Date(b.listed_at) - +new Date(a.listed_at);
     return b.views - a.views;
   });
+  const sponsoredProducts = [...allProducts]
+    .sort((a, b) => (b.views + b.reviews + b.rating * 25) - (a.views + a.reviews + a.rating * 25))
+    .slice(0, 3);
 
   const describeProduct = (title: string, categoryName: string) => {
     if (title.toLowerCase().includes("jollof")) return "Freshly prepared campus meal, ready for pickup or quick drop-off.";
@@ -704,6 +727,22 @@ function MarketplacePage() {
     );
   };
 
+  const openFeaturedListingFlow = () => {
+    if (!user) {
+      navigate("/auth?tab=signup&role=seller");
+      return;
+    }
+
+    if (user.role !== "seller") {
+      toast.info("Switch to a seller account to run featured listings.");
+      navigate("/profile-setup");
+      return;
+    }
+
+    toast.info("Featured listing slots: GHS 10, GHS 20, and GHS 30.");
+    navigate("/dashboard");
+  };
+
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
@@ -730,13 +769,75 @@ function MarketplacePage() {
           </div>
         </div>
 
+        <Card className="border-orange-200 bg-orange-50/60 shadow-sm">
+          <CardContent className="space-y-3 p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700">
+                  <Flame className="h-4 w-4" /> Campus Demand
+                </p>
+                <h2 className="section-title">🔥 Trending in Legon</h2>
+                <p className="text-sm text-slate-600">Students are actively browsing these right now.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {campusTrendingTopics.map((topic) => (
+                <button
+                  key={topic}
+                  className="rounded-full border border-orange-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-orange-400 hover:text-orange-800"
+                  onClick={() => {
+                    setSearchQuery(topic.toLowerCase());
+                    setCategory("All");
+                  }}
+                >
+                  {topic}
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-amber-200 bg-amber-50/60 shadow-sm">
+          <CardContent className="space-y-4 p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                  <Megaphone className="h-4 w-4" /> Growth Lever
+                </p>
+                <h2 className="section-title">⭐ Sponsored & Featured Listings</h2>
+                <p className="text-sm text-slate-600">Sellers can pay GHS 10 - GHS 30 to appear at the top and get faster visibility.</p>
+              </div>
+              <Button onClick={openFeaturedListingFlow}>Promote a Listing</Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {sponsoredProducts.map((product, index) => {
+                const badge = index === 0 ? "⭐ Sponsored" : index === 1 ? "⭐ Featured Seller" : "⭐ Top Product";
+                return (
+                  <Card key={`featured-${product.id}`} className="overflow-hidden border-amber-200 bg-white shadow-sm">
+                    <img src={product.image} alt={product.title} className="h-24 w-full object-cover" />
+                    <CardContent className="space-y-2 p-3">
+                      <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{badge}</span>
+                      <p className="line-clamp-1 text-sm font-semibold text-slate-900">{product.title}</p>
+                      <p className="text-xs text-slate-500">{product.sellerName}</p>
+                      <div className="flex items-center justify-between">
+                        <p className="font-bold text-primary">GHS {product.price.toFixed(2)}</p>
+                        <Button size="sm" variant="outline" asChild><Link to={`/product/${product.id}`}>View</Link></Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardContent className="grid gap-3 p-4 md:grid-cols-4">
             <div className="relative md:col-span-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search products or sellers" className="pl-9" />
             </div>
-            <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border bg-white px-3 py-2 text-sm">
+            <select aria-label="Category" value={selectedCategory} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border bg-white px-3 py-2 text-sm">
               {categories.map((cat) => <option key={cat}>{cat}</option>)}
             </select>
             <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)} className="rounded-lg border bg-white px-3 py-2 text-sm">
@@ -1153,6 +1254,11 @@ function SellerDashboard() {
     toast.success("Store link copied");
   };
 
+  const openFeaturedPlans = () => {
+    toast.info("Promotion tiers: GHS 10 (Starter), GHS 20 (Boost), GHS 30 (Top Spotlight).");
+    navigate("/marketplace");
+  };
+
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
@@ -1190,6 +1296,34 @@ function SellerDashboard() {
                     </div>
                   </CardContent>
                 </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-amber-200 bg-amber-50/60 shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                  <Megaphone className="h-4 w-4" /> Monetize Visibility
+                </p>
+                <h2 className="section-title">Featured Listings</h2>
+                <p className="mt-1 text-sm text-slate-600">Pay once to push your product to the top of marketplace feeds.</p>
+              </div>
+              <Button onClick={openFeaturedPlans}>Start Promotion</Button>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {[
+                ["GHS 10", "Starter", "Appear in sponsored row"],
+                ["GHS 20", "Boost", "Better placement + badge"],
+                ["GHS 30", "Top Spotlight", "Pinned top product slot"],
+              ].map(([price, tier, benefit]) => (
+                <div key={tier} className="rounded-xl border border-amber-200 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{tier}</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">{price}</p>
+                  <p className="text-xs text-slate-600">{benefit}</p>
+                </div>
               ))}
             </div>
           </CardContent>
@@ -1449,30 +1583,127 @@ function AdminDashboard() {
   const navigate = useNavigate();
   const user = useCurrentUser();
   const [tab, setTab] = useState<"users" | "products" | "orders" | "disputes">("users");
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([]);
+  const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
+  const [stats, setStats] = useState<{ totalUsers?: number; totalProducts?: number; totalOrders?: number; totalRevenue?: number; commission?: number } | null>(null);
   if (!user) return <Navigate to="/auth" replace />;
   if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
-  const users = getUsers();
-  const products = getProducts();
-  const orders = getOrders();
   const activities = getActivities();
-  const gmv = orders.reduce((s, o) => s + o.amount, 0);
-  const dailyOrders = Array.from({ length: 30 }, (_, i) => { const date = new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10); return { day: date.slice(5), orders: orders.filter((o) => o.created_at.startsWith(date)).length }; });
-  const categorySales = Object.entries(products.reduce<Record<string, number>>((acc, p) => { const sold = orders.filter((o) => o.productId === p.id && o.status === "completed").reduce((s, o) => s + o.amount, 0); acc[p.category] = (acc[p.category] || 0) + sold; return acc; }, {})).map(([category, sales]) => ({ category, sales })).sort((a, b) => b.sales - a.sales).slice(0, 5);
 
-  const resolveDispute = (orderId: string) => {
-    saveOrders(getOrders().map((o) => (o.id === orderId ? { ...o, status: "confirmed" as const } : o)));
-    toast.success(`Dispute on order #${orderId} marked resolved`);
+  const loadAdminData = async () => {
+    setLoading(true);
+    const [statsRes, usersRes, productsRes, ordersRes] = await Promise.all([
+      adminApi.getStats(),
+      adminApi.getAllUsers(),
+      adminApi.getAllProducts(),
+      adminApi.getAllOrders(),
+    ]);
+    setLoading(false);
+
+    if (statsRes.error) toast.error(statsRes.error);
+    if (usersRes.error) toast.error(usersRes.error);
+    if (productsRes.error) toast.error(productsRes.error);
+    if (ordersRes.error) toast.error(ordersRes.error);
+
+    if (statsRes.data) {
+      setStats({
+        totalUsers: Number(statsRes.data.totalUsers || 0),
+        totalProducts: Number((statsRes.data as any).totalProducts || 0),
+        totalOrders: Number(statsRes.data.totalOrders || 0),
+        totalRevenue: Number(statsRes.data.totalRevenue || 0),
+        commission: Number((statsRes.data as any).commission || 0),
+      });
+    }
+    if (usersRes.data) setAdminUsers(usersRes.data);
+    if (productsRes.data) setAdminProducts(productsRes.data);
+    if (ordersRes.data) setAdminOrders(ordersRes.data);
   };
+
+  useEffect(() => {
+    loadAdminData();
+  }, []);
+
+  const runAdminAction = async (key: string, action: () => Promise<{ error?: string } | void>, successMessage: string) => {
+    setActionLoading(key);
+    const result = await action();
+    setActionLoading(null);
+
+    if (result && "error" in result && result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    toast.success(successMessage);
+    await loadAdminData();
+  };
+
+  const updateRole = async (userId: string, role: AdminUserRole) => {
+    await runAdminAction(`role:${userId}:${role}`, () => adminApi.updateUserRole(userId, role), "User role updated");
+  };
+
+  const banUser = async (userId: string) => {
+    await runAdminAction(`ban:${userId}`, () => adminApi.banUser(userId), "User banned");
+  };
+
+  const unbanUser = async (userId: string) => {
+    await runAdminAction(`unban:${userId}`, () => adminApi.unbanUser(userId), "User unbanned");
+  };
+
+  const removeProduct = async (productId: string) => {
+    await runAdminAction(`product:${productId}`, () => adminApi.removeProduct(productId), "Product removed");
+  };
+
+  const moderateOrder = async (orderId: string, status: "pending" | "paid" | "cancelled", successMessage: string) => {
+    await runAdminAction(`order:${orderId}:${status}`, () => adminApi.updateOrderStatus(orderId, status), successMessage);
+  };
+
+  const resolveDispute = async (orderId: string) => {
+    await moderateOrder(orderId, "cancelled", `Dispute on order #${orderId} resolved`);
+  };
+
+  const totalUsers = Number(stats?.totalUsers ?? adminUsers.length);
+  const totalProducts = Number(stats?.totalProducts ?? adminProducts.length);
+  const totalOrders = Number(stats?.totalOrders ?? adminOrders.length);
+  const totalRevenue = Number(
+    stats?.totalRevenue ?? adminOrders.filter((o) => o.status === "paid").reduce((sum, order) => sum + Number(order.amount || 0), 0),
+  );
+  const gmv = adminOrders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
+  const disputes = adminOrders.filter((o) => o.status === "disputed");
+
+  const dailyOrders = Array.from({ length: 30 }, (_, i) => {
+    const date = new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10);
+    return {
+      day: date.slice(5),
+      orders: adminOrders.filter((order) => String(order.created_at || "").startsWith(date)).length,
+    };
+  });
+
+  const categorySales = Object.entries(
+    adminProducts.reduce<Record<string, number>>((acc, product) => {
+      const sold = adminOrders
+        .filter((order) => order.product_id === product.id && order.status === "paid")
+        .reduce((sum, order) => sum + Number(order.amount || 0), 0);
+      const category = product.category || "General";
+      acc[category] = (acc[category] || 0) + sold;
+      return acc;
+    }, {}),
+  )
+    .map(([category, sales]) => ({ category, sales }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 5);
 
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
         <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Admin Dashboard</h1><p className="body-text">Monitor marketplace health, compliance, and operations from one control center.</p></div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[["Total Users", users.length, "+6%"], ["Products Listed", products.length, "+9%"], ["Total Orders", orders.length, "+11%"], ["Platform Revenue / GMV", `GHS ${gmv.toFixed(2)}`, "+14%"]].map(([title, value, growth]) => (<Card key={String(title)} className="shadow-sm"><CardContent className="p-4"><p className="label-text">{String(title)}</p><p className="mt-1 text-2xl font-bold text-primary">{String(value)}</p><p className="text-xs text-green-600">{String(growth)} vs last week</p></CardContent></Card>))}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[["Total Users", totalUsers, "+6%"], ["Products Listed", totalProducts, "+9%"], ["Total Orders", totalOrders, "+11%"], ["Platform Revenue / GMV", `GHS ${gmv.toFixed(2)}`, "+14%"]].map(([title, value, growth]) => (<Card key={String(title)} className="shadow-sm"><CardContent className="p-4"><p className="label-text">{String(title)}</p><p className="mt-1 text-2xl font-bold text-primary">{String(value)}</p><p className="text-xs text-green-600">{String(growth)} vs last week</p></CardContent></Card>))}</div>
         <div className="grid gap-4 lg:grid-cols-3">
           <Card><CardContent className="p-4"><h2 className="section-title mb-2">Recent Activity Feed</h2><div className="space-y-2">{activities.slice(0, 10).map((a: any) => (<div key={a.id} className="rounded-lg border p-2"><p className="text-sm">{a.text}</p><p className="text-xs text-gray-500">{timeAgo(a.time)}</p></div>))}</div></CardContent></Card>
           <Card><CardContent className="space-y-4 p-4"><h2 className="section-title">Charts & Analytics</h2><div className="h-40"><ResponsiveContainer width="100%" height="100%"><LineChart data={dailyOrders}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" hide /><YAxis /><Tooltip /><Line dataKey="orders" stroke="#006633" strokeWidth={2} /></LineChart></ResponsiveContainer></div><div className="h-40"><ResponsiveContainer width="100%" height="100%"><BarChart data={categorySales}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="category" /><YAxis /><Tooltip /><Bar dataKey="sales" fill="#FF6B00" /></BarChart></ResponsiveContainer></div></CardContent></Card>
-          <Card><CardContent className="p-4"><h2 className="section-title mb-2">Pending Actions</h2><div className="space-y-2">{[["Sellers awaiting verification", 3, "Review", "users"], ["Open disputes", orders.filter((o) => o.status === "disputed").length, "Resolve", "disputes"], ["Reported products", 2, "Review", "products"], ["Flagged users", 1, "Review", "users"]].map(([label, count, cta, toTab]) => (<div key={String(label)} className="flex items-center justify-between rounded-lg border p-2"><div><p className="text-sm">{String(label)}</p><p className="text-xs text-gray-500">{String(count)} pending</p></div><Button size="sm" variant="outline" onClick={() => setTab(String(toTab) as any)}>{String(cta)}</Button></div>))}</div></CardContent></Card>
+          <Card><CardContent className="p-4"><h2 className="section-title mb-2">Pending Actions</h2><div className="space-y-2">{[["Sellers awaiting verification", adminUsers.filter((u) => u.role === "seller").length, "Review", "users"], ["Open disputes", disputes.length, "Resolve", "disputes"], ["Products requiring moderation", adminProducts.filter((p) => !p.is_active).length, "Review", "products"], ["Commission (Paid)", `GHS ${(stats?.commission || totalRevenue * 0.1).toFixed(2)}`, "View", "orders"]].map(([label, count, cta, toTab]) => (<div key={String(label)} className="flex items-center justify-between rounded-lg border p-2"><div><p className="text-sm">{String(label)}</p><p className="text-xs text-gray-500">{String(count)} pending</p></div><Button size="sm" variant="outline" onClick={() => setTab(String(toTab) as any)}>{String(cta)}</Button></div>))}</div></CardContent></Card>
         </div>
 
         <Card>
@@ -1492,10 +1723,72 @@ function AdminDashboard() {
                   {tab === "disputes" && <tr className="text-left text-gray-500"><th className="py-2">Order ID</th><th>Raised By</th><th>Reason</th><th>Status</th><th>Resolve</th></tr>}
                 </thead>
                 <tbody>
-                  {tab === "users" && getUsers().map((u) => <tr key={u.id} className="border-t"><td className="py-2">{u.full_name}</td><td>{u.email}</td><td>{u.role}</td><td>{u.role === "seller" ? "Yes" : "-"}</td><td>{new Date().toLocaleDateString()}</td><td><Button size="sm" variant="outline" onClick={() => navigate("/profile-setup")}>Manage</Button></td></tr>)}
-                  {tab === "products" && products.map((p) => <tr key={p.id} className="border-t"><td className="py-2"><img src={p.image} className="h-8 w-8 rounded" /></td><td>{p.title}</td><td>{p.sellerName}</td><td>GHS {p.price}</td><td>{p.is_active ? "active" : "hidden"}</td><td><Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Review</Button></td></tr>)}
-                  {tab === "orders" && orders.map((o) => <tr key={o.id} className="border-t"><td className="py-2">#{o.id}</td><td>{o.buyerName}</td><td>{o.sellerName}</td><td>GHS {o.amount}</td><td>{o.status}</td><td><Button size="sm" variant="outline" onClick={() => navigate(`/checkout/${o.id}`)}>Open</Button></td></tr>)}
-                  {tab === "disputes" && orders.filter((o) => o.status === "disputed").map((o) => <tr key={o.id} className="border-t"><td className="py-2">#{o.id}</td><td>{o.buyerName}</td><td>Product mismatch</td><td>{o.status}</td><td><Button size="sm" onClick={() => resolveDispute(o.id)}>Resolve</Button></td></tr>)}
+                  {loading && <tr><td colSpan={6} className="py-4 text-center text-slate-500">Loading admin data...</td></tr>}
+                  {!loading && tab === "users" && adminUsers.map((u) => (
+                    <tr key={u.id} className="border-t">
+                      <td className="py-2">{u.full_name || "User"}</td>
+                      <td>{u.email}</td>
+                      <td className="capitalize">{u.role}</td>
+                      <td>{u.role === "seller" || u.role === "admin" ? "Yes" : "-"}</td>
+                      <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {u.role === "banned" ? (
+                            <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => unbanUser(u.id)}>Unban</Button>
+                          ) : (
+                            <Button size="sm" variant="outline" disabled={!!actionLoading || u.id === user.id} onClick={() => banUser(u.id)}>Ban</Button>
+                          )}
+                          {u.role !== "user" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "user")}>Set User</Button>}
+                          {u.role !== "seller" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "seller")}>Set Seller</Button>}
+                          {u.role !== "admin" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "admin")}>Set Admin</Button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!loading && tab === "products" && adminProducts.map((p) => (
+                    <tr key={p.id} className="border-t">
+                      <td className="py-2"><img src={p.image_url || "https://via.placeholder.com/80"} className="h-8 w-8 rounded object-cover" /></td>
+                      <td>{p.title}</td>
+                      <td>{p.seller?.full_name || p.seller?.email || p.seller_id}</td>
+                      <td>GHS {Number(p.price || 0).toFixed(2)}</td>
+                      <td>{p.is_active ? "active" : "hidden"}</td>
+                      <td>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Review</Button>
+                          <Button size="sm" variant="destructive" disabled={!!actionLoading} onClick={() => removeProduct(p.id)}>Remove</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!loading && tab === "orders" && adminOrders.map((o) => (
+                    <tr key={o.id} className="border-t">
+                      <td className="py-2">#{o.id.slice(0, 8)}</td>
+                      <td>{o.buyer?.full_name || o.buyer?.email || o.buyer_id}</td>
+                      <td>{o.seller?.full_name || o.seller?.email || o.seller_id}</td>
+                      <td>GHS {Number(o.amount || 0).toFixed(2)}</td>
+                      <td className="capitalize">{o.status}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/checkout/${o.id}`)}>Open</Button>
+                          {o.status !== "paid" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "paid", `Order #${o.id} marked paid`)}>Mark Paid</Button>}
+                          {o.status !== "pending" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "pending", `Order #${o.id} set to pending`)}>Set Pending</Button>}
+                          {o.status !== "cancelled" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "cancelled", `Order #${o.id} cancelled`)}>Cancel</Button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!loading && tab === "disputes" && disputes.map((o) => (
+                    <tr key={o.id} className="border-t">
+                      <td className="py-2">#{o.id.slice(0, 8)}</td>
+                      <td>{o.buyer?.full_name || o.buyer?.email || o.buyer_id}</td>
+                      <td>Escalated to admin support</td>
+                      <td className="capitalize">{o.status}</td>
+                      <td><Button size="sm" disabled={!!actionLoading} onClick={() => resolveDispute(o.id)}>Resolve</Button></td>
+                    </tr>
+                  ))}
+                  {!loading && tab === "disputes" && disputes.length === 0 && (
+                    <tr><td colSpan={5} className="py-4 text-center text-slate-500">No disputed orders right now.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
