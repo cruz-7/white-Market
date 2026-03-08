@@ -70,9 +70,7 @@ const Navbar = () => {
     <nav className="sticky top-0 z-50 border-b border-border/70 bg-white/90 shadow-sm backdrop-blur-md">
       <div className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary shadow-sm">
-            <span className="font-display text-lg font-bold text-primary-foreground">WM</span>
-          </div>
+          <img src="/logo.svg" alt="White Market logo" className="h-9 w-9 rounded-xl shadow-sm" />
           <span className="font-display text-xl font-bold text-foreground">White Market</span>
         </Link>
 

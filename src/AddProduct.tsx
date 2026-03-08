@@ -1,3 +1,4 @@
+// cspell:ignore Jollof
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -9,7 +10,7 @@ import { Input } from "./input";
 import { Textarea } from "./textarea";
 import { Label } from "./label";
 import { Badge } from "./badge";
-import { productsApi, type Product } from "./api";
+import { productsApi } from "./api";
 
 const CATEGORIES = [
   "Food",
@@ -67,7 +68,7 @@ function AddProduct() {
         return;
       }
       if (result.data?.image_url) {
-        setForm((prev) => ({ ...prev, image_url: result.data!.image_url }));
+        setForm((prev) => ({ ...prev, image_url: result.data.image_url }));
         toast.success("Image uploaded successfully");
       }
     });
@@ -86,7 +87,7 @@ function AddProduct() {
       return;
     }
 
-    const price = parseFloat(form.price);
+    const price = Number.parseFloat(form.price);
     if (!price || price <= 0) {
       toast.error("Please enter a valid price");
       return;
@@ -158,6 +159,8 @@ function AddProduct() {
                       <button
                         type="button"
                         onClick={removeImage}
+                        aria-label="Remove selected image"
+                        title="Remove selected image"
                         className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1.5 text-white hover:bg-red-600"
                       >
                         <X className="h-3 w-3" />
@@ -252,6 +255,8 @@ function AddProduct() {
                     </Label>
                     <select
                       id="category"
+                      aria-label="Product category"
+                      title="Product category"
                       value={form.category}
                       onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
                       className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

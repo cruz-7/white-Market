@@ -7,9 +7,7 @@ const Footer = () => (
         {/* Brand Column */}
         <div className="col-span-2 sm:col-span-2 md:col-span-1">
           <div className="mb-4 flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <span className="font-display text-sm font-bold text-primary-foreground">WM</span>
-            </div>
+            <img src="/logo.svg" alt="White Market logo" className="h-8 w-8 rounded-lg" />
             <span className="font-display text-lg font-bold">White Market</span>
           </div>
           <p className="text-sm text-muted-foreground">

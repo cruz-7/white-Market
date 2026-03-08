@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Star, MapPin, Calendar, MessageCircle, ShoppingBag, ShieldCheck, Loader2 } from "lucide-react";
+import { ArrowLeft, Star, Calendar, MessageCircle, ShoppingBag, ShieldCheck, Loader2 } from "lucide-react";
 
 import { Button } from "./button";
 import { Card, CardContent } from "./card";

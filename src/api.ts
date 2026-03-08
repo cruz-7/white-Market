@@ -6,6 +6,8 @@
  * - Production default: relative paths (same origin/reverse proxy)
  */
 
+import { supabase } from "./supabase-client";
+
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
 
@@ -24,15 +26,23 @@ async function fetchApi<T>(
 ): Promise<ApiResponse<T>> {
   const url = resolveApiUrl(endpoint);
   
-  // Get token from localStorage
-  const userJson = localStorage.getItem("wm_user");
+  // Get token - first try from localStorage, then from Supabase session
   let token: string | null = null;
+  
+  // First try to get from localStorage
+  const userJson = localStorage.getItem("wm_user");
   if (userJson) {
     try {
       token = JSON.parse(userJson).access_token || null;
     } catch {
       token = null;
     }
+  }
+  
+  // If no token in localStorage, try to get from Supabase session
+  if (!token && supabase) {
+    const { data: { session } } = await supabase.auth.getSession();
+    token = session?.access_token || null;
   }
   
   const headers: HeadersInit = {
@@ -152,8 +162,18 @@ export const productsApi = {
     const formData = new FormData();
     formData.append("image", file);
 
+    // Get token
+    let token: string | null = null;
     const userJson = localStorage.getItem("wm_user");
-    const token = userJson ? JSON.parse(userJson).access_token : null;
+    if (userJson) {
+      try {
+        token = JSON.parse(userJson).access_token || null;
+      } catch { token = null; }
+    }
+    if (!token && supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token || null;
+    }
 
     try {
       const response = await fetch(`${API_BASE_URL}/products/upload-image`, {
@@ -338,6 +358,63 @@ export const userApi = {
 
   getTransactions: () =>
     fetchApi<any[]>("/protected/wallet/transactions"),
+};
+
+// ==================== VERIFICATION API ====================
+
+export interface VerificationStatus {
+  verified: boolean;
+  verification_status: "none" | "pending" | "approved" | "rejected";
+  document_type?: string | null;
+  created_at?: string | null;
+  is_school_email: boolean;
+}
+
+export interface VerificationRequest {
+  document_type: "student_id" | "admission_letter";
+}
+
+export interface Verification {
+  id: string;
+  user_id: string;
+  document_url?: string | null;
+  document_type: string;
+  status: "pending" | "approved" | "rejected";
+  reviewed_by?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  user?: {
+    email: string;
+    full_name?: string;
+  };
+}
+
+export const verificationApi = {
+  getStatus: () =>
+    fetchApi<VerificationStatus>("/verification/status"),
+
+  submitRequest: (params: VerificationRequest) =>
+    fetchApi<{ message: string; verification_id?: string; status: string }>("/verification/request", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+
+  // Admin endpoints
+  getAllPending: (status?: string) =>
+    fetchApi<{ verifications: Verification[] }>(
+      status ? `/admin/verifications?status=${status}` : "/admin/verifications"
+    ),
+
+  approve: (id: string) =>
+    fetchApi<{ message: string; status: string }>(`/verification/admin/verification/${id}/approve`, {
+      method: "PATCH",
+    }),
+
+  reject: (id: string, reason?: string) =>
+    fetchApi<{ message: string; status: string }>(`/verification/admin/verification/${id}/reject`, {
+      method: "PATCH",
+      body: JSON.stringify({ reason }),
+    }),
 };
 
 // ==================== ADMIN API ====================

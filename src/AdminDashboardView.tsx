@@ -1,9 +1,10 @@
+﻿// cspell:ignore momo
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   CalendarDays, CircleHelp, Download, FileText, Info, Search, ShoppingCart, Store, UserRound, Wallet,
-  AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Filter, MoreHorizontal,
-  Shield, DollarSign, Activity, Users, Package, XCircle, Eye, Ban, Flag, ArrowUpRight, ArrowDownRight
+  AlertTriangle, CheckCircle,
+  Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -23,15 +24,40 @@ import {
   timeAgo 
 } from "./data";
 
-type Props = {
+type Props = Readonly<{
   user: LocalUser;
-};
+}>;
 
 type AdminRole = "operations" | "finance" | "compliance";
 type ActivityType = "all" | "orders" | "payments" | "disputes" | "verification" | "products";
+type ActivityRecordType = Exclude<ActivityType, "all">;
+type PriorityLevel = "critical" | "high" | "medium" | "low";
+type SlaLevel = "critical" | "warning" | "ok";
+type ActivitySeverity = "normal" | "warning" | "high";
+
+type ActivityItem = {
+  id: string;
+  type: ActivityRecordType;
+  text: string;
+  time: string;
+  severity: ActivitySeverity;
+};
+
+type PendingAction = {
+  id: string;
+  label: string;
+  count: number;
+  priority: PriorityLevel;
+  updatedAt: string;
+  age: number;
+  sla: SlaLevel;
+  cta: string;
+  target: "disputes" | "verification" | "products" | "orders";
+  description: string;
+};
 
 const DAY_MS = 86400000;
-const COMMISSION_RATE = 0.10; // 10% platform fee
+const COMMISSION_RATE = 0.1; // 10% platform fee
 
 function inRange(iso: string, from: Date, to: Date) {
   const t = +new Date(iso);
@@ -61,6 +87,51 @@ function getSLAStatus(daysOld: number, criticalDays = 3, warningDays = 7): "crit
   return "ok";
 }
 
+function getVerificationPriority(count: number): PriorityLevel {
+  if (count > 5) return "high";
+  if (count > 0) return "medium";
+  return "low";
+}
+
+function getVerificationSla(count: number): SlaLevel {
+  if (count > 10) return "critical";
+  if (count > 5) return "warning";
+  return "ok";
+}
+
+function getFlaggedContentPriority(count: number): PriorityLevel {
+  if (count > 3) return "high";
+  if (count > 0) return "medium";
+  return "low";
+}
+
+function getPendingActionCardClass(priority: PriorityLevel): string {
+  if (priority === "critical") return "border-red-200 bg-red-50";
+  if (priority === "high") return "border-orange-200 bg-orange-50";
+  return "border-slate-200";
+}
+
+function getActivityContainerClass(severity: ActivitySeverity): string {
+  if (severity === "high") return "border-red-200 bg-red-50";
+  if (severity === "warning") return "border-amber-200 bg-amber-50";
+  return "border-slate-200";
+}
+
+function getActivityBadgeClass(type: ActivityRecordType): string {
+  if (type === "orders") return "bg-slate-100 text-slate-700";
+  if (type === "payments") return "bg-emerald-100 text-emerald-700";
+  if (type === "disputes") return "bg-red-100 text-red-700";
+  if (type === "verification") return "bg-amber-100 text-amber-700";
+  return "bg-blue-100 text-blue-700";
+}
+
+function getOrderStatusTextClass(status: string): string {
+  if (status === "completed") return "text-emerald-600";
+  if (status === "disputed") return "text-red-600";
+  if (status === "pending") return "text-amber-600";
+  return "text-slate-600";
+}
+
 export default function AdminDashboardView({ user }: Props) {
   const navigate = useNavigate();
   
@@ -71,7 +142,6 @@ export default function AdminDashboardView({ user }: Props) {
   const [activityFilter, setActivityFilter] = useState<ActivityType>("all");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [rangePreset, setRangePreset] = useState<"7d" | "30d" | "90d">("30d");
-  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("30d");
   
   // Data
   const users = getUsers();
@@ -113,9 +183,7 @@ export default function AdminDashboardView({ user }: Props) {
   // Marketplace quality metrics
   const openDisputes = orders.filter((o) => o.status === "disputed");
   const disputeRate = rangeOrders.length > 0 ? (openDisputes.length / rangeOrders.length) * 100 : 0;
-  const returnRate = 2.5; // Placeholder - would come from actual data
   const flaggedProducts = products.filter((p) => !p.is_active);
-  const flaggedContentRate = products.length > 0 ? (flaggedProducts.length / products.length) * 100 : 0;
   
   // Daily trend data
   const dayKeys: string[] = [];
@@ -146,52 +214,52 @@ export default function AdminDashboardView({ user }: Props) {
   
   // Activities feed
   const activities = useMemo(() => {
-    const items = [
+    const items: ActivityItem[] = [
       ...orders.map((o) => ({ 
         id: `order-${o.id}`, 
         type: "orders" as const, 
         text: `Order #${o.id.slice(-6)} created - ${o.productTitle} (${o.buyerName})`, 
         time: o.created_at,
-        severity: "normal"
+        severity: "normal" as const
       })),
       ...orders.filter((o) => settledStatuses.has(o.status)).map((o) => ({ 
         id: `payment-${o.id}`, 
         type: "payments" as const, 
         text: `Payment of ${fmtCurrency(o.amount)} settled for Order #${o.id.slice(-6)}`, 
         time: o.created_at,
-        severity: "normal"
+        severity: "normal" as const
       })),
       ...openDisputes.map((o) => ({ 
         id: `dispute-${o.id}`, 
         type: "disputes" as const, 
-        text: `⚠️ Dispute raised on Order #${o.id.slice(-6)} - ${o.productTitle}`, 
+        text: `âš ï¸ Dispute raised on Order #${o.id.slice(-6)} - ${o.productTitle}`, 
         time: o.created_at,
-        severity: "high"
+        severity: "high" as const
       })),
       ...rangeProducts.map((p) => ({
         id: `product-${p.id}`,
         type: "products" as const,
         text: `Seller "${p.sellerName}" listed "${p.title}" in ${p.category}`,
         time: p.listed_at,
-        severity: p.is_active ? "normal" : "warning"
+        severity: (p.is_active ? "normal" : "warning") as ActivitySeverity
       })),
       ...pendingVerification.map((s) => ({
         id: `verify-${s.id}`,
         type: "verification" as const,
         text: `Seller "${s.full_name}" awaiting verification`,
         time: now.toISOString(),
-        severity: "warning"
+        severity: "warning" as const
       }))
     ]
     .sort((a, b) => +new Date(b.time) - +new Date(a.time))
-    .filter((a) => (activityFilter === "all" ? true : a.type === activityFilter))
-    .filter((a) => (!search ? true : a.text.toLowerCase().includes(search)));
+    .filter((a) => activityFilter === "all" || a.type === activityFilter)
+    .filter((a) => search.length === 0 || a.text.toLowerCase().includes(search));
     
     return items;
   }, [orders, openDisputes, rangeProducts, pendingVerification, activityFilter, search]);
   
   // Pending actions with priority, age, and SLA
-  const pendingActions = useMemo(() => [
+  const pendingActions = useMemo<PendingAction[]>(() => [
     { 
       id: "disputes", 
       label: "Open Disputes", 
@@ -208,10 +276,10 @@ export default function AdminDashboardView({ user }: Props) {
       id: "verification", 
       label: "Seller Verification", 
       count: pendingVerification.length, 
-      priority: pendingVerification.length > 5 ? "high" : pendingVerification.length > 0 ? "medium" : "low", 
+      priority: getVerificationPriority(pendingVerification.length), 
       updatedAt: now.toISOString(),
       age: pendingVerification.length,
-      sla: pendingVerification.length > 10 ? "critical" : pendingVerification.length > 5 ? "warning" : "ok",
+      sla: getVerificationSla(pendingVerification.length),
       cta: "Review", 
       target: "verification" as const,
       description: "Sellers awaiting identity verification"
@@ -220,7 +288,7 @@ export default function AdminDashboardView({ user }: Props) {
       id: "flagged-products", 
       label: "Flagged Content", 
       count: flaggedProducts.length, 
-      priority: flaggedProducts.length > 3 ? "high" : flaggedProducts.length > 0 ? "medium" : "low", 
+      priority: getFlaggedContentPriority(flaggedProducts.length), 
       updatedAt: products[0]?.listed_at || now.toISOString(),
       age: 0,
       sla: "ok",
@@ -290,22 +358,28 @@ const handleVerifySeller = (sellerId: string) => {
   const exportPdf = () => {
     const win = window.open("", "_blank", "width=900,height=700");
     if (!win) return toast.error("Allow pop-ups to export PDF");
-    win.document.write(`
-      <h1>White Market Admin Report</h1>
-      <p>Generated: ${new Date().toLocaleString()}</p>
-      <h2>Financial Summary</h2>
-      <p>GMV: ${fmtCurrency(gmv)}</p>
-      <p>Platform Revenue: ${fmtCurrency(revenue)}</p>
-      <p>Commission (${COMMISSION_RATE * 100}%)</p>
-      <h2>Operations</h2>
-      <p>Orders: ${rangeOrders.length}</p>
-      <p>Products: ${rangeProducts.length}</p>
-      <p>Active Sellers: ${activeSellers.length}</p>
-      <h2>Quality Metrics</h2>
-      <p>Dispute Rate: ${disputeRate.toFixed(2)}%</p>
-      <p>Flagged Content: ${flaggedProducts.length}</p>
-    `);
-    win.document.close();
+    const doc = win.document;
+    doc.title = "White Market Admin Report";
+    if (doc.body) {
+      doc.body.innerHTML = "";
+      const container = doc.createElement("div");
+      container.innerHTML = `
+        <h1>White Market Admin Report</h1>
+        <p>Generated: ${new Date().toLocaleString()}</p>
+        <h2>Financial Summary</h2>
+        <p>GMV: ${fmtCurrency(gmv)}</p>
+        <p>Platform Revenue: ${fmtCurrency(revenue)}</p>
+        <p>Commission (${COMMISSION_RATE * 100}%)</p>
+        <h2>Operations</h2>
+        <p>Orders: ${rangeOrders.length}</p>
+        <p>Products: ${rangeProducts.length}</p>
+        <p>Active Sellers: ${activeSellers.length}</p>
+        <h2>Quality Metrics</h2>
+        <p>Dispute Rate: ${disputeRate.toFixed(2)}%</p>
+        <p>Flagged Content: ${flaggedProducts.length}</p>
+      `;
+      doc.body.appendChild(container);
+    }
     win.print();
     toast.success("PDF report generated");
   };
@@ -355,15 +429,25 @@ const handleVerifySeller = (sellerId: string) => {
   };
 
   const currentRole = roleConfigs[adminRole];
+  const navItems = [
+    { id: "dashboard", label: "Dashboard", Icon: Activity },
+    { id: "users", label: "Users", Icon: UserRound },
+    { id: "products", label: "Products", Icon: Store },
+    { id: "orders", label: "Orders", Icon: ShoppingCart },
+    { id: "disputes", label: "Disputes", Icon: CircleHelp },
+    { id: "verification", label: "Verification", Icon: Shield },
+    { id: "settings", label: "Settings", Icon: Info },
+  ] as const;
 
   return (
     <section className="space-y-4 lg:space-y-6">
       {/* Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:p-5 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 shadow-lg p-4 lg:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-xl lg:text-2xl font-bold text-slate-900">Admin Dashboard</h1>
-            <p className="text-sm text-slate-600 hidden sm:block">{currentRole.description}</p>
+            <h1 className="text-xl lg:text-2xl font-bold text-white">White Market Admin</h1>
+            <p className="text-sm text-slate-300">{currentRole.description}</p>
+            <p className="text-xs text-slate-400">Signed in as {user.full_name}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={exportCsv}>
@@ -410,7 +494,13 @@ const handleVerifySeller = (sellerId: string) => {
             <div className="flex items-center gap-1 rounded-lg border bg-slate-50 px-3 py-2 text-xs text-slate-600">
               <CalendarDays className="h-4 w-4" />
             </div>
+            <label htmlFor="admin-range-preset" className="sr-only">
+              Date range preset
+            </label>
             <select 
+              id="admin-range-preset"
+              aria-label="Date range preset"
+              title="Date range preset"
               value={rangePreset} 
               onChange={(e) => setRangePreset(e.target.value as "7d" | "30d" | "90d")} 
               className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm"
@@ -430,17 +520,9 @@ const handleVerifySeller = (sellerId: string) => {
           <Card>
             <CardContent className="p-2 lg:p-3">
               <div className="space-y-1">
-                {[
-                  ["dashboard", "Dashboard", <Activity className="h-4 w-4" />],
-                  ["users", "Users", <UserRound className="h-4 w-4" />],
-                  ["products", "Products", <Store className="h-4 w-4" />],
-                  ["orders", "Orders", <ShoppingCart className="h-4 w-4" />],
-                  ["disputes", "Disputes", <CircleHelp className="h-4 w-4" />],
-                  ["verification", "Verification", <Shield className="h-4 w-4" />],
-                  ["settings", "Settings", <Info className="h-4 w-4" />],
-                ].map(([id, label, icon]) => (
+                {navItems.map(({ id, label, Icon }) => (
                   <button
-                    key={String(id)}
+                    key={id}
                     onClick={() => setTab(id as typeof tab)}
                     className={`flex w-full items-center gap-2 rounded-lg px-2 lg:px-3 py-2 text-sm ${
                       tab === id 
@@ -448,7 +530,7 @@ const handleVerifySeller = (sellerId: string) => {
                         : "text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    {icon}
+                    <Icon className="h-4 w-4" />
                     <span className="hidden sm:inline">{label}</span>
                   </button>
                 ))}
@@ -468,11 +550,7 @@ const handleVerifySeller = (sellerId: string) => {
               {pendingActions.map((item) => (
                 <div 
                   key={item.id} 
-                  className={`rounded-lg border p-3 ${
-                    item.priority === "critical" ? "border-red-200 bg-red-50" :
-                    item.priority === "high" ? "border-orange-200 bg-orange-50" :
-                    "border-slate-200"
-                  }`}
+                  className={`rounded-lg border p-3 ${getPendingActionCardClass(item.priority)}`}
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">{item.label}</p>
@@ -736,19 +814,9 @@ const handleVerifySeller = (sellerId: string) => {
                 {(showAllActivity ? activities : activities.slice(0, 8)).map((a) => (
                   <div 
                     key={a.id} 
-                    className={`flex items-start gap-3 rounded-lg border p-3 ${
-                      a.severity === "high" ? "border-red-200 bg-red-50" :
-                      a.severity === "warning" ? "border-amber-200 bg-amber-50" :
-                      "border-slate-200"
-                    }`}
+                    className={`flex items-start gap-3 rounded-lg border p-3 ${getActivityContainerClass(a.severity)}`}
                   >
-                    <div className={`mt-0.5 rounded-full p-2 ${
-                      a.type === "orders" ? "bg-slate-100 text-slate-700" :
-                      a.type === "payments" ? "bg-emerald-100 text-emerald-700" :
-                      a.type === "disputes" ? "bg-red-100 text-red-700" :
-                      a.type === "verification" ? "bg-amber-100 text-amber-700" :
-                      "bg-blue-100 text-blue-700"
-                    }`}>
+                    <div className={`mt-0.5 rounded-full p-2 ${getActivityBadgeClass(a.type)}`}>
                       {a.type === "orders" && <ShoppingCart className="h-4 w-4" />}
                       {a.type === "payments" && <Wallet className="h-4 w-4" />}
                       {a.type === "disputes" && <CircleHelp className="h-4 w-4" />}
@@ -897,12 +965,7 @@ const handleVerifySeller = (sellerId: string) => {
                           <td className="py-2 pr-4">{o.sellerName}</td>
                           <td className="py-2 pr-4">GHS {o.amount}</td>
                           <td className="py-2 pr-4 capitalize">
-                            <span className={
-                              o.status === "completed" ? "text-emerald-600" :
-                              o.status === "disputed" ? "text-red-600" :
-                              o.status === "pending" ? "text-amber-600" :
-                              "text-slate-600"
-                            }>
+                            <span className={getOrderStatusTextClass(o.status)}>
                               {o.status}
                             </span>
                           </td>
@@ -984,3 +1047,4 @@ const handleVerifySeller = (sellerId: string) => {
     </section>
   );
 }
+

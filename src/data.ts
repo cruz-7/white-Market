@@ -7,6 +7,7 @@ export type LocalUser = {
   role: UserRole;
   avatar_url?: string;
   momo_number?: string;
+  verified?: boolean;
   created_at?: string;
 };
 

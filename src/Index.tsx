@@ -3,7 +3,7 @@ import { Button } from "./button";
 import { Badge } from "./badge";
 import { CheckCircle, Star, Shield, ArrowRight, Search, ShoppingBag, MessageSquare, Wallet, Users, Zap, Award, Camera, TrendingUp, Store, Flame } from "lucide-react";
 import { Card, CardContent } from "./card";
-import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import { Avatar, AvatarFallback } from "./avatar";
 import { Input } from "./input";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
