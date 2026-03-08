@@ -13,6 +13,7 @@ import productsRouter from "./routes/products.js";
 import sellersRouter from "./routes/sellers.js";
 import adminRouter from "./routes/admin.js";
 import testRouter from "./routes/test.js";
+import verificationRouter from "./routes/verification.js";
 
 function parseOrigins(originsInput) {
   if (Array.isArray(originsInput)) {
@@ -34,11 +35,53 @@ function validateRequiredEnv(isProduction) {
     "SUPABASE_ANON_KEY",
     "FRONTEND_URL",
     "PAYSTACK_SECRET_KEY",
+    "PAYSTACK_CALLBACK_URL",
   ];
   const missing = requiredEnv.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables for production: ${missing.join(", ")}`);
   }
+}
+
+function createIpRateLimiter({ windowMs, maxRequests, message }) {
+  const hits = new Map();
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of hits.entries()) {
+      if (entry.resetAt <= now) {
+        hits.delete(ip);
+      }
+    }
+  }, Math.max(60_000, Math.floor(windowMs / 2)));
+  if (typeof cleanup.unref === "function") {
+    cleanup.unref();
+  }
+
+  return (req, res, next) => {
+    const now = Date.now();
+    const forwardedFor = req.headers["x-forwarded-for"];
+    const ip =
+      typeof forwardedFor === "string"
+        ? forwardedFor.split(",")[0].trim()
+        : req.ip || req.socket?.remoteAddress || "unknown";
+
+    let entry = hits.get(ip);
+    if (!entry || entry.resetAt <= now) {
+      entry = { count: 0, resetAt: now + windowMs };
+      hits.set(ip, entry);
+    }
+
+    entry.count += 1;
+    res.setHeader("RateLimit-Limit", String(maxRequests));
+    res.setHeader("RateLimit-Remaining", String(Math.max(0, maxRequests - entry.count)));
+    res.setHeader("RateLimit-Reset", String(Math.ceil((entry.resetAt - now) / 1000)));
+
+    if (entry.count > maxRequests) {
+      return res.status(429).json({ error: message || "Too many requests. Please try again later." });
+    }
+
+    return next();
+  };
 }
 
 export function createApp(options = {}) {
@@ -53,12 +96,33 @@ export function createApp(options = {}) {
   }
 
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+
+  const globalRateLimiter = createIpRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    maxRequests: isProduction ? 300 : 5000,
+  });
+  const authRateLimiter = createIpRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    maxRequests: isProduction ? 30 : 300,
+    message: "Too many authentication attempts. Please try again later.",
+  });
+
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (isProduction) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    return next();
+  });
 
   app.use(
     cors({
       credentials: true,
       origin(origin, callback) {
-        // Allow non-browser clients and same-origin requests without Origin header.
         if (!origin) {
           return callback(null, true);
         }
@@ -75,7 +139,9 @@ export function createApp(options = {}) {
       },
     }),
   );
-  // Webhook endpoints require raw payload for signature verification.
+
+  app.use(globalRateLimiter);
+  app.use("/auth", authRateLimiter);
   app.use("/payments/webhook", express.raw({ type: "application/json" }));
   app.use(express.json());
 
@@ -97,6 +163,7 @@ export function createApp(options = {}) {
   app.use("/messages", messagesRouter);
   app.use("/sellers", sellersRouter);
   app.use("/admin", adminRouter);
+  app.use("/verification", verificationRouter);
 
   if (enableTestRoutes) {
     app.use(testRouter);

@@ -77,6 +77,10 @@ ordersRouter.patch("/:id/status", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Cancelled order cannot be updated" });
   }
 
+  if (order.status === "paid") {
+    return res.status(400).json({ error: "Paid order cannot be updated on this endpoint" });
+  }
+
   const { data: updated, error: updateError } = await supabase
     .from("orders")
     .update({ status })
@@ -92,75 +96,44 @@ ordersRouter.patch("/:id/status", requireAuth, async (req, res) => {
 });
 
 ordersRouter.get("/my-orders", requireAuth, async (req, res) => {
-  const primary = await supabase
+  const { data, error } = await supabase
     .from("orders")
-    .select("*, products(title, image_url), users!orders_seller_id_fkey(full_name)")
+    .select("*, products(title, image_url)")
     .eq("buyer_id", req.user.id);
 
-  if (!primary.error) {
-    return res.json(primary.data);
+  if (error) {
+    return res.status(400).json({ error: error.message });
   }
 
-  const fallback = await supabase
-    .from("orders")
-    .select("*, products!orders_product_id_fkey(title, image_url), users!orders_seller_id_fkey(full_name)")
-    .eq("buyer_id", req.user.id);
-
-  if (fallback.error) {
-    return res.status(400).json({ error: fallback.error.message });
-  }
-
-  return res.json(fallback.data);
+  return res.json(data || []);
 });
 
 ordersRouter.get("/sales", requireAuth, async (req, res) => {
-  const primary = await supabase
+  const { data, error } = await supabase
     .from("orders")
-    .select("*, products(title, image_url), users!orders_buyer_id_fkey(full_name)")
+    .select("*, products(title, image_url)")
     .eq("seller_id", req.user.id);
 
-  if (!primary.error) {
-    return res.json(primary.data);
+  if (error) {
+    return res.status(400).json({ error: error.message });
   }
 
-  const fallback = await supabase
-    .from("orders")
-    .select("*, products!orders_product_id_fkey(title, image_url), users!orders_buyer_id_fkey(full_name)")
-    .eq("seller_id", req.user.id);
-
-  if (fallback.error) {
-    return res.status(400).json({ error: fallback.error.message });
-  }
-
-  return res.json(fallback.data);
+  return res.json(data || []);
 });
 
 ordersRouter.get("/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
 
-  const primary = await supabase
+  const { data: order, error } = await supabase
     .from("orders")
-    .select(
-      "*, products(title, image_url), buyer:users!orders_buyer_id_fkey(full_name), seller:users!orders_seller_id_fkey(full_name)",
-    )
+    .select("*, products(title, image_url)")
     .eq("id", id)
     .single();
 
-  const result = primary.error
-    ? await supabase
-        .from("orders")
-        .select(
-          "*, products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name), seller:users!orders_seller_id_fkey(full_name)",
-        )
-        .eq("id", id)
-        .single()
-    : primary;
-
-  if (result.error || !result.data) {
+  if (error || !order) {
     return res.status(404).json({ error: "Order not found" });
   }
 
-  const order = result.data;
   const isParticipant = order.buyer_id === req.user.id || order.seller_id === req.user.id || req.user.role === "admin";
   if (!isParticipant) {
     return res.status(403).json({ error: "Not allowed to view this order" });

@@ -138,7 +138,7 @@ router.get("/users", requireAuth, requireAdmin, async (req, res) => {
 router.get("/products", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("products")
-    .select("id, seller_id, title, price, image_url, category, is_active, created_at, seller:users!products_seller_id_fkey(full_name, email)")
+    .select("id, seller_id, title, price, image_url, category, is_active, created_at")
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -152,9 +152,7 @@ router.get("/products", requireAuth, requireAdmin, async (req, res) => {
 router.get("/orders", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("orders")
-    .select(
-      "id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, product:products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name, email), seller:users!orders_seller_id_fkey(full_name, email)",
-    )
+    .select("id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, products(title, image_url)")
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -183,9 +181,7 @@ router.patch("/orders/:id/status", requireAuth, requireAdmin, async (req, res) =
     .from("orders")
     .update(updateData)
     .eq("id", req.params.id)
-    .select(
-      "id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, product:products!orders_product_id_fkey(title, image_url), buyer:users!orders_buyer_id_fkey(full_name, email), seller:users!orders_seller_id_fkey(full_name, email)",
-    )
+    .select("id, product_id, buyer_id, seller_id, amount, status, created_at, paid_at, products(title, image_url)")
     .single()
 
   if (error) {

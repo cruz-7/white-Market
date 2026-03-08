@@ -6,6 +6,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "service-role-test-key";
 process.env.SUPABASE_ANON_KEY ||= "anon-test-key";
 process.env.FRONTEND_URL ||= "https://allowed.example.com";
 process.env.PAYSTACK_SECRET_KEY ||= "paystack-test-key";
+process.env.PAYSTACK_CALLBACK_URL ||= "https://allowed.example.com/payments/callback";
 
 const { createApp } = await import("../../src/index.js");
 
