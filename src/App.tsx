@@ -9,7 +9,7 @@ import Navbar from "./Navbar";
 import Footer from "./Footer";
 import MobileBottomNav from "./MobileBottomNav";
 import { Button } from "./button";
-import { Card, CardContent, CardHeader, CardTitle } from "./card";
+import { Card, CardContent } from "./card";
 import { Input } from "./input";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Textarea } from "./textarea";
@@ -23,14 +23,12 @@ import {
   getMessages,
   getOrders,
   getProducts,
-  getUsers,
   getWallet,
   getWalletTransactions,
   recordActivity,
   saveConversations,
   saveOrders,
   saveProducts,
-  saveUsers,
   saveWallet,
   saveWalletTransactions,
   subscribeDataChange,
@@ -41,7 +39,6 @@ import {
 import { supabase } from "./supabase-client";
 import Index from "./Index";
 import {
-  authApi,
   productsApi,
   ordersApi,
   userApi,
@@ -65,6 +62,7 @@ import ReportIssue from "./ReportIssue";
 import BuyerProtection from "./BuyerProtection";
 import AddProduct from "./AddProduct";
 import SellerProfile from "./SellerProfile";
+import ProfessionalOrdersPage from "./ProfessionalOrdersPage";
 
 declare global {
   interface Window {
@@ -391,7 +389,7 @@ function App() {
       <Route path="/product/:id" element={backendElement(<ProductDetailPage />)} />
       <Route path="/checkout/:orderId" element={backendElement(<CheckoutPage />)} />
       <Route path="/messages" element={backendElement(<MessagesPage />)} />
-      <Route path="/orders" element={backendElement(<OrdersPage />)} />
+      <Route path="/orders" element={backendElement(<ProfessionalOrdersPage user={currentUser} />)} />
       <Route path="/auth" element={backendElement(<AuthPage />)} />
       <Route path="/dashboard" element={backendElement(<DashboardRouter />)} />
       <Route path="/admin" element={backendElement(<AdminDashboard />)} />
@@ -408,6 +406,113 @@ function App() {
   );
 }
 
+function getPasswordStrength(password: string) {
+  const hasLength = password.length >= 8;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  const requirementsCount = [hasLength, hasUpper, hasNumber].filter(Boolean).length;
+  return {
+    hasLength,
+    hasUpper,
+    hasNumber,
+    requirementsCount,
+    strength: requirementsCount <= 1 ? "weak" : requirementsCount === 2 ? "medium" : "strong",
+  };
+}
+
+async function handleLogin(email: string, password: string, navigate: ReturnType<typeof useNavigate>) {
+  if (!email.trim() || !password.trim()) return;
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!supabase) {
+    toast.error("Authentication service is not configured.");
+    return;
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+  if (error) {
+    toast.error(error?.message || "Login failed. Check your credentials.");
+    return;
+  }
+
+  if (!data.user) {
+    toast.error("Login failed. Check your credentials.");
+    return;
+  }
+
+  const authUser = data.user;
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role, full_name")
+    .eq("id", authUser.id)
+    .maybeSingle();
+
+  const sessionUser: LocalUser = {
+    id: authUser.id,
+    email: authUser.email || normalizedEmail,
+    full_name: (profile as any)?.full_name || authUser.user_metadata?.full_name || normalizedEmail.split("@")[0],
+    role: ((profile as any)?.role as LocalUser["role"]) || "user",
+    avatar_url: authUser.user_metadata?.avatar_url as string | undefined,
+  };
+
+  upsertUser(sessionUser);
+  localStorage.setItem("wm_user", JSON.stringify(sessionUser));
+  window.dispatchEvent(new Event("wm-auth-change"));
+  toast.success("Signed in successfully");
+  navigate("/dashboard");
+}
+
+async function handleSignup(fullName: string, email: string, password: string, role: "user" | "seller", navigate: ReturnType<typeof useNavigate>, setTab: (tab: "login" | "signup") => void) {
+  if (!fullName.trim() || !email.trim()) return;
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!supabase) {
+    toast.error("Authentication service is not configured.");
+    return;
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: normalizedEmail,
+    password,
+    options: { data: { full_name: fullName.trim() } },
+  });
+
+  if (error) {
+    toast.error(error.message);
+    return;
+  }
+
+  if (!data.user) {
+    toast.success("Check your email to confirm your account, then log in.");
+    setTab("login");
+    return;
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role, full_name")
+    .eq("id", data.user.id)
+    .maybeSingle();
+
+  const sessionUser: LocalUser = {
+    id: data.user.id,
+    full_name: (profile as any)?.full_name || fullName.trim(),
+    email: data.user.email || normalizedEmail,
+    role: ((profile as any)?.role as LocalUser["role"]) || "user",
+  };
+
+  if (role === "seller" && sessionUser.role === "user") {
+    toast.info("Account created. Seller mode can be enabled from profile setup.");
+  } else {
+    toast.success("Account created successfully");
+  }
+
+  upsertUser(sessionUser);
+  localStorage.setItem("wm_user", JSON.stringify(sessionUser));
+  window.dispatchEvent(new Event("wm-auth-change"));
+  navigate("/dashboard");
+}
+
 function AuthPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -420,106 +525,19 @@ function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const hasLength = password.length >= 8;
-  const hasUpper = /[A-Z]/.test(password);
-  const hasNumber = /\d/.test(password);
+  const pwdStrength = getPasswordStrength(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
-  const requirementsCount = [hasLength, hasUpper, hasNumber].filter(Boolean).length;
-  const strength = requirementsCount <= 1 ? "weak" : requirementsCount === 2 ? "medium" : "strong";
   const allowedDomain = email.endsWith("@st.ug.edu.gh") || email.endsWith("@ug.edu.gh");
   const canSubmitLogin = Boolean(email.trim() && password.trim());
-  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && hasLength && hasUpper && hasNumber && passwordsMatch);
+  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && pwdStrength.hasLength && pwdStrength.hasUpper && pwdStrength.hasNumber && passwordsMatch);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (tab === "login") {
-      if (!canSubmitLogin) return;
-      const normalizedEmail = email.trim().toLowerCase();
-
-      // Prefer Supabase auth when configured so role is sourced server-side.
-      if (supabase) {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
-        if (!error && data.user) {
-          const authUser = data.user;
-          const { data: profile } = await supabase
-            .from("users")
-            .select("role, full_name")
-            .eq("id", authUser.id)
-            .maybeSingle();
-
-          const sessionUser: LocalUser = {
-            id: authUser.id,
-            email: authUser.email || normalizedEmail,
-            full_name: (profile as any)?.full_name || authUser.user_metadata?.full_name || normalizedEmail.split("@")[0],
-            role: ((profile as any)?.role as LocalUser["role"]) || "user",
-            avatar_url: authUser.user_metadata?.avatar_url as string | undefined,
-          };
-
-          upsertUser(sessionUser);
-          localStorage.setItem("wm_user", JSON.stringify(sessionUser));
-          window.dispatchEvent(new Event("wm-auth-change"));
-          toast.success("Signed in successfully");
-          navigate("/dashboard");
-          return;
-        }
-
-        toast.error(error?.message || "Login failed. Check your credentials.");
-        return;
-      }
-
-      toast.error("Authentication service is not configured.");
+      await handleLogin(email, password, navigate);
       return;
     }
-
-    if (!canSubmitSignup) return;
-    const normalizedEmail = email.trim().toLowerCase();
-
-    // Prefer Supabase signup for production auth flow.
-    if (supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: { data: { full_name: fullName.trim() } },
-      });
-
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-
-      if (!data.user) {
-        toast.success("Check your email to confirm your account, then log in.");
-        setTab("login");
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role, full_name")
-        .eq("id", data.user.id)
-        .maybeSingle();
-
-      const sessionUser: LocalUser = {
-        id: data.user.id,
-        full_name: (profile as any)?.full_name || fullName.trim(),
-        email: data.user.email || normalizedEmail,
-        role: ((profile as any)?.role as LocalUser["role"]) || "user",
-      };
-
-      if (role === "seller" && sessionUser.role === "user") {
-        toast.info("Account created. Seller mode can be enabled from profile setup.");
-      } else {
-        toast.success("Account created successfully");
-      }
-
-      upsertUser(sessionUser);
-      localStorage.setItem("wm_user", JSON.stringify(sessionUser));
-      window.dispatchEvent(new Event("wm-auth-change"));
-      navigate("/dashboard");
-      return;
-    }
-
-    toast.error("Authentication service is not configured.");
+    await handleSignup(fullName, email, password, role, navigate, setTab);
   };
 
   return (
@@ -533,7 +551,7 @@ function AuthPage() {
           <div className="grid md:grid-cols-[1fr_1.2fr]">
             <div className="hidden bg-primary p-8 text-white md:block">
               <div className="mb-8 flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">WM</div>
+                <img src="/logo.svg" alt="White Market logo" className="h-11 w-11 rounded-xl" />
                 <div>
                   <p className="text-xl font-bold">White Market</p>
                   <p className="text-xs text-white/75">Verified student marketplace</p>
@@ -552,7 +570,7 @@ function AuthPage() {
 
             <CardContent className="p-6 sm:p-8">
               <div className="mb-6 md:hidden">
-                <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white">WM</div>
+                <img src="/logo.svg" alt="White Market logo" className="mb-3 h-10 w-10 rounded-xl" />
                 <h1 className="text-2xl font-bold text-slate-900">Welcome to White Market</h1>
                 <p className="text-sm text-slate-500">Sign in to continue or create your campus account.</p>
               </div>
@@ -600,13 +618,19 @@ function AuthPage() {
                   <label className="mb-1 block text-sm font-semibold text-slate-900">Password</label>
                   <div className="relative">
                     <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tab === "signup" ? "Min 8 chars, 1 uppercase, 1 number" : "••••••••"} className="h-11 rounded-lg pr-10" />
-                    <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" onClick={() => setShowPassword((v) => !v)}>
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   {tab === "signup" && (
                     <div className="mt-2 h-2 rounded-full bg-slate-200">
-                      <div className={`h-2 rounded-full transition-all ${strength === "weak" ? "w-1/3 bg-red-500" : strength === "medium" ? "w-2/3 bg-amber-500" : "w-full bg-green-500"}`} />
+                      <div className={`h-2 rounded-full transition-all ${pwdStrength.strength === "weak" ? "w-1/3 bg-red-500" : pwdStrength.strength === "medium" ? "w-2/3 bg-amber-500" : "w-full bg-green-500"}`} />
                     </div>
                   )}
                 </div>
@@ -616,7 +640,13 @@ function AuthPage() {
                     <label className="mb-1 block text-sm font-semibold text-slate-900">Confirm Password</label>
                     <div className="relative">
                       <Input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="h-11 rounded-lg pr-10" />
-                      <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" onClick={() => setShowConfirmPassword((v) => !v)}>
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                        onClick={() => setShowConfirmPassword((v) => !v)}
+                        aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                        title={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                      >
                         {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
@@ -642,7 +672,6 @@ function AuthPage() {
     </div>
   );
 }
-
 function MarketplacePage() {
   useDataRefresh();
   const navigate = useNavigate();
@@ -739,7 +768,7 @@ function MarketplacePage() {
       return;
     }
 
-    toast.info("Featured listing slots: GHS 10, GHS 20, and GHS 30.");
+toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
     navigate("/dashboard");
   };
 
@@ -776,7 +805,7 @@ function MarketplacePage() {
                 <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700">
                   <Flame className="h-4 w-4" /> Campus Demand
                 </p>
-                <h2 className="section-title">🔥 Trending in Legon</h2>
+                <h2 className="section-title">?? Trending in Legon</h2>
                 <p className="text-sm text-slate-600">Students are actively browsing these right now.</p>
               </div>
             </div>
@@ -804,14 +833,14 @@ function MarketplacePage() {
                 <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
                   <Megaphone className="h-4 w-4" /> Growth Lever
                 </p>
-                <h2 className="section-title">⭐ Sponsored & Featured Listings</h2>
-                <p className="text-sm text-slate-600">Sellers can pay GHS 10 - GHS 30 to appear at the top and get faster visibility.</p>
+                <h2 className="section-title">? Sponsored & Featured Listings</h2>
+<p className="text-sm text-slate-600">Sellers can pay GHS 50 - GHS 100 to appear at the top and get faster visibility.</p>
               </div>
               <Button onClick={openFeaturedListingFlow}>Promote a Listing</Button>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               {sponsoredProducts.map((product, index) => {
-                const badge = index === 0 ? "⭐ Sponsored" : index === 1 ? "⭐ Featured Seller" : "⭐ Top Product";
+                const badge = index === 0 ? "? Sponsored" : index === 1 ? "? Featured Seller" : "? Top Product";
                 return (
                   <Card key={`featured-${product.id}`} className="overflow-hidden border-amber-200 bg-white shadow-sm">
                     <img src={product.image} alt={product.title} className="h-24 w-full object-cover" />
@@ -886,7 +915,7 @@ function MarketplacePage() {
                 </div>
                 <p className="text-xs text-slate-500">Condition: {p.condition === "Used" ? "Used - Good Condition" : p.condition}. {p.condition === "Used" ? "Light wear, tested and fully functional." : "Clean and ready to use."}</p>
                 <div className="flex items-center justify-between">
-                  <p className="font-bold text-primary">₵ {p.price.toFixed(2)}</p>
+                  <p className="font-bold text-primary">? {p.price.toFixed(2)}</p>
                   <p className="text-xs text-slate-500">{p.category}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -1160,9 +1189,12 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
               <h3 className="section-title">{openTopUp ? "Top Up Wallet" : "Withdraw Funds"}</h3>
               <div className="mt-3 space-y-3">
                 <div><p className="label-text">Amount (GHS)</p><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-                {openTopUp && <div><p className="label-text">Payment Method</p><select className="w-full rounded-lg border bg-white p-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}><option value="paystack">Paystack (Card/MoMo)</option><option value="momo">Mobile Money</option></select></div>}
+                {openTopUp && <div><p className="label-text">Payment Method</p><select aria-label="Payment Method" className="w-full rounded-lg border bg-white p-2 text-sm" value={method} onChange={(e) => setMethod(e.target.value)}><option value="paystack">Paystack (Card/MoMo)</option><option value="momo">Mobile Money</option></select></div>}
               </div>
-              <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={() => { setOpenTopUp(false); setOpenWithdraw(false); }}>Cancel</Button><Button onClick={openTopUp ? handleTopUp : handleWithdraw}>{openTopUp ? "Confirm Top Up" : "Request Withdrawal"}</Button></div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => { setOpenTopUp(false); setOpenWithdraw(false); }}>Cancel</Button>
+                <Button onClick={openTopUp ? handleTopUp : handleWithdraw}>{openTopUp ? "Confirm Top Up" : "Request Withdrawal"}</Button>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1255,14 +1287,14 @@ function SellerDashboard() {
   };
 
   const openFeaturedPlans = () => {
-    toast.info("Promotion tiers: GHS 10 (Starter), GHS 20 (Boost), GHS 30 (Top Spotlight).");
+toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spotlight).");
     navigate("/marketplace");
   };
 
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]} 👋</h1><p className="body-text">Manage your store, orders, and payouts with a clear business view.</p></div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]} ??</h1><p className="body-text">Manage your store, orders, and payouts with a clear business view.</p></div>
         <div id="wallet-card"><WalletCard user={user} sellerMode /></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {[["Total Sales", `GHS ${revenueAll.toFixed(2)}`], ["This Month", `GHS ${monthRevenue.toFixed(2)}`], ["Active Listings", String(products.filter((p) => p.is_active).length)], ["Total Orders", String(orders.length)], ["Pending Orders", String(pendingCount)]].map(([label, value], i) => (
@@ -1284,10 +1316,10 @@ function SellerDashboard() {
               <button onClick={addNewProduct} className="text-left"><Card className="border-dashed"><CardContent className="p-4 text-center"><p className="text-sm font-semibold">+ List a Product</p></CardContent></Card></button>
               {products.map((p) => (
                 <Card key={p.id}>
-                  <img src={p.image} className="h-24 w-full rounded-t-xl object-cover" />
+                  <img src={p.image} alt={p.title} className="h-24 w-full rounded-t-xl object-cover" />
                   <CardContent className="p-3">
                     <p className="line-clamp-1 text-sm font-semibold">{p.title}</p>
-                    <p className="text-xs text-gray-500">{p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Out of Stock"} • {p.views} views</p>
+                    <p className="text-xs text-gray-500">{p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Out of Stock"} ï¿½ {p.views} views</p>
                     <p className="font-bold text-primary">GHS {p.price}</p>
                     <div className="mt-2 flex gap-1">
                       <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Edit</Button>
@@ -1315,9 +1347,9 @@ function SellerDashboard() {
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
               {[
-                ["GHS 10", "Starter", "Appear in sponsored row"],
-                ["GHS 20", "Boost", "Better placement + badge"],
-                ["GHS 30", "Top Spotlight", "Pinned top product slot"],
+                ["GHS 50", "Starter", "Featured in homepage carousel for 7 days"],
+                ["GHS 75", "Boost", "Priority placement + Verified badge for 14 days"],
+                ["GHS 100", "Top Spotlight", "Pinned at top + Badge for 30 days"],
               ].map(([price, tier, benefit]) => (
                 <div key={tier} className="rounded-xl border border-amber-200 bg-white p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{tier}</p>
@@ -1400,14 +1432,13 @@ function StudentDashboard() {
   const user = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("All");
-  const [wishlist, setWishlist] = useState<string[]>(["p2", "p5"]);
+  const [wishlist] = useState<string[]>(["p2", "p5"]);
   if (!user) return <Navigate to="/auth" replace />;
 
   const allProducts = getProducts().filter((p) => p.is_active);
   const orders = getOrders().filter((o) => o.buyerId === user.id || user.id === "u_student_1");
   const activeOrders = orders.filter((o) => ["pending", "confirmed", "shipped", "delivered"].includes(o.status));
   const history = orders.filter((o) => o.status === "completed");
-  const wallet = getWallet(user.id);
   const categories = ["All", ...Array.from(new Set(allProducts.map((p) => p.category)))];
 
   const searched = allProducts.filter((p) => {
@@ -1444,7 +1475,7 @@ function StudentDashboard() {
     <AppScaffold>
       <section className="container space-y-6 py-8">
         <div>
-          <h1 className="page-title">Hey {user.full_name.split(" ")[0]} 👋 What do you need today?</h1>
+          <h1 className="page-title">Hey {user.full_name.split(" ")[0]} ?? What do you need today?</h1>
           <p className="body-text">Discover trusted campus sellers, track orders, and pay faster with your wallet.</p>
         </div>
 
@@ -1525,7 +1556,7 @@ function StudentDashboard() {
                     <CardContent className="flex items-center justify-between gap-3 p-4">
                       <div>
                         <p className="font-semibold">{o.productTitle}</p>
-                        <p className="body-text">{o.sellerName} • GHS {o.amount}</p>
+                        <p className="body-text">{o.sellerName} ï¿½ GHS {o.amount}</p>
                       </div>
                       <Button size="sm" asChild><Link to={`/checkout/${o.id}`}>Track Order</Link></Button>
                     </CardContent>
@@ -1747,7 +1778,7 @@ function AdminDashboard() {
                   ))}
                   {!loading && tab === "products" && adminProducts.map((p) => (
                     <tr key={p.id} className="border-t">
-                      <td className="py-2"><img src={p.image_url || "https://via.placeholder.com/80"} className="h-8 w-8 rounded object-cover" /></td>
+                      <td className="py-2"><img src={p.image_url || "https://via.placeholder.com/80"} alt={p.title} className="h-8 w-8 rounded object-cover" /></td>
                       <td>{p.title}</td>
                       <td>{p.seller?.full_name || p.seller?.email || p.seller_id}</td>
                       <td>GHS {Number(p.price || 0).toFixed(2)}</td>
@@ -1799,37 +1830,6 @@ function AdminDashboard() {
   );
 }
 
-function OrdersPage() {
-  useDataRefresh();
-  const user = useCurrentUser();
-  if (!user) return <Navigate to="/auth" replace />;
-  const orders = getOrders().filter((o) => o.buyerId === user.id || o.sellerId === user.id || user.role === "admin");
-  return (
-    <AppScaffold>
-      <section className="container py-8">
-        <div className="mb-4 rounded-xl border bg-white p-5 shadow-sm">
-          <h1 className="page-title">Orders</h1>
-          <p className="body-text">Track every order status, payment state, and next action in one place.</p>
-        </div>
-        <div className="space-y-3">
-          {orders.map((o) => (
-            <Card key={o.id} className="shadow-sm">
-              <CardContent className="flex items-center justify-between gap-3 p-4">
-                <div>
-                  <p className="font-semibold">{o.productTitle}</p>
-                  <p className="body-text">#{o.id} • {o.status}</p>
-                </div>
-                <Button asChild size="sm">
-                  <Link to={`/checkout/${o.id}`}>Open</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-    </AppScaffold>
-  );
-}
 function CheckoutPage() {
   useDataRefresh();
   const user = useCurrentUser();
@@ -2056,9 +2056,9 @@ function MessagesPage() {
 
           {selected && (!isMobile || selectedId) ? (
             <div className="flex h-[76vh] flex-col">
-              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})}><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
+              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})} aria-label="Back" title="Back" className="p-1 text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
               <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
-              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)}><Send className="h-4 w-4" /></Button></div></div>
+              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2" title="Attach image"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button></div></div>
             </div>
           ) : <div className="grid h-[76vh] place-items-center text-gray-500">Select a conversation</div>}
         </div>
@@ -2306,17 +2306,17 @@ function ProfileSetupPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-slate-900">Full Name *</label>
-                        <Input value={form.fullName} onChange={(e) => setForm((prev) => ({ ...prev, fullName: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, fullName: true }))} aria-invalid={showError("fullName")} />
+                        <Input value={form.fullName} onChange={(e) => setForm((prev) => ({ ...prev, fullName: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, fullName: true }))} aria-invalid={showError("fullName") ? "true" : "false"} />
                         {showError("fullName") && <p className="mt-1 text-xs text-red-600">{validation.fullName}</p>}
                       </div>
                       <div>
                         <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Student ID * <span title="This helps us verify you are an active student."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
-                        <Input value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, studentId: true }))} aria-invalid={showError("studentId")} />
+                        <Input value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, studentId: true }))} aria-invalid={showError("studentId") ? "true" : "false"} />
                         {showError("studentId") && <p className="mt-1 text-xs text-red-600">{validation.studentId}</p>}
                       </div>
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-slate-900">Campus *</label>
-                        <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" value={form.campus} onChange={(e) => setForm((prev) => ({ ...prev, campus: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, campus: true }))} aria-invalid={showError("campus")}>
+                        <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" aria-label="Campus" value={form.campus} onChange={(e) => setForm((prev) => ({ ...prev, campus: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, campus: true }))} aria-invalid={showError("campus") ? "true" : "false"}>
                           <option value="">Select campus</option>
                           {SETUP_CAMPUSES.map((campus) => <option key={campus} value={campus}>{campus}</option>)}
                         </select>
@@ -2324,7 +2324,7 @@ function ProfileSetupPage() {
                       </div>
                       <div>
                         <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">WhatsApp Number * <span title="We'll send order and security updates here."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
-                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={showError("whatsapp")} />
+                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={showError("whatsapp") ? "true" : "false"} />
                         {showError("whatsapp") && <p className="mt-1 text-xs text-red-600">{validation.whatsapp}</p>}
                       </div>
                     </div>
@@ -2350,7 +2350,7 @@ function ProfileSetupPage() {
                       <div className="grid gap-4 rounded-xl border bg-slate-50 p-4 sm:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-sm font-semibold text-slate-900">Typical budget range *</label>
-                          <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" value={form.buyerBudget} onChange={(e) => setForm((prev) => ({ ...prev, buyerBudget: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, buyerBudget: true }))} aria-invalid={showError("buyerBudget")}>
+                          <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" aria-label="Typical budget range" value={form.buyerBudget} onChange={(e) => setForm((prev) => ({ ...prev, buyerBudget: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, buyerBudget: true }))} aria-invalid={showError("buyerBudget") ? "true" : "false"}>
                             <option value="">Choose a range</option>
                             <option value="lt50">Below GHS 50</option>
                             <option value="50to150">GHS 50 - 150</option>
@@ -2448,3 +2448,4 @@ function SimplePage({ title, message }: { title: string; message: string }) {
 }
 
 export default App;
+
