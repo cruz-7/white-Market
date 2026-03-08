@@ -44,6 +44,7 @@ ALLOW_SIMULATED_WALLET_TOPUP=true
 Run:
 
 1. `supabase/migrations/20260307_security_hardening.sql`
+2. `supabase/migrations/20260308_payment_atomicity.sql`
 
 Notes:
 - These are the canonical migrations.
@@ -73,7 +74,8 @@ npm run check
 ```
 
 1. Set `NODE_ENV=production`.
-2. Set non-empty `FRONTEND_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`.
+2. Set non-empty `FRONTEND_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, `PAYSTACK_CALLBACK_URL`.
 3. Set `ENABLE_TEST_ROUTES=false`.
 4. Keep `ALLOW_SIMULATED_WALLET_TOPUP` unset or `false`.
 5. Configure your Paystack webhook to `POST /payments/webhook`.
+6. Ensure `FRONTEND_URL` and `PAYSTACK_CALLBACK_URL` use your hosted domain, not `localhost`.

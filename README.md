@@ -17,8 +17,9 @@ cd backend && npm install
 - Copy [`.env.example`](C:/Users/cruz/Desktop/white%20matket/.env.example) to `.env`
 - Copy [`backend/.env.example`](C:/Users/cruz/Desktop/white%20matket/backend/.env.example) to `backend/.env`
 
-3. Run database migration in Supabase SQL editor:
+3. Run database migrations in Supabase SQL editor:
 - `supabase/migrations/20260307_security_hardening.sql`
+- `supabase/migrations/20260308_payment_atomicity.sql`
 
 4. Start backend:
 ```bash
@@ -44,6 +45,7 @@ npm run check
 ## Production Notes
 
 - Set `NODE_ENV=production` in backend.
-- Set `FRONTEND_URL`, `PAYSTACK_SECRET_KEY`, and `SUPABASE_*` env vars.
+- Set `FRONTEND_URL`, `PAYSTACK_CALLBACK_URL`, `PAYSTACK_SECRET_KEY`, and `SUPABASE_*` env vars.
+- Do not leave production URLs as `localhost`.
 - Test/debug routes are disabled in production by default.
 - Simulated wallet top-up is blocked in production unless `ALLOW_SIMULATED_WALLET_TOPUP=true`.
