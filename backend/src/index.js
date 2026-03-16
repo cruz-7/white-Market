@@ -32,6 +32,24 @@ function parseOrigins(originsInput) {
     .filter(Boolean);
 }
 
+function normalizeOrigin(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  // Accept full URLs (even with paths/trailing slashes) and normalize to origin.
+  // Example: "https://example.com/app/" -> "https://example.com"
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      return raw.replace(/\/+$/, "");
+    }
+  }
+
+  // For already-normalized origins, just strip trailing slashes.
+  return raw.replace(/\/+$/, "");
+}
+
 function validateRequiredEnv(isProduction) {
   if (!isProduction) return;
 
@@ -94,6 +112,7 @@ export function createApp(options = {}) {
   const app = express();
   const isProduction = options.isProduction ?? process.env.NODE_ENV === "production";
   const configuredOrigins = parseOrigins(options.frontendOrigins ?? process.env.FRONTEND_URL);
+  const allowedOrigins = configuredOrigins.map(normalizeOrigin).filter(Boolean);
   const enableTestRoutes = options.enableTestRoutes ?? (!isProduction && process.env.ENABLE_TEST_ROUTES !== "false");
   const validateEnv = options.validateEnv ?? true;
 
@@ -125,26 +144,29 @@ export function createApp(options = {}) {
     return next();
   });
 
-  app.use(
-    cors({
-      credentials: true,
-      origin(origin, callback) {
-        if (!origin) {
-          return callback(null, true);
-        }
+  const corsOptions = {
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
 
-        if (!isProduction) {
-          return callback(null, true);
-        }
+      if (!isProduction) {
+        return callback(null, true);
+      }
 
-        if (configuredOrigins.includes(origin)) {
-          return callback(null, true);
-        }
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
 
-        return callback(new Error("CORS origin denied"));
-      },
-    }),
-  );
+      return callback(new Error("CORS origin denied"));
+    },
+  };
+
+  app.use(cors(corsOptions));
+  // Ensure browsers' CORS preflights get a successful response.
+  app.options(/.*/, cors(corsOptions));
 
   app.use(globalRateLimiter);
   app.use("/auth", authRateLimiter);

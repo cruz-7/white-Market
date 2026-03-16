@@ -46,6 +46,7 @@ import {
   messagesApi,
   paymentsApi,
   healthApi,
+  getApiBaseUrl,
   type AdminUser,
   type AdminProduct,
   type AdminOrder,
@@ -257,14 +258,59 @@ function useBackendGuard() {
 }
 
 function BackendUnavailablePage() {
+  const apiBaseUrl = getApiBaseUrl();
+  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const apiLabel = apiBaseUrl || "(same origin)";
+  const isProd = import.meta.env.PROD;
+  const showMissingApiUrlHint = isProd && !apiBaseUrl;
+  const showLocalhostHint = isProd && apiBaseUrl.includes("localhost");
+
   return (
     <AppScaffold>
       <section className="container py-12">
         <Card className="mx-auto max-w-xl">
-          <CardContent className="space-y-3 p-6">
-            <h1 className="page-title">Backend Unavailable</h1>
-            <p className="body-text">The API is currently unreachable. Please try again shortly.</p>
-            <Button asChild><Link to="/">Return Home</Link></Button>
+          <CardContent className="space-y-4 p-6">
+            <div className="space-y-1">
+              <h1 className="page-title">Backend Unavailable</h1>
+              <p className="body-text">The API is currently unreachable. Please try again shortly.</p>
+            </div>
+
+            <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
+              <div>
+                <span className="font-medium">Frontend:</span> {currentOrigin || "unknown"}
+              </div>
+              <div>
+                <span className="font-medium">API base:</span> {apiLabel}
+              </div>
+            </div>
+
+            {showMissingApiUrlHint && (
+              <p className="text-sm text-slate-600">
+                This build has no <code className="font-mono">VITE_API_URL</code> set. If your backend is hosted on a
+                different domain, set <code className="font-mono">VITE_API_URL</code> to your backend URL and redeploy.
+              </p>
+            )}
+
+            {showLocalhostHint && (
+              <p className="text-sm text-slate-600">
+                Your API base points to <code className="font-mono">localhost</code>. That works only on your computer.
+                Set <code className="font-mono">VITE_API_URL</code> to your deployed backend URL for hosting.
+              </p>
+            )}
+
+            <p className="text-sm text-slate-600">
+              If this is a CORS issue, make sure the backend <code className="font-mono">FRONTEND_URL</code> includes
+              the frontend origin above (no trailing slash).
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={() => window.location.reload()}>
+                Retry
+              </Button>
+              <Button asChild>
+                <Link to="/">Return Home</Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </section>

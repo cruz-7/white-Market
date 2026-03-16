@@ -8,8 +8,9 @@
 
 import { supabase } from "./supabase-client";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
+const API_BASE_URL = String(
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "")
+).replace(/\/+$/, "");
 
 interface ApiResponse<T = any> {
   data?: T;
@@ -717,9 +718,27 @@ export function getApiBaseUrl(): string {
 
 export const healthApi = {
   check: async (): Promise<ApiResponse<{ status: string }>> => {
-    const primary = await fetchApi<{ status?: string }>("/health");
-    if (primary.data?.status === "ok") {
-      return { data: { status: "ok" } };
+    let primaryError: string | undefined;
+
+    // Keep this probe "simple" (no auth, no JSON Content-Type) to avoid unnecessary
+    // CORS preflights and make failures easier to debug.
+    try {
+      const response = await fetch(resolveApiUrl("/health"), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && (data as any)?.status === "ok") {
+        return { data: { status: "ok" } };
+      }
+
+      primaryError =
+        typeof (data as any)?.error === "string"
+          ? (data as any).error
+          : `HTTP ${response.status}: Health check failed`;
+    } catch (error) {
+      primaryError = error instanceof Error ? error.message : "Network error";
     }
 
     // Fallback for environments still running older backend builds without /health.
@@ -748,6 +767,6 @@ export const healthApi = {
       // swallow and return primary failure
     }
 
-    return { error: primary.error || "Backend health check failed" };
+    return { error: primaryError || "Backend health check failed" };
   },
 };
