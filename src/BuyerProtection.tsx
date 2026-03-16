@@ -56,15 +56,15 @@ export default function BuyerProtection() {
                 <div>
                   <h4 className="font-semibold text-slate-900">24-Hour Protection</h4>
                   <p className="text-sm text-slate-600 mt-1">
-                    Report issues within 24 hours of delivery for eligible refunds.
+                    Report issues within 24 hours of handover for eligible refunds.
                   </p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-slate-900">What Qualifies</h4>
                   <ul className="text-sm text-slate-600 mt-1 space-y-1">
-                    <li>• Item significantly different from description</li>
-                    <li>• Item damaged during shipping</li>
-                    <li>• Item missing from order</li>
+                    <li>Item significantly different from description</li>
+                    <li>Item damaged or missing at handover</li>
+                    <li>Wrong item handed over</li>
                   </ul>
                 </div>
               </CardContent>
@@ -157,21 +157,20 @@ export default function BuyerProtection() {
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <h4 className="font-semibold text-slate-900 mb-2">✅ Covered</h4>
+                  <h4 className="font-semibold text-slate-900 mb-2">Covered</h4>
                   <ul className="text-sm text-slate-600 space-y-1">
-                    <li>• Verified seller transactions</li>
-                    <li>• Items damaged in transit</li>
-                    <li>• Wrong or missing items</li>
-                    <li>• Significant description mismatch</li>
+                    <li>Verified seller transactions</li>
+                    <li>Wrong, missing, or damaged items at handover</li>
+                    <li>Significant description mismatch</li>
                   </ul>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-slate-900 mb-2">❌ Not Covered</h4>
+                  <h4 className="font-semibold text-slate-900 mb-2">Not Covered</h4>
                   <ul className="text-sm text-slate-600 space-y-1">
-                    <li>• Buyer's remorse</li>
-                    <li>• Minor cosmetic differences</li>
-                    <li>• Unverified seller transactions</li>
-                    <li>• Claims after 24-hour window</li>
+                    <li>Buyer's remorse</li>
+                    <li>Minor cosmetic differences</li>
+                    <li>Unverified seller transactions</li>
+                    <li>Claims after 24-hour window</li>
                   </ul>
                 </div>
               </div>

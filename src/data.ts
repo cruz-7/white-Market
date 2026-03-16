@@ -25,7 +25,7 @@ export type Product = {
   rating: number;
   reviews: number;
   eta: string;
-  delivery_type: "Pickup" | "Delivery" | "Pickup or Delivery";
+  delivery_type: "Campus Meetup" | "Pickup Point" | "Hall Lobby Handover";
   condition: "New" | "Like New" | "Used";
   verified_seller: boolean;
   seller_sales: number;
@@ -38,10 +38,13 @@ export type OrderStatus =
   | "paid"
   | "cancelled"
   | "confirmed"
-  | "shipped"
-  | "delivered"
+  | "processing"
+  | "meetup_scheduled"
+  | "handed_over"
   | "completed"
-  | "disputed";
+  | "disputed"
+  | "shipped" // legacy
+  | "delivered"; // legacy
 
 export type Order = {
   id: string;
@@ -139,7 +142,7 @@ function rid(prefix: string) {
 }
 
 export function seedData() {
-  const SEED_VERSION = "2";
+  const SEED_VERSION = "3";
   if (localStorage.getItem(KEYS.seeded) === SEED_VERSION) return;
 
   const users: LocalUser[] = [
@@ -150,12 +153,12 @@ export function seedData() {
   ];
 
   const products: Product[] = [
-    { id: "p1", title: "Homemade Jollof Bowl", price: 25, sellerId: "u_seller_1", sellerName: "Nana Mensah", category: "Food", image: "https://images.unsplash.com/photo-1516684732162-798a0062be99?w=500&q=80", is_active: true, stock_status: "in_stock", views: 321, rating: 4.8, reviews: 96, eta: "20-35 min", delivery_type: "Pickup or Delivery", condition: "New", verified_seller: true, seller_sales: 142, response_time: "~8 min", listed_at: new Date(Date.now() - 2 * 86400000).toISOString() },
-    { id: "p2", title: "Beaded Bracelet Set", price: 18, sellerId: "u_seller_1", sellerName: "Nana Mensah", category: "Accessories", image: "https://images.unsplash.com/photo-1617038220319-276d3cfab638?w=500&q=80", is_active: true, stock_status: "limited", views: 128, rating: 4.6, reviews: 41, eta: "Same day pickup", delivery_type: "Pickup", condition: "New", verified_seller: true, seller_sales: 142, response_time: "~8 min", listed_at: new Date(Date.now() - 4 * 86400000).toISOString() },
-    { id: "p3", title: "Adjustable Laptop Stand", price: 90, sellerId: "u_seller_2", sellerName: "Kojo Asante", category: "Electronics", image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=500&q=80", is_active: true, stock_status: "in_stock", views: 74, rating: 4.7, reviews: 28, eta: "1-2 days", delivery_type: "Delivery", condition: "Like New", verified_seller: true, seller_sales: 67, response_time: "~15 min", listed_at: new Date(Date.now() - 1 * 86400000).toISOString() },
-    { id: "p4", title: "Graphing Calculator (Used)", price: 120, sellerId: "u_seller_2", sellerName: "Kojo Asante", category: "Electronics", image: "https://images.unsplash.com/photo-1509228468518-180dd4864904?w=500&q=80", is_active: true, stock_status: "limited", views: 87, rating: 4.4, reviews: 15, eta: "Same day meetup", delivery_type: "Pickup", condition: "Used", verified_seller: true, seller_sales: 67, response_time: "~15 min", listed_at: new Date(Date.now() - 7 * 86400000).toISOString() },
-    { id: "p5", title: "Natural Shea Body Butter", price: 30, sellerId: "u_seller_3", sellerName: "Efua Addo", category: "Beauty", image: "https://images.unsplash.com/photo-1611930022073-b7a4ba5fcccd?w=500&q=80", is_active: true, stock_status: "in_stock", views: 205, rating: 4.9, reviews: 112, eta: "24 hours", delivery_type: "Pickup or Delivery", condition: "New", verified_seller: false, seller_sales: 39, response_time: "~20 min", listed_at: new Date(Date.now() - 3 * 86400000).toISOString() },
-    { id: "p6", title: "Campus Tote Bag", price: 45, sellerId: "u_seller_3", sellerName: "Efua Addo", category: "Accessories", image: "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?w=500&q=80", is_active: true, stock_status: "out_of_stock", views: 66, rating: 4.5, reviews: 22, eta: "2-3 days", delivery_type: "Delivery", condition: "New", verified_seller: false, seller_sales: 39, response_time: "~20 min", listed_at: new Date(Date.now() - 10 * 86400000).toISOString() },
+    { id: "p1", title: "Homemade Jollof Bowl", price: 25, sellerId: "u_seller_1", sellerName: "Nana Mensah", category: "Food", image: "https://images.unsplash.com/photo-1516684732162-798a0062be99?w=500&q=80", is_active: true, stock_status: "in_stock", views: 321, rating: 4.8, reviews: 96, eta: "Ready in 20-35 min", delivery_type: "Campus Meetup", condition: "New", verified_seller: true, seller_sales: 142, response_time: "~8 min", listed_at: new Date(Date.now() - 2 * 86400000).toISOString() },
+    { id: "p2", title: "Beaded Bracelet Set", price: 18, sellerId: "u_seller_1", sellerName: "Nana Mensah", category: "Accessories", image: "https://images.unsplash.com/photo-1617038220319-276d3cfab638?w=500&q=80", is_active: true, stock_status: "limited", views: 128, rating: 4.6, reviews: 41, eta: "Same-day meetup", delivery_type: "Pickup Point", condition: "New", verified_seller: true, seller_sales: 142, response_time: "~8 min", listed_at: new Date(Date.now() - 4 * 86400000).toISOString() },
+    { id: "p3", title: "Adjustable Laptop Stand", price: 90, sellerId: "u_seller_2", sellerName: "Kojo Asante", category: "Electronics", image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=500&q=80", is_active: true, stock_status: "in_stock", views: 74, rating: 4.7, reviews: 28, eta: "Meetup today or tomorrow", delivery_type: "Campus Meetup", condition: "Like New", verified_seller: true, seller_sales: 67, response_time: "~15 min", listed_at: new Date(Date.now() - 1 * 86400000).toISOString() },
+    { id: "p4", title: "Graphing Calculator (Used)", price: 120, sellerId: "u_seller_2", sellerName: "Kojo Asante", category: "Electronics", image: "https://images.unsplash.com/photo-1509228468518-180dd4864904?w=500&q=80", is_active: true, stock_status: "limited", views: 87, rating: 4.4, reviews: 15, eta: "Same-day meetup", delivery_type: "Pickup Point", condition: "Used", verified_seller: true, seller_sales: 67, response_time: "~15 min", listed_at: new Date(Date.now() - 7 * 86400000).toISOString() },
+    { id: "p5", title: "Natural Shea Body Butter", price: 30, sellerId: "u_seller_3", sellerName: "Efua Addo", category: "Beauty", image: "https://images.unsplash.com/photo-1611930022073-b7a4ba5fcccd?w=500&q=80", is_active: true, stock_status: "in_stock", views: 205, rating: 4.9, reviews: 112, eta: "Within 24 hours", delivery_type: "Hall Lobby Handover", condition: "New", verified_seller: false, seller_sales: 39, response_time: "~20 min", listed_at: new Date(Date.now() - 3 * 86400000).toISOString() },
+    { id: "p6", title: "Campus Tote Bag", price: 45, sellerId: "u_seller_3", sellerName: "Efua Addo", category: "Accessories", image: "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?w=500&q=80", is_active: true, stock_status: "out_of_stock", views: 66, rating: 4.5, reviews: 22, eta: "1-2 days", delivery_type: "Campus Meetup", condition: "New", verified_seller: false, seller_sales: 39, response_time: "~20 min", listed_at: new Date(Date.now() - 10 * 86400000).toISOString() },
   ];
 
   const orders: Order[] = [
@@ -180,7 +183,7 @@ export function seedData() {
   const messages: Message[] = [
     { id: "m1", conversationId: "c1", senderId: "u_student_1", text: "Hi, is this still available?", created_at: new Date(Date.now() - 7200000).toISOString(), status: "read" },
     { id: "m2", conversationId: "c1", senderId: "u_seller_1", text: "Yes, available now.", created_at: new Date(Date.now() - 7100000).toISOString(), status: "read" },
-    { id: "m3", conversationId: "c1", senderId: "u_seller_1", text: "Can deliver to Commonwealth Hall.", created_at: new Date(Date.now() - 300000).toISOString(), status: "delivered" },
+    { id: "m3", conversationId: "c1", senderId: "u_seller_1", text: "Let's meet at Commonwealth Hall gate.", created_at: new Date(Date.now() - 300000).toISOString(), status: "delivered" },
   ];
 
   const wallets: Wallet[] = [

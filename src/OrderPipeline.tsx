@@ -2,7 +2,7 @@
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { Link } from "react-router-dom";
-import { Clock, CheckCircle, Truck, AlertTriangle, XCircle, Package, ThumbsUp } from "lucide-react";
+import { Clock, CheckCircle, MapPin, AlertTriangle, XCircle, Package, ThumbsUp } from "lucide-react";
 
 interface OrderPipelineProps {
   orders: any[];
@@ -10,25 +10,31 @@ interface OrderPipelineProps {
   onUpdateStatus?: (jobId: string, status: string) => void;
 }
 
-const STATUS_STEPS = ["pending", "confirmed", "delivered", "completed"];
+const STATUS_STEPS = ["pending", "confirmed", "meetup_scheduled", "handed_over", "completed"];
 
 const STATUS_CONFIG: Record<string, { icon: any; color: string; bg: string; label: string }> = {
   pending: { icon: Clock, color: "text-warning", bg: "bg-warning/10 border-warning/30", label: "Pending" },
   confirmed: { icon: CheckCircle, color: "text-primary", bg: "bg-primary/10 border-primary/30", label: "Confirmed" },
-  delivered: { icon: Truck, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Delivered" },
+  meetup_scheduled: { icon: MapPin, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Meetup Scheduled" },
+  handed_over: { icon: Package, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Handed Over" },
   completed: { icon: ThumbsUp, color: "text-success", bg: "bg-success/10 border-success/30", label: "Completed" },
   disputed: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10 border-destructive/30", label: "Disputed" },
   cancelled: { icon: XCircle, color: "text-muted-foreground", bg: "bg-muted border-muted-foreground/20", label: "Cancelled" },
   // Legacy statuses mapped
   requested: { icon: Clock, color: "text-warning", bg: "bg-warning/10 border-warning/30", label: "Pending" },
   accepted: { icon: CheckCircle, color: "text-primary", bg: "bg-primary/10 border-primary/30", label: "Confirmed" },
-  in_progress: { icon: Truck, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Processing" },
+  processing: { icon: MapPin, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Meetup Scheduled" },
+  shipped: { icon: MapPin, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Meetup Scheduled" },
+  delivered: { icon: Package, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Handed Over" },
+  in_progress: { icon: MapPin, color: "text-accent", bg: "bg-accent/10 border-accent/30", label: "Meetup Scheduled" },
 };
 
 const StatusTracker = ({ currentStatus }: { currentStatus: string }) => {
   const normalizedStatus = currentStatus === "requested" ? "pending" 
     : currentStatus === "accepted" ? "confirmed" 
-    : currentStatus === "in_progress" ? "delivered" 
+    : currentStatus === "in_progress" ? "meetup_scheduled" 
+    : currentStatus === "shipped" ? "meetup_scheduled"
+    : currentStatus === "delivered" ? "handed_over"
     : currentStatus;
   
   const currentIdx = STATUS_STEPS.indexOf(normalizedStatus);
@@ -106,13 +112,13 @@ const OrderPipeline = ({ orders, type, onUpdateStatus }: OrderPipelineProps) => 
                             </>
                           )}
                           {(job.status === "accepted" || job.status === "confirmed") && (
-                            <Button size="sm" className="h-7 text-xs" onClick={() => onUpdateStatus(job.id, "delivered")}>Mark Delivered</Button>
+                            <Button size="sm" className="h-7 text-xs" onClick={() => onUpdateStatus(job.id, "handed_over")}>Mark Handed Over</Button>
                           )}
                         </>
                       )}
                       {type === "buyer" && onUpdateStatus && (
                         <>
-                          {job.status === "delivered" && (
+                          {["handed_over", "delivered"].includes(job.status) && (
                             <Button size="sm" className="h-7 text-xs bg-success hover:bg-success/90" onClick={() => onUpdateStatus(job.id, "completed")}>Confirm Received</Button>
                           )}
                         </>

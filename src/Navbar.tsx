@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "./button";
-import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck } from "lucide-react";
+import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck, Heart, Bell, Gift, Package } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { supabase } from "./supabase-client";
@@ -76,6 +76,9 @@ const Navbar = () => {
 
         <div className="hidden items-center gap-5 md:flex">
           <Link to="/marketplace" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Marketplace</Link>
+          <Link to="/categories" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+            <Package className="h-4 w-4" /> Categories
+          </Link>
 
           {user ? (
             <>
@@ -100,6 +103,15 @@ const Navbar = () => {
                 <DropdownMenuContent align="end" className="w-48">
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="h-4 w-4 mr-2" /> Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/favorites")}>
+                    <Heart className="h-4 w-4 mr-2" /> Favorites
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/notifications")}>
+                    <Bell className="h-4 w-4 mr-2" /> Notifications
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/referrals")}>
+                    <Gift className="h-4 w-4 mr-2" /> Referrals
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/profile-setup")}>
                     <MessageSquare className="h-4 w-4 mr-2" /> Edit Profile
@@ -135,11 +147,15 @@ const Navbar = () => {
         <div className="border-t bg-white p-4 md:hidden">
           <div className="flex flex-col gap-3">
             <Link to="/marketplace" className="text-sm font-medium" onClick={() => setOpen(false)}>Marketplace</Link>
+            <Link to="/categories" className="text-sm font-medium" onClick={() => setOpen(false)}>Categories</Link>
             {user ? (
               <>
                 <Link to="/dashboard" className="text-sm font-medium" onClick={() => setOpen(false)}>Dashboard</Link>
                 <Link to="/orders" className="text-sm font-medium" onClick={() => setOpen(false)}>Orders</Link>
                 <Link to="/messages" className="text-sm font-medium" onClick={() => setOpen(false)}>Messages</Link>
+                <Link to="/favorites" className="text-sm font-medium" onClick={() => setOpen(false)}>Favorites</Link>
+                <Link to="/notifications" className="text-sm font-medium" onClick={() => setOpen(false)}>Notifications</Link>
+                <Link to="/referrals" className="text-sm font-medium" onClick={() => setOpen(false)}>Referrals</Link>
                 {isAdmin && (
                   <Link to="/admin" className="text-sm font-medium flex items-center gap-1" onClick={() => setOpen(false)}>
                     <ShieldCheck className="h-3.5 w-3.5" /> Admin Panel

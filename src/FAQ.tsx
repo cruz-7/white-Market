@@ -122,28 +122,27 @@ export default function FAQ() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Delivery & Logistics</CardTitle>
+                <CardTitle>Meetups & Handover</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <h4 className="font-semibold text-slate-900">What delivery options are available?</h4>
+                  <h4 className="font-semibold text-slate-900">How do I receive an item?</h4>
                   <p className="text-sm text-slate-600 mt-1">
-                    Campus pickup (free), same-day delivery, or next-day delivery
-                    depending on seller location and item type.
+                    White Market is campus-first. You and the seller agree on a safe meetup spot
+                    (hall lobby, hostel gate, or a busy public location) for handover.
                   </p>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-slate-900">How long do deliveries take?</h4>
+                  <h4 className="font-semibold text-slate-900">How soon can I meet the seller?</h4>
                   <p className="text-sm text-slate-600 mt-1">
-                    Most orders are delivered within 24 hours. Track your order
-                    status in real-time from your dashboard.
+                    Most meetups happen same-day or within 24 hours depending on availability.
+                    Use messages to agree on the exact time and place.
                   </p>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-slate-900">Can I change my delivery address?</h4>
+                  <h4 className="font-semibold text-slate-900">Can I change the meetup spot or time?</h4>
                   <p className="text-sm text-slate-600 mt-1">
-                    Contact the seller directly through messages to update
-                    delivery details before the item ships.
+                    Yes. Message the seller to update the meetup details before you meet.
                   </p>
                 </div>
               </CardContent>

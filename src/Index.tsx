@@ -22,8 +22,8 @@ const CATEGORIES = [
 const STEPS = [
   { icon: Users, title: "Sign Up & Verify", desc: "Create your account with your UG email. Upload your student ID to get verified." },
   { icon: Store, title: "Set Up Shop or Browse", desc: "List your products with photos and prices, or browse what fellow students are selling." },
-  { icon: MessageSquare, title: "Connect & Agree", desc: "Chat with the seller, agree on price and delivery before you buy." },
-  { icon: Wallet, title: "Pay & Receive", desc: "Pay via Mobile Money. Pickup on campus or arrange delivery." },
+  { icon: MessageSquare, title: "Connect & Agree", desc: "Chat with the seller, agree on price and a campus meetup spot before you buy." },
+  { icon: Wallet, title: "Pay & Handover", desc: "Pay via Mobile Money, then meet on campus for a quick handover." },
 ];
 
 const TESTIMONIALS = [

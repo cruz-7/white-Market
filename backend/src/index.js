@@ -14,6 +14,12 @@ import sellersRouter from "./routes/sellers.js";
 import adminRouter from "./routes/admin.js";
 import testRouter from "./routes/test.js";
 import verificationRouter from "./routes/verification.js";
+import categoriesRouter from "./routes/categories.js";
+import reviewsRouter from "./routes/reviews.js";
+import favoritesRouter from "./routes/favorites.js";
+import searchRouter from "./routes/search.js";
+import referralsRouter from "./routes/referrals.js";
+import notificationsRouter from "./routes/notifications.js";
 
 function parseOrigins(originsInput) {
   if (Array.isArray(originsInput)) {
@@ -164,6 +170,12 @@ export function createApp(options = {}) {
   app.use("/sellers", sellersRouter);
   app.use("/admin", adminRouter);
   app.use("/verification", verificationRouter);
+  app.use("/categories", categoriesRouter);
+  app.use("/reviews", reviewsRouter);
+  app.use("/favorites", favoritesRouter);
+  app.use("/search", searchRouter);
+  app.use("/referrals", referralsRouter);
+  app.use("/notifications", notificationsRouter);
 
   if (enableTestRoutes) {
     app.use(testRouter);

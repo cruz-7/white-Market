@@ -2,7 +2,6 @@
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
   Package,
-  Truck,
   CheckCircle,
   Clock,
   MapPin,
@@ -28,7 +27,36 @@ type Props = {
 };
 
 // Order status types
-type OrderStatus = "pending" | "confirmed" | "processing" | "shipped" | "delivered" | "completed" | "cancelled" | "disputed";
+type OrderStatus = "pending" | "confirmed" | "meetup_scheduled" | "handed_over" | "completed" | "cancelled" | "disputed";
+
+function normalizeOrderStatus(status: string): OrderStatus {
+  switch (status) {
+    case "pending":
+      return "pending";
+    case "paid":
+    case "confirmed":
+      return "confirmed";
+    case "meetup_scheduled":
+      return "meetup_scheduled";
+    case "handed_over":
+      return "handed_over";
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "cancelled";
+    case "disputed":
+      return "disputed";
+    // Legacy statuses (shipping-style) mapped to campus handover flow.
+    case "processing":
+      return "confirmed";
+    case "shipped":
+      return "meetup_scheduled";
+    case "delivered":
+      return "handed_over";
+    default:
+      return "pending";
+  }
+}
 
 // Status configuration for professional look
 const STATUS_CONFIG: Record<OrderStatus, { 
@@ -55,35 +83,26 @@ const STATUS_CONFIG: Record<OrderStatus, {
     bg: "bg-blue-50", 
     border: "border-blue-200",
     label: "Confirmed", 
-    description: "Seller has confirmed your order",
+    description: "Seller confirmed and ready to meet",
     step: 1
   },
-  processing: { 
+  meetup_scheduled: { 
     icon: Package, 
     color: "text-purple-600", 
     bg: "bg-purple-50", 
     border: "border-purple-200",
-    label: "Processing", 
-    description: "Preparing your items",
+    label: "Meetup Scheduled", 
+    description: "Time and place agreed",
     step: 2
   },
-  shipped: { 
-    icon: Truck, 
-    color: "text-indigo-600", 
-    bg: "bg-indigo-50", 
-    border: "border-indigo-200",
-    label: "Shipped", 
-    description: "On the way to you",
-    step: 3
-  },
-  delivered: { 
+  handed_over: { 
     icon: MapPin, 
     color: "text-teal-600", 
     bg: "bg-teal-50", 
     border: "border-teal-200",
-    label: "Delivered", 
-    description: "Arrived at pickup location",
-    step: 4
+    label: "Handed Over", 
+    description: "Item handed over on campus",
+    step: 3
   },
   completed: { 
     icon: Star, 
@@ -92,7 +111,7 @@ const STATUS_CONFIG: Record<OrderStatus, {
     border: "border-green-200",
     label: "Completed", 
     description: "Order successfully completed",
-    step: 5
+    step: 4
   },
   cancelled: { 
     icon: X, 
@@ -116,16 +135,15 @@ const STATUS_CONFIG: Record<OrderStatus, {
 
 // Progress stepper component
 const OrderProgressStepper = ({ currentStatus }: { currentStatus: string }) => {
-  const status = currentStatus as OrderStatus;
+  const status = normalizeOrderStatus(currentStatus);
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
   const currentStep = config.step;
   
   const steps = [
     { key: "pending", label: "Order Placed" },
     { key: "confirmed", label: "Confirmed" },
-    { key: "processing", label: "Processing" },
-    { key: "shipped", label: "Shipped" },
-    { key: "delivered", label: "Delivered" },
+    { key: "meetup_scheduled", label: "Meetup Scheduled" },
+    { key: "handed_over", label: "Handed Over" },
   ];
 
   // For completed orders, add final step
@@ -206,7 +224,7 @@ const OrderProgressStepper = ({ currentStatus }: { currentStatus: string }) => {
 
 // Single Order Card Component
 const OrderCard = ({ order, onViewDetails }: { order: Order; onViewDetails: (id: string) => void }) => {
-  const statusConfig = STATUS_CONFIG[order.status as OrderStatus] || STATUS_CONFIG.pending;
+  const statusConfig = STATUS_CONFIG[normalizeOrderStatus(order.status)] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   
   return (
@@ -256,7 +274,7 @@ const OrderCard = ({ order, onViewDetails }: { order: Order; onViewDetails: (id:
             </Link>
           </Button>
           <div className="flex gap-2">
-            {order.status === "delivered" && (
+            {normalizeOrderStatus(order.status) === "handed_over" && (
               <Button size="sm" className="bg-green-600 hover:bg-green-700">
                 <CheckCircle className="w-4 h-4 mr-1" />
                 Confirm Received
@@ -277,7 +295,7 @@ const OrderCard = ({ order, onViewDetails }: { order: Order; onViewDetails: (id:
 const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: () => void }) => {
   if (!order) return null;
   
-  const statusConfig = STATUS_CONFIG[order.status as OrderStatus] || STATUS_CONFIG.pending;
+  const statusConfig = STATUS_CONFIG[normalizeOrderStatus(order.status)] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   
   return (
@@ -377,7 +395,7 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
                 Chat with Seller
               </Link>
             </Button>
-            {order.status === "delivered" && (
+            {normalizeOrderStatus(order.status) === "handed_over" && (
               <Button className="flex-1 bg-green-600 hover:bg-green-700">
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Confirm Received
@@ -409,7 +427,7 @@ export default function ProfessionalOrdersPage({ user }: Props) {
   
   // Filter orders by status
   const activeOrders = orders.filter((o) => 
-    ["pending", "confirmed", "processing", "shipped", "delivered"].includes(o.status)
+    ["pending", "confirmed", "meetup_scheduled", "handed_over"].includes(normalizeOrderStatus(o.status))
   );
   const historyOrders = orders.filter((o) => 
     ["completed", "cancelled", "disputed"].includes(o.status)

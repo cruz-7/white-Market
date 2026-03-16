@@ -74,11 +74,11 @@ export default function TermsOfService() {
                 <p>As a service provider on White Market, you agree to:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Provide accurate descriptions of your services</li>
-                  <li>Deliver services as promised or agreed upon</li>
+                  <li>Provide services as promised or agreed upon</li>
                   <li>Respond to inquiries within a reasonable timeframe</li>
                   <li>Maintain professional conduct in all communications</li>
                   <li>Set fair and reasonable prices</li>
-                  <li>Honored agreed delivery times</li>
+                  <li>Honor agreed timelines</li>
                   <li>Not engage in any fraudulent or deceptive practices</li>
                 </ul>
               </div>
@@ -96,7 +96,7 @@ export default function TermsOfService() {
                   <li>Make timely payments for services rendered</li>
                   <li>Communicate respectfully with service providers</li>
                   <li>Not request services that violate laws or regulations</li>
-                  <li>Provide necessary materials or information for service delivery</li>
+                  <li>Provide necessary materials or information to complete the service</li>
                   <li>Release payment promptly when service is completed satisfactorily</li>
                 </ul>
               </div>
@@ -114,7 +114,7 @@ export default function TermsOfService() {
                   <li><strong>Escrow System:</strong> Payments are held until service is completed</li>
                   <li><strong>Platform Fee:</strong> A small service fee may be charged on transactions</li>
                   <li><strong>Payout Schedule:</strong> Earnings are paid out weekly or upon request</li>
-                  <li><strong>Refunds:</strong> Available only if service is not delivered as agreed</li>
+                  <li><strong>Refunds:</strong> Available only if service is not completed as agreed</li>
                 </ul>
                 <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mt-4">
                   <p className="text-sm text-amber-800"><strong>Important:</strong> Never make payments outside of White Market's platform. Doing so violates our terms and may result in loss of funds.</p>
@@ -161,7 +161,7 @@ export default function TermsOfService() {
                 <p className="mt-4">White Market reserves the right to:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Mediate disputes and make final decisions</li>
-                  <li>Refund payments in case of fraud or non-delivery</li>
+                  <li>Refund payments in case of fraud or non-fulfillment</li>
                   <li>Suspend accounts during dispute investigation</li>
                 </ul>
               </div>

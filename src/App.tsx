@@ -63,6 +63,10 @@ import BuyerProtection from "./BuyerProtection";
 import AddProduct from "./AddProduct";
 import SellerProfile from "./SellerProfile";
 import ProfessionalOrdersPage from "./ProfessionalOrdersPage";
+import CategoriesPage from "./CategoriesPage";
+import FavoritesPage from "./FavoritesPage";
+import NotificationsPage from "./NotificationsPage";
+import ReferralsPage from "./ReferralsPage";
 
 declare global {
   interface Window {
@@ -138,6 +142,19 @@ function statDelta(index: number) {
   return deltas[index % deltas.length];
 }
 
+function normalizeCampusOrderStatus(status: string) {
+  switch (status) {
+    case "processing":
+      return "confirmed";
+    case "shipped":
+      return "meetup_scheduled";
+    case "delivered":
+      return "handed_over";
+    default:
+      return status;
+  }
+}
+
 function toLocalProduct(product: ApiProduct) {
   return {
     id: product.id,
@@ -153,7 +170,7 @@ function toLocalProduct(product: ApiProduct) {
     rating: 4.5,
     reviews: 0,
     eta: "Same day",
-    delivery_type: "Pickup or Delivery" as const,
+    delivery_type: "Campus Meetup" as const,
     condition: "New" as const,
     verified_seller: true,
     seller_sales: 0,
@@ -401,6 +418,11 @@ function App() {
       <Route path="/buyer-protection" element={backendElement(<BuyerProtection />)} />
       <Route path="/add-product" element={backendElement(<AddProduct />)} />
       <Route path="/seller/:id" element={backendElement(<SellerProfile />)} />
+      <Route path="/categories" element={backendElement(<CategoriesPage />)} />
+      <Route path="/categories/:slug" element={backendElement(<CategoriesPage />)} />
+      <Route path="/favorites" element={backendElement(<FavoritesPage />)} />
+      <Route path="/notifications" element={backendElement(<NotificationsPage />)} />
+      <Route path="/referrals" element={backendElement(<ReferralsPage />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -586,14 +608,14 @@ function AuthPage() {
                 {tab === "signup" && (
                   <>
                     <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-900">Account type</label>
+                      <label htmlFor="account-type" className="mb-2 block text-sm font-semibold text-slate-900">Account type</label>
                       <div className="grid grid-cols-2 gap-2">
-                        <button type="button" onClick={() => setRole("user")} className={`rounded-xl border p-3 text-left transition ${role === "user" ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                        <button type="button" id="role-user" onClick={() => setRole("user")} className={`rounded-xl border p-3 text-left transition ${role === "user" ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                           <GraduationCap className={`mb-1 h-5 w-5 ${role === "user" ? "text-primary" : "text-slate-500"}`} />
                           <p className="text-sm font-semibold text-slate-900">Student</p>
                           <p className="text-xs text-slate-500">Browse and buy</p>
                         </button>
-                        <button type="button" onClick={() => setRole("seller")} className={`rounded-xl border p-3 text-left transition ${role === "seller" ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                        <button type="button" id="role-seller" onClick={() => setRole("seller")} className={`rounded-xl border p-3 text-left transition ${role === "seller" ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                           <Store className={`mb-1 h-5 w-5 ${role === "seller" ? "text-primary" : "text-slate-500"}`} />
                           <p className="text-sm font-semibold text-slate-900">Seller</p>
                           <p className="text-xs text-slate-500">List and earn</p>
@@ -602,22 +624,22 @@ function AuthPage() {
                     </div>
 
                     <div>
-                      <label className="mb-1 block text-sm font-semibold text-slate-900">Full Name</label>
-                      <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Ama Mensah" className="h-11 rounded-lg" />
+                      <label htmlFor="full-name" className="mb-1 block text-sm font-semibold text-slate-900">Full Name</label>
+                      <Input id="full-name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Ama Mensah" className="h-11 rounded-lg" />
                     </div>
                   </>
                 )}
 
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-900">{tab === "signup" ? "University Email" : "Email"}</label>
-                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@st.ug.edu.gh" className="h-11 rounded-lg" />
+                  <label htmlFor="email" className="mb-1 block text-sm font-semibold text-slate-900">{tab === "signup" ? "University Email" : "Email"}</label>
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@st.ug.edu.gh" className="h-11 rounded-lg" />
                   {tab === "signup" && <p className="mt-1 text-xs text-slate-500">Only @st.ug.edu.gh and @ug.edu.gh emails are accepted.</p>}
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-900">Password</label>
+                  <label htmlFor="password" className="mb-1 block text-sm font-semibold text-slate-900">Password</label>
                   <div className="relative">
-                    <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tab === "signup" ? "Min 8 chars, 1 uppercase, 1 number" : "••••••••"} className="h-11 rounded-lg pr-10" />
+                    <Input id="password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tab === "signup" ? "Min 8 chars, 1 uppercase, 1 number" : "••••••••"} className="h-11 rounded-lg pr-10" />
                     <button
                       type="button"
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
@@ -637,9 +659,9 @@ function AuthPage() {
 
                 {tab === "signup" && (
                   <div>
-                    <label className="mb-1 block text-sm font-semibold text-slate-900">Confirm Password</label>
+                    <label htmlFor="confirm-password" className="mb-1 block text-sm font-semibold text-slate-900">Confirm Password</label>
                     <div className="relative">
-                      <Input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="h-11 rounded-lg pr-10" />
+                      <Input id="confirm-password" type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="h-11 rounded-lg pr-10" />
                       <button
                         type="button"
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
@@ -712,7 +734,7 @@ function MarketplacePage() {
     .slice(0, 3);
 
   const describeProduct = (title: string, categoryName: string) => {
-    if (title.toLowerCase().includes("jollof")) return "Freshly prepared campus meal, ready for pickup or quick drop-off.";
+    if (title.toLowerCase().includes("jollof")) return "Freshly prepared campus meal, ready for a quick meetup.";
     if (title.toLowerCase().includes("calculator")) return "Exam-ready calculator with tested buttons and clean display.";
     if (title.toLowerCase().includes("laptop stand")) return "Adjustable stand to improve posture during study sessions.";
     if (title.toLowerCase().includes("bracelet")) return "Handmade accessories designed for everyday campus style.";
@@ -779,7 +801,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h1 className="page-title">Marketplace</h1>
-              <p className="body-text">Find trusted campus listings with clear pricing, delivery options, and direct seller messaging.</p>
+              <p className="body-text">Find trusted campus listings with clear pricing, meetup options, and direct seller messaging.</p>
             </div>
             <Button variant="outline" onClick={() => setShowVerification(true)}>
               How Verification Works
@@ -805,7 +827,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                 <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700">
                   <Flame className="h-4 w-4" /> Campus Demand
                 </p>
-                <h2 className="section-title">?? Trending in Legon</h2>
+                <h2 className="section-title">Trending in Legon</h2>
                 <p className="text-sm text-slate-600">Students are actively browsing these right now.</p>
               </div>
             </div>
@@ -833,14 +855,14 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                 <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
                   <Megaphone className="h-4 w-4" /> Growth Lever
                 </p>
-                <h2 className="section-title">? Sponsored & Featured Listings</h2>
+                <h2 className="section-title">Sponsored & Featured Listings</h2>
 <p className="text-sm text-slate-600">Sellers can pay GHS 50 - GHS 100 to appear at the top and get faster visibility.</p>
               </div>
               <Button onClick={openFeaturedListingFlow}>Promote a Listing</Button>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               {sponsoredProducts.map((product, index) => {
-                const badge = index === 0 ? "? Sponsored" : index === 1 ? "? Featured Seller" : "? Top Product";
+                const badge = index === 0 ? "Sponsored" : index === 1 ? "Featured Seller" : "Top Product";
                 return (
                   <Card key={`featured-${product.id}`} className="overflow-hidden border-amber-200 bg-white shadow-sm">
                     <img src={product.image} alt={product.title} className="h-24 w-full object-cover" />
@@ -907,7 +929,25 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                   <span>Responds {p.response_time}</span>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-full bg-slate-100 px-2 py-1">{p.delivery_type === "Pickup" ? "Campus Pickup" : p.delivery_type === "Delivery" ? "Same-Day/Next-Day Delivery" : "Campus Pickup or Delivery"}</span>
+                  {(() => {
+                    let deliveryLabel = "";
+                    switch (p.delivery_type) {
+                      case "Campus Meetup":
+                        deliveryLabel = "Campus Meetup";
+                        break;
+                      case "Pickup Point":
+                        deliveryLabel = "Pickup Point";
+                        break;
+                      case "Hall Lobby Handover":
+                        deliveryLabel = "Hall Lobby Handover";
+                        break;
+                      default:
+                        deliveryLabel = String(p.delivery_type);
+                    }
+                    return (
+                      <span className="rounded-full bg-slate-100 px-2 py-1">{deliveryLabel}</span>
+                    );
+                  })()}
                   <span className={`rounded-full px-2 py-1 ${p.stock_status === "in_stock" ? "bg-green-100 text-green-700" : p.stock_status === "limited" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
                     {p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Sold Out"}
                   </span>
@@ -957,7 +997,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
               <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
                 <li>Identity and student status confirmed</li>
                 <li>Active campus contact details verified</li>
-                <li>Monitored for delivery, response, and dispute behavior</li>
+                <li>Monitored for meetup, response, and dispute behavior</li>
               </ul>
               <div className="mt-4 flex justify-end">
                 <Button onClick={() => setShowVerification(false)}>Got it</Button>
@@ -1012,7 +1052,7 @@ function ProductDetailPage() {
       <section className="container py-8">
         <div className="mb-4 rounded-xl border bg-white p-5 shadow-sm">
           <h1 className="page-title">Product Details</h1>
-          <p className="body-text">Review pricing, seller trust signals, and delivery details before you buy.</p>
+          <p className="body-text">Review pricing, seller trust signals, and handover details before you buy.</p>
         </div>
         <div className="grid gap-6 md:grid-cols-2">
           <img src={product.image} alt={product.title} className="h-80 w-full rounded-xl object-cover" />
@@ -1158,7 +1198,7 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
         {!sellerMode && wallet.balance <= 0 && (
           <div className="mb-4 rounded-xl border border-dashed border-accent/40 bg-accent/5 p-3">
             <p className="text-sm font-medium text-slate-800">Your wallet is empty. Add funds to check out faster.</p>
-            <p className="text-xs text-slate-500">First top-up bonus: get free priority delivery on your next order.</p>
+            <p className="text-xs text-slate-500">First top-up bonus: get free priority support on your next order.</p>
             <Button size="sm" className="mt-2" onClick={() => setOpenTopUp(true)}>Top Up Now</Button>
           </div>
         )}
@@ -1294,7 +1334,7 @@ toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spot
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]} ??</h1><p className="body-text">Manage your store, orders, and payouts with a clear business view.</p></div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]}!</h1><p className="body-text">Manage your store, orders, and payouts with a clear business view.</p></div>
         <div id="wallet-card"><WalletCard user={user} sellerMode /></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {[["Total Sales", `GHS ${revenueAll.toFixed(2)}`], ["This Month", `GHS ${monthRevenue.toFixed(2)}`], ["Active Listings", String(products.filter((p) => p.is_active).length)], ["Total Orders", String(orders.length)], ["Pending Orders", String(pendingCount)]].map(([label, value], i) => (
@@ -1319,7 +1359,7 @@ toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spot
                   <img src={p.image} alt={p.title} className="h-24 w-full rounded-t-xl object-cover" />
                   <CardContent className="p-3">
                     <p className="line-clamp-1 text-sm font-semibold">{p.title}</p>
-                    <p className="text-xs text-gray-500">{p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Out of Stock"} ï¿½ {p.views} views</p>
+                    <p className="text-xs text-gray-500">{p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Out of Stock"} - {p.views} views</p>
                     <p className="font-bold text-primary">GHS {p.price}</p>
                     <div className="mt-2 flex gap-1">
                       <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Edit</Button>
@@ -1406,7 +1446,7 @@ function EmptyStateCard({ title, description, cta, to }: { title: string; descri
 function ProductDiscoveryCard({ product, onQuickAdd }: { product: ReturnType<typeof getProducts>[number]; onQuickAdd: (id: string) => void }) {
   return (
     <Card className="overflow-hidden">
-      <img src={product.image} className="h-32 w-full object-cover" />
+      <img src={product.image} alt={product.title} className="h-32 w-full object-cover" />
       <CardContent className="space-y-1 p-3">
         <p className="line-clamp-1 text-sm font-semibold">{product.title}</p>
         <p className="text-xs text-slate-500">by {product.sellerName}</p>
@@ -1437,7 +1477,7 @@ function StudentDashboard() {
 
   const allProducts = getProducts().filter((p) => p.is_active);
   const orders = getOrders().filter((o) => o.buyerId === user.id || user.id === "u_student_1");
-  const activeOrders = orders.filter((o) => ["pending", "confirmed", "shipped", "delivered"].includes(o.status));
+  const activeOrders = orders.filter((o) => ["pending", "confirmed", "meetup_scheduled", "handed_over"].includes(normalizeCampusOrderStatus(o.status)));
   const history = orders.filter((o) => o.status === "completed");
   const categories = ["All", ...Array.from(new Set(allProducts.map((p) => p.category)))];
 
@@ -1475,8 +1515,8 @@ function StudentDashboard() {
     <AppScaffold>
       <section className="container space-y-6 py-8">
         <div>
-          <h1 className="page-title">Hey {user.full_name.split(" ")[0]} ?? What do you need today?</h1>
-          <p className="body-text">Discover trusted campus sellers, track orders, and pay faster with your wallet.</p>
+          <h1 className="page-title">Hey {user.full_name.split(" ")[0]}! What do you need today?</h1>
+          <p className="body-text">Discover trusted campus sellers, coordinate meetups, and pay faster with your wallet.</p>
         </div>
 
         <Card>
@@ -1504,7 +1544,7 @@ function StudentDashboard() {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-xl border p-4"><p className="label-text">Step 1</p><p className="font-semibold">Fund your wallet</p><p className="body-text">Top up once and check out in seconds.</p></div>
                 <div className="rounded-xl border p-4"><p className="label-text">Step 2</p><p className="font-semibold">Save products</p><p className="body-text">Build your wishlist for quick access.</p></div>
-                <div className="rounded-xl border p-4"><p className="label-text">Step 3</p><p className="font-semibold">Place your first order</p><p className="body-text">Track delivery and review your seller.</p></div>
+                <div className="rounded-xl border p-4"><p className="label-text">Step 3</p><p className="font-semibold">Place your first order</p><p className="body-text">Agree on a meetup and review your seller.</p></div>
               </div>
             </CardContent>
           </Card>
@@ -1512,7 +1552,7 @@ function StudentDashboard() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               ["Total Orders", String(orders.length)],
-              ["Pending Deliveries", String(activeOrders.length)],
+              ["Pending Meetups", String(activeOrders.length)],
               ["Completed Orders", String(history.length)],
               ["Saved Items", String(wishlist.length)],
             ].map(([label, value]) => (
@@ -1545,7 +1585,7 @@ function StudentDashboard() {
             {activeOrders.length === 0 ? (
               <EmptyStateCard
                 title="You don't have any active orders yet"
-                description="When you place an order, delivery updates and ETA will appear here."
+                description="When you place an order, status updates and meetup timing will appear here."
                 cta="Start Shopping"
                 to="/marketplace"
               />
@@ -1556,9 +1596,9 @@ function StudentDashboard() {
                     <CardContent className="flex items-center justify-between gap-3 p-4">
                       <div>
                         <p className="font-semibold">{o.productTitle}</p>
-                        <p className="body-text">{o.sellerName} ï¿½ GHS {o.amount}</p>
+                        <p className="body-text">{o.sellerName} - GHS {o.amount}</p>
                       </div>
-                      <Button size="sm" asChild><Link to={`/checkout/${o.id}`}>Track Order</Link></Button>
+                      <Button size="sm" asChild><Link to={`/checkout/${o.id}`}>View Order</Link></Button>
                     </CardContent>
                   </Card>
                 ))}
@@ -2056,9 +2096,9 @@ function MessagesPage() {
 
           {selected && (!isMobile || selectedId) ? (
             <div className="flex h-[76vh] flex-col">
-              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})} aria-label="Back" title="Back" className="p-1 text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
-              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
-              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2" title="Attach image"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button></div></div>
+              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})} aria-label="Back" title="Back" className="p-1 text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} alt="Product image" className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
+              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} alt="Sent image" className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
+              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} alt="Preview of uploaded image" title="Preview of uploaded image" className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2" title="Attach image"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button></div></div>
             </div>
           ) : <div className="grid h-[76vh] place-items-center text-gray-500">Select a conversation</div>}
         </div>
@@ -2151,7 +2191,7 @@ function ProfileSetupPage() {
     interestedCategories: form.interestedCategories.length > 0 ? "" : "Choose at least one category you care about.",
     buyerBudget: form.role === "seller" || form.buyerBudget ? "" : "Pick a rough budget so we can personalize your feed.",
     sellerCategories: form.role === "buyer" || form.sellerCategories.length > 0 ? "" : "Select what you plan to sell.",
-    sellerFulfillment: form.role === "buyer" || form.sellerFulfillment.length > 0 ? "" : "Tell buyers how you will deliver items.",
+    sellerFulfillment: form.role === "buyer" || form.sellerFulfillment.length > 0 ? "" : "Tell buyers how you will hand over items.",
     momoNumber: form.momoNumber && !/^(0\d{9}|\+233\d{9})$/.test(form.momoNumber.trim()) ? "Mobile money number format is invalid." : "",
   };
 
@@ -2306,17 +2346,24 @@ function ProfileSetupPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-slate-900">Full Name *</label>
-                        <Input value={form.fullName} onChange={(e) => setForm((prev) => ({ ...prev, fullName: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, fullName: true }))} aria-invalid={showError("fullName") ? "true" : "false"} />
+                        <Input value={form.fullName} onChange={(e) => setForm((prev) => ({ ...prev, fullName: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, fullName: true }))} aria-invalid={(showError("fullName") ? "true" : "false") as "true" | "false"} />
                         {showError("fullName") && <p className="mt-1 text-xs text-red-600">{validation.fullName}</p>}
                       </div>
                       <div>
                         <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">Student ID * <span title="This helps us verify you are an active student."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
-                        <Input value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, studentId: true }))} aria-invalid={showError("studentId") ? "true" : "false"} />
+                        <Input value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, studentId: true }))} aria-invalid={(showError("studentId") ? "true" : "false") as "true" | "false"} />
                         {showError("studentId") && <p className="mt-1 text-xs text-red-600">{validation.studentId}</p>}
                       </div>
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-slate-900">Campus *</label>
-                        <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" aria-label="Campus" value={form.campus} onChange={(e) => setForm((prev) => ({ ...prev, campus: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, campus: true }))} aria-invalid={showError("campus") ? "true" : "false"}>
+                        <select
+                          className="h-10 w-full rounded-lg border bg-white px-3 text-sm"
+                          aria-label="Campus"
+                          value={form.campus}
+                          onChange={(e) => setForm((prev) => ({ ...prev, campus: e.target.value }))}
+                          onBlur={() => setTouched((t) => ({ ...t, campus: true }))}
+                          aria-invalid={(showError("campus") ? "true" : "false") as "true" | "false"}
+                        >
                           <option value="">Select campus</option>
                           {SETUP_CAMPUSES.map((campus) => <option key={campus} value={campus}>{campus}</option>)}
                         </select>
@@ -2324,7 +2371,7 @@ function ProfileSetupPage() {
                       </div>
                       <div>
                         <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">WhatsApp Number * <span title="We'll send order and security updates here."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
-                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={showError("whatsapp") ? "true" : "false"} />
+                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={Boolean(showError("whatsapp"))} />
                         {showError("whatsapp") && <p className="mt-1 text-xs text-red-600">{validation.whatsapp}</p>}
                       </div>
                     </div>
@@ -2384,7 +2431,7 @@ function ProfileSetupPage() {
                         <div>
                           <label className="mb-1 block text-sm font-semibold text-slate-900">How can buyers receive items? *</label>
                           <div className="flex flex-wrap gap-2">
-                            {["Campus Pickup", "Delivery", "Pickup or Delivery"].map((mode) => (
+                            {["Campus Meetup", "Pickup Point", "Hall Lobby Handover"].map((mode) => (
                               <button key={mode} type="button" onClick={() => toggleValue("sellerFulfillment", mode)} className={`rounded-full border px-3 py-1 text-xs ${form.sellerFulfillment.includes(mode) ? "border-primary bg-primary text-white" : "border-slate-200 bg-white text-slate-700"}`}>
                                 {mode}
                               </button>
@@ -2403,7 +2450,7 @@ function ProfileSetupPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-sm font-semibold text-slate-900">Mobile Money Number</label>
-                        <Input placeholder="0240000000" value={form.momoNumber} onChange={(e) => setForm((prev) => ({ ...prev, momoNumber: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, momoNumber: true }))} aria-invalid={showError("momoNumber")} />
+                        <Input placeholder="0240000000" value={form.momoNumber} onChange={(e) => setForm((prev) => ({ ...prev, momoNumber: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, momoNumber: true }))} aria-invalid={(showError("momoNumber") ? "true" : "false") as "true" | "false"} />
                         {showError("momoNumber") && <p className="mt-1 text-xs text-red-600">{validation.momoNumber}</p>}
                       </div>
                       <div>

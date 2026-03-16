@@ -514,6 +514,197 @@ export const adminApi = {
     }>("/admin/stats"),
 };
 
+// ==================== CATEGORIES API ====================
+
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  icon?: string;
+  sort_order: number;
+  is_active: boolean;
+  product_count?: number;
+}
+
+export const categoriesApi = {
+  getAll: () =>
+    fetchApi<Category[]>("/categories"),
+
+  getById: (id: string) =>
+    fetchApi<{ category: Category; products: Product[]; pagination: any }>(`/categories/${id}`),
+};
+
+// ==================== REVIEWS API ====================
+
+export interface Review {
+  id: string;
+  order_id: string;
+  reviewer_id: string;
+  reviewee_id: string;
+  rating: number;
+  comment?: string;
+  is_seller_review: boolean;
+  created_at: string;
+  reviewer?: {
+    id: string;
+    full_name: string;
+    avatar_url?: string;
+  };
+}
+
+export const reviewsApi = {
+  getForSeller: (sellerId: string, page = 1, limit = 10) =>
+    fetchApi<{ reviews: Review[]; rating: number; review_count: number; pagination: any }>(
+      `/reviews/seller/${sellerId}?page=${page}&limit=${limit}`
+    ),
+
+  getForOrder: (orderId: string) =>
+    fetchApi<{ review: Review | null }>(`/reviews/order/${orderId}`),
+
+  create: (review: { order_id: string; rating: number; comment?: string; is_seller_review?: boolean }) =>
+    fetchApi<{ review: Review }>("/reviews", {
+      method: "POST",
+      body: JSON.stringify(review),
+    }),
+
+  update: (id: string, review: { rating?: number; comment?: string }) =>
+    fetchApi<{ review: Review }>(`/reviews/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(review),
+    }),
+};
+
+// ==================== FAVORITES API ====================
+
+export interface Favorite {
+  id: string;
+  user_id: string;
+  product_id: string;
+  created_at: string;
+  product?: Product;
+}
+
+export const favoritesApi = {
+  getAll: () =>
+    fetchApi<{ favorites: Favorite[] }>("/favorites"),
+
+  add: (product_id: string) =>
+    fetchApi<{ favorite: Favorite }>("/favorites", {
+      method: "POST",
+      body: JSON.stringify({ product_id }),
+    }),
+
+  remove: (productId: string) =>
+    fetchApi<{ message: string }>(`/favorites/${productId}`, {
+      method: "DELETE",
+    }),
+
+  check: (productId: string) =>
+    fetchApi<{ is_favorited: boolean }>(`/favorites/check/${productId}`),
+};
+
+// ==================== SEARCH API ====================
+
+export const searchApi = {
+  saveQuery: (query: string) =>
+    fetchApi<{ history: any }>("/search/history", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    }),
+
+  getHistory: (limit = 10) =>
+    fetchApi<{ history: { query: string; created_at: string }[] }>(`/search/history?limit=${limit}`),
+
+  clearHistory: () =>
+    fetchApi<{ message: string }>("/search/history", {
+      method: "DELETE",
+    }),
+
+  getSuggestions: (query: string, limit = 5) =>
+    fetchApi<{ suggestions: { id: string; title: string; image_url: string }[]; popular: string[] }>(
+      `/search/suggestions?q=${encodeURIComponent(query)}&limit=${limit}`
+    ),
+};
+
+// ==================== REFERRALS API ====================
+
+export interface ReferralStats {
+  referral_code: string;
+  total_referrals: number;
+  recent_referrals: { referred_id: string; created_at: string }[];
+}
+
+export const referralsApi = {
+  getCode: () =>
+    fetchApi<ReferralStats>("/referrals/code"),
+
+  verify: (referral_code?: string, referrer_email?: string) =>
+    fetchApi<{ valid: boolean; referrer: { id: string; name: string } }>("/referrals/verify", {
+      method: "POST",
+      body: JSON.stringify({ referral_code, referrer_email }),
+    }),
+
+  claim: (referral_code?: string, referrer_email?: string) =>
+    fetchApi<{ message: string }>("/referrals/claim", {
+      method: "POST",
+      body: JSON.stringify({ referral_code, referrer_email }),
+    }),
+
+  getStats: () =>
+    fetchApi<{
+      total_referrals: number;
+      claimed_rewards: number;
+      pending_rewards: number;
+      referrals: any[];
+    }>("/referrals/stats"),
+};
+
+// ==================== NOTIFICATIONS API ====================
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body?: string;
+  data?: any;
+  is_read: boolean;
+  created_at: string;
+}
+
+export const notificationsApi = {
+  getAll: (page = 1, limit = 20, unread_only = false) =>
+    fetchApi<{
+      notifications: Notification[];
+      unread_count: number;
+      pagination: any;
+    }>(`/notifications?page=${page}&limit=${limit}&unread_only=${unread_only}`),
+
+  getUnreadCount: () =>
+    fetchApi<{ unread_count: number }>("/notifications/unread-count"),
+
+  markAsRead: (id: string) =>
+    fetchApi<{ message: string }>(`/notifications/${id}/read`, {
+      method: "PATCH",
+    }),
+
+  markAllAsRead: () =>
+    fetchApi<{ message: string }>("/notifications/read-all", {
+      method: "PATCH",
+    }),
+
+  delete: (id: string) =>
+    fetchApi<{ message: string }>(`/notifications/${id}`, {
+      method: "DELETE",
+    }),
+
+  clearAll: () =>
+    fetchApi<{ message: string }>("/notifications/clear-all", {
+      method: "DELETE",
+    }),
+};
+
 // ==================== UTILITY ====================
 
 export function isApiConfigured(): boolean {
