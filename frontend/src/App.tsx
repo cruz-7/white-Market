@@ -2143,9 +2143,9 @@ function MessagesPage() {
 
           {selected && (!isMobile || selectedId) ? (
             <div className="flex h-[76vh] flex-col">
-              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})} aria-label="Back" title="Back" className="p-1 text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} alt="Product image" className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
-              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} alt="Sent image" className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
-              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} alt="Preview of uploaded image" title="Preview of uploaded image" className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2" title="Attach image"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button></div></div>
+              <div className="flex items-center justify-between border-b p-3"><div className="flex items-center gap-2">{isMobile && <button onClick={() => setParams({})} aria-label="Back" title="Back" className="p-1 text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" /></button>}<Avatar className="h-8 w-8"><AvatarFallback>{(selected.buyerId === user.id ? selected.sellerName : selected.buyerName).slice(0, 1)}</AvatarFallback></Avatar><div><p className="text-sm font-semibold">{selected.buyerId === user.id ? selected.sellerName : selected.buyerName}</p><div className="flex items-center gap-1 text-xs text-gray-500"><img src={selected.productImage} alt="Product thumbnail" className="h-4 w-4 rounded object-cover" /><span className="truncate">{selected.productTitle}</span></div></div></div><Info className="h-4 w-4 text-gray-500" /></div>
+              <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-3">{conversationMessages.map((m) => { const mine = m.senderId === user.id; return (<div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[75%] rounded-2xl px-3 py-2 ${mine ? "bg-primary text-white" : "bg-gray-200 text-gray-900"}`}>{m.imageUrl && <img src={m.imageUrl} alt="Sent content" className="mb-2 max-h-48 rounded-lg" />}{m.text && <p className="text-sm">{m.text}</p>}<div className={`mt-1 flex items-center gap-1 text-[10px] ${mine ? "text-green-100" : "text-gray-500"}`}><span>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>{mine && <MessageStatusIcon status={m.status} />}</div></div></div>); })}</div>
+              <div className="border-t p-3">{uploadingImage && <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-1 text-xs"><img src={uploadingImage} alt="Preview" title="Preview of uploaded image" className="h-8 w-8 rounded object-cover" /><span>Image attached</span></div>}<div className="flex items-end gap-2"><label className="cursor-pointer rounded-lg border p-2" title="Attach image"><ImagePlus className="h-4 w-4" /><input type="file" accept="image/*" className="hidden" onChange={onImagePick} /></label><Textarea value={draft} onChange={onDraftChange} rows={1} placeholder="Type a message" className="min-h-10 resize-none" /><Button onClick={onSend} disabled={sending || (!draft.trim() && !uploadingImage)} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button></div></div>
             </div>
           ) : <div className="grid h-[76vh] place-items-center text-gray-500">Select a conversation</div>}
         </div>
@@ -2381,7 +2381,7 @@ function ProfileSetupPage() {
                             type="button"
                             onClick={() => setForm((prev) => ({ ...prev, role: value }))}
                             className={`rounded-xl border p-3 text-left ${form.role === value ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"}`}
-                            aria-pressed={form.role === value}
+                            aria-pressed={(form.role === value ? "true" : "false") as "true" | "false"}
                           >
                             <p className="font-semibold text-slate-900">{label}</p>
                             <p className="text-xs text-slate-500">{hint}</p>
@@ -2418,7 +2418,7 @@ function ProfileSetupPage() {
                       </div>
                       <div>
                         <label className="mb-1 flex items-center gap-1 text-sm font-semibold text-slate-900">WhatsApp Number * <span title="We'll send order and security updates here."><CircleHelp className="h-3.5 w-3.5 text-slate-400" /></span></label>
-                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={Boolean(showError("whatsapp"))} />
+                        <Input placeholder="0240000000" value={form.whatsapp} onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, whatsapp: true }))} aria-invalid={showError("whatsapp") ? "true" : "false"} />
                         {showError("whatsapp") && <p className="mt-1 text-xs text-red-600">{validation.whatsapp}</p>}
                       </div>
                     </div>
@@ -2444,7 +2444,7 @@ function ProfileSetupPage() {
                       <div className="grid gap-4 rounded-xl border bg-slate-50 p-4 sm:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-sm font-semibold text-slate-900">Typical budget range *</label>
-                          <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" aria-label="Typical budget range" value={form.buyerBudget} onChange={(e) => setForm((prev) => ({ ...prev, buyerBudget: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, buyerBudget: true }))} aria-invalid={showError("buyerBudget") ? "true" : "false"}>
+                          <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm" aria-label="Typical budget range" value={form.buyerBudget} onChange={(e) => setForm((prev) => ({ ...prev, buyerBudget: e.target.value }))} onBlur={() => setTouched((t) => ({ ...t, buyerBudget: true }))} aria-invalid={(showError("buyerBudget") ? "true" : "false") as "true" | "false"}>
                             <option value="">Choose a range</option>
                             <option value="lt50">Below GHS 50</option>
                             <option value="50to150">GHS 50 - 150</option>
@@ -2523,7 +2523,7 @@ function ProfileSetupPage() {
           )}
 
           <div className="text-center text-xs text-slate-500">
-            Need help? <a href="#" className="font-medium text-primary underline" onClick={(e) => e.preventDefault()}>Open setup FAQ</a>
+            Need help? <button type="button" className="font-medium text-primary underline" onClick={() => toast.info("FAQ coming soon")}>Open setup FAQ</button>
           </div>
         </div>
       </section>

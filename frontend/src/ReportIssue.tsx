@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, AlertTriangle, MessageSquare, Shield, Upload, CheckCircle, X, Phone } from "lucide-react";
+import { ArrowLeft, AlertTriangle, MessageSquare, Shield, Upload, CheckCircle, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle } from "./card";
@@ -69,11 +69,6 @@ export default function ReportIssue() {
 
   const handleRemoveFile = () => {
     setSelectedFile(null);
-  };
-
-  const handleEmergencyCall = () => {
-    window.open("tel:+233201234567");
-    toast.info("Calling campus security...");
   };
 
   const handleReset = () => {
@@ -245,12 +240,10 @@ export default function ReportIssue() {
           <Card>
             <CardContent className="text-center py-8">
               <h3 className="text-lg font-semibold text-slate-900 mb-2">Emergency Safety Concern?</h3>
-              <p className="text-slate-600 mb-4">For immediate threats to personal safety, contact campus security directly.</p>
+              <p className="text-slate-600 mb-4">
+                If you are in immediate danger, this form is not monitored 24/7. Contact your campus security or local emergency services.
+              </p>
               <div className="flex flex-wrap justify-center gap-3">
-                <Button variant="outline" onClick={handleEmergencyCall}>
-                  <Phone className="h-4 w-4 mr-2" />
-                  Call Campus Security
-                </Button>
                 <Button variant="outline" asChild>
                   <Link to="/safety">View Safety Tips</Link>
                 </Button>

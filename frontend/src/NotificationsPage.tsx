@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Bell, Loader2, Check, CheckCheck, Trash2, MessageCircle, ShoppingBag, Wallet, Award } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Bell, Loader2, Check, CheckCheck, Trash2, MessageCircle, ShoppingBag, Wallet, Award } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "./button";
@@ -22,6 +22,7 @@ const notificationIcons: Record<string, React.ReactNode> = {
 };
 
 export default function NotificationsPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -105,6 +106,15 @@ export default function NotificationsPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-2 rounded-lg border border-transparent px-2 py-1 text-sm text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+      </div>
+
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
           <Bell className="h-8 w-8 text-primary" />

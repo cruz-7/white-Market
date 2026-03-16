@@ -84,7 +84,7 @@ const Footer = () => (
       
       {/* Bottom Copyright */}
       <div className="mt-8 border-t pt-6 text-center text-sm text-muted-foreground">
-        &copy; {new Date().getFullYear()} White Market. Built for Legon, by Legon.
+        &copy; {new Date().getFullYear()} White Market. Built for Legon.
       </div>
     </div>
   </footer>

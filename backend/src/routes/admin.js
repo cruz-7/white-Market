@@ -138,14 +138,22 @@ router.get("/users", requireAuth, requireAdmin, async (req, res) => {
 router.get("/products", requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from("products")
-    .select("id, seller_id, title, price, image_url, category, is_active, created_at")
+    .select(
+      "id, seller_id, title, price, image_url, category_id, is_active, created_at, seller:users!products_seller_id_fkey(full_name, email), categories!products_category_id_fkey(name, slug)",
+    )
     .order("created_at", { ascending: false })
 
   if (error) {
     return res.status(400).json({ error: error.message })
   }
-  
-  res.json(data)
+
+  // Backward-compatible shape: keep a top-level `category` string for older UIs.
+  const normalized = (data || []).map((product) => ({
+    ...product,
+    category: product?.categories?.name ?? null,
+  }))
+
+  res.json(normalized)
 })
 
 // GET ALL ORDERS

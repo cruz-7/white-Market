@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Copy, Loader2, Gift, Users, TrendingUp } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft, Copy, Loader2, Gift, Users, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "./button";
@@ -10,6 +11,7 @@ import { referralsApi } from "./api";
 import { timeAgo } from "./data";
 
 export default function ReferralsPage() {
+  const navigate = useNavigate();
   const [referralCode, setReferralCode] = useState("");
   const [totalReferrals, setTotalReferrals] = useState(0);
   const [recentReferrals, setRecentReferrals] = useState<any[]>([]);
@@ -80,6 +82,15 @@ export default function ReferralsPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-2 rounded-lg border border-transparent px-2 py-1 text-sm text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+      </div>
+
       <div className="flex items-center gap-3 mb-8">
         <Gift className="h-8 w-8 text-orange-500" />
         <h1 className="text-2xl font-bold">Refer Friends</h1>
