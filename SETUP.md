@@ -9,7 +9,7 @@
 ## 2) Environment Files
 
 ### Frontend
-Create `.env` from `.env.example`:
+Create `frontend/.env` from `frontend/.env.example`:
 
 ```env
 VITE_API_URL=http://localhost:5000
@@ -60,6 +60,7 @@ npm run dev
 
 ### Frontend
 ```bash
+cd frontend
 npm run dev
 ```
 
@@ -68,8 +69,7 @@ npm run dev
 Run validation before deploy:
 
 ```bash
-npm run check
-cd backend
+# from repo root
 npm run check
 ```
 

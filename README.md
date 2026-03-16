@@ -1,7 +1,7 @@
 # White Market
 
 White Market is a campus marketplace with:
-- Vite + React frontend (`/src`)
+- Vite + React frontend (`/frontend/src`)
 - Express + Supabase backend (`/backend/src`)
 - Supabase SQL migrations (`/supabase/migrations`)
 
@@ -9,13 +9,13 @@ White Market is a campus marketplace with:
 
 1. Install dependencies:
 ```bash
-npm install
-cd backend && npm install
+cd frontend && npm install
+cd ../backend && npm install
 ```
 
 2. Create env files:
-- Copy [`.env.example`](C:/Users/cruz/Desktop/white%20matket/.env.example) to `.env`
-- Copy [`backend/.env.example`](C:/Users/cruz/Desktop/white%20matket/backend/.env.example) to `backend/.env`
+- Copy `frontend/.env.example` to `frontend/.env`
+- Copy `backend/.env.example` to `backend/.env`
 
 3. Run database migrations in Supabase SQL editor:
 - `supabase/migrations/20260307_security_hardening.sql`
@@ -29,6 +29,7 @@ npm run dev
 
 5. Start frontend:
 ```bash
+cd frontend
 npm run dev
 ```
 
@@ -37,8 +38,7 @@ npm run dev
 Run before deploy:
 
 ```bash
-npm run check
-cd backend
+# from repo root
 npm run check
 ```
 

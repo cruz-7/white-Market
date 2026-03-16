@@ -1,4 +1,4 @@
-# White Market - Architecture Document
+﻿# White Market - Architecture Document
 
 ## Project Overview
 
@@ -52,15 +52,15 @@ graph TB
 
 | Component | Technology | Status |
 |-----------|------------|--------|
-| Frontend Framework | Vite + React + TypeScript | ✅ Completed |
-| Styling | Tailwind CSS + shadcn/ui | ✅ Completed |
-| Backend Runtime | Node.js 20+ | ✅ Completed |
-| Backend Framework | Express.js | ✅ Completed |
-| Database | Supabase (PostgreSQL) | ✅ Completed |
-| Authentication | Supabase Auth | ✅ Completed |
-| File Storage | Supabase Storage | ✅ Completed |
-| Payment Gateway | Paystack | ✅ Completed |
-| Mobile Money | MTN/Vodafone/AirtelTigo | ✅ Completed |
+| Frontend Framework | Vite + React + TypeScript | âœ… Completed |
+| Styling | Tailwind CSS + shadcn/ui | âœ… Completed |
+| Backend Runtime | Node.js 20+ | âœ… Completed |
+| Backend Framework | Express.js | âœ… Completed |
+| Database | Supabase (PostgreSQL) | âœ… Completed |
+| Authentication | Supabase Auth | âœ… Completed |
+| File Storage | Supabase Storage | âœ… Completed |
+| Payment Gateway | Paystack | âœ… Completed |
+| Mobile Money | MTN/Vodafone/AirtelTigo | âœ… Completed |
 
 ---
 
@@ -92,7 +92,7 @@ erDiagram
 ### Table Definitions
 
 #### 1. Users Table (`public.users`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -112,7 +112,7 @@ erDiagram
 | updated_at | timestamptz | Last update time |
 
 #### 2. Products Table (`public.products`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -125,7 +125,7 @@ erDiagram
 | created_at | timestamptz | Creation time |
 
 #### 3. Orders Table (`public.orders`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -140,7 +140,7 @@ erDiagram
 | created_at | timestamptz | Creation time |
 
 #### 4. Wallets Table (`public.wallets`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -152,7 +152,7 @@ erDiagram
 | updated_at | timestamptz | Last update |
 
 #### 5. Wallet Transactions (`public.wallet_transactions`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -166,7 +166,7 @@ erDiagram
 | created_at | timestamptz | Transaction time |
 
 #### 6. Payouts Table (`public.payouts`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -178,7 +178,7 @@ erDiagram
 | created_at | timestamptz | Creation time |
 
 #### 7. Conversations Table (`public.conversations`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -192,7 +192,7 @@ erDiagram
 **Constraints:** buyer_id != seller_id
 
 #### 8. Messages Table (`public.messages`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -207,7 +207,7 @@ erDiagram
 **Constraints:** text OR image_url must be present
 
 #### 9. Verifications Table (`public.verifications`)
-**Status: ✅ Completed**
+**Status: âœ… Completed**
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -279,20 +279,20 @@ graph TB
 
 | Middleware | File | Purpose | Status |
 |------------|------|---------|--------|
-| requireAuth | `backend/src/middleware/requireAuth.js` | Verify JWT token | ✅ Completed |
-| requireAdmin | `backend/src/middleware/requireAdmin.js` | Verify admin role | ✅ Completed |
-| upload | `backend/src/middleware/upload.js` | File upload handling | ✅ Completed |
+| requireAuth | `backend/src/middleware/requireAuth.js` | Verify JWT token | âœ… Completed |
+| requireAdmin | `backend/src/middleware/requireAdmin.js` | Verify admin role | âœ… Completed |
+| upload | `backend/src/middleware/upload.js` | File upload handling | âœ… Completed |
 
 ### Security Features
 
 | Feature | Implementation | Status |
 |---------|----------------|--------|
-| Rate Limiting | IP-based global and per-route limits | ✅ Completed |
-| CORS Control | Origin validation for production | ✅ Completed |
-| Security Headers | X-Content-Type, X-Frame-Options, etc. | ✅ Completed |
-| RLS | Row Level Security on all tables | ✅ Completed |
-| SQL Injection | Parameterized queries via Supabase | ✅ Completed |
-| Webhook Signature | Paystack signature verification | ✅ Completed |
+| Rate Limiting | IP-based global and per-route limits | âœ… Completed |
+| CORS Control | Origin validation for production | âœ… Completed |
+| Security Headers | X-Content-Type, X-Frame-Options, etc. | âœ… Completed |
+| RLS | Row Level Security on all tables | âœ… Completed |
+| SQL Injection | Parameterized queries via Supabase | âœ… Completed |
+| Webhook Signature | Paystack signature verification | âœ… Completed |
 
 ---
 
@@ -328,35 +328,35 @@ graph LR
 
 | Component | File | Status | Description |
 |------------|------|--------|-------------|
-| Navbar | `src/Navbar.tsx` | ✅ Completed | Navigation header |
-| Footer | `src/Footer.tsx` | ✅ Completed | Site footer |
-| MobileBottomNav | `src/MobileBottomNav.tsx` | ✅ Completed | Mobile navigation |
-| Index | `src/Index.tsx` | ✅ Completed | Landing page |
-| AddProduct | `src/AddProduct.tsx` | ✅ Completed | Product listing form |
-| ProductGrid | `src/ProductGrid.tsx` | ✅ Completed | Product display grid |
-| SellerProfile | `src/SellerProfile.tsx` | ✅ Completed | Seller information |
-| ProfessionalOrdersPage | `src/ProfessionalOrdersPage.tsx` | ✅ Completed | Order management |
-| OrderPipeline | `src/OrderPipeline.tsx` | ✅ Completed | Order status flow |
-| AdminDashboardView | `src/AdminDashboardView.tsx` | ✅ Completed | Admin panel |
-| VerifyStudent | `src/VerifyStudent.tsx` | ✅ Completed | Student verification |
-| BuyerProtection | `src/BuyerProtection.tsx` | ✅ Completed | Buyer safety info |
-| PrivacyPolicy | `src/PrivacyPolicy.tsx` | ✅ Completed | Privacy policy page |
-| TermsOfService | `src/TermsOfService.tsx` | ✅ Completed | Terms page |
-| FAQ | `src/FAQ.tsx` | ✅ Completed | FAQ page |
-| ReportIssue | `src/ReportIssue.tsx` | ✅ Completed | Issue reporting |
+| Navbar | `src/Navbar.tsx` | âœ… Completed | Navigation header |
+| Footer | `src/Footer.tsx` | âœ… Completed | Site footer |
+| MobileBottomNav | `src/MobileBottomNav.tsx` | âœ… Completed | Mobile navigation |
+| Index | `src/Index.tsx` | âœ… Completed | Landing page |
+| AddProduct | `src/AddProduct.tsx` | âœ… Completed | Product listing form |
+| ProductGrid | `src/ProductGrid.tsx` | âœ… Completed | Product display grid |
+| SellerProfile | `src/SellerProfile.tsx` | âœ… Completed | Seller information |
+| ProfessionalOrdersPage | `src/ProfessionalOrdersPage.tsx` | âœ… Completed | Order management |
+| OrderPipeline | `src/OrderPipeline.tsx` | âœ… Completed | Order status flow |
+| AdminDashboardView | `src/AdminDashboardView.tsx` | âœ… Completed | Admin panel |
+| VerifyStudent | `src/VerifyStudent.tsx` | âœ… Completed | Student verification |
+| BuyerProtection | `src/BuyerProtection.tsx` | âœ… Completed | Buyer safety info |
+| PrivacyPolicy | `src/PrivacyPolicy.tsx` | âœ… Completed | Privacy policy page |
+| TermsOfService | `src/TermsOfService.tsx` | âœ… Completed | Terms page |
+| FAQ | `src/FAQ.tsx` | âœ… Completed | FAQ page |
+| ReportIssue | `src/ReportIssue.tsx` | âœ… Completed | Issue reporting |
 
 ### API Client (`src/api.ts`)
 
 | API Module | Endpoints | Status |
 |------------|-----------|--------|
-| authApi | signup, login, logout | ✅ Completed |
-| productsApi | CRUD operations, image upload | ✅ Completed |
-| ordersApi | create, list, status update | ✅ Completed |
-| paymentsApi | initialize, verify, wallet-pay | ✅ Completed |
-| payoutsApi | request, list, recipient | ✅ Completed |
-| messagesApi | conversations, messages | ✅ Completed |
-| adminApi | stats, user management | ✅ Completed |
-| verificationApi | status, request, review | ✅ Completed |
+| authApi | signup, login, logout | âœ… Completed |
+| productsApi | CRUD operations, image upload | âœ… Completed |
+| ordersApi | create, list, status update | âœ… Completed |
+| paymentsApi | initialize, verify, wallet-pay | âœ… Completed |
+| payoutsApi | request, list, recipient | âœ… Completed |
+| messagesApi | conversations, messages | âœ… Completed |
+| adminApi | stats, user management | âœ… Completed |
+| verificationApi | status, request, review | âœ… Completed |
 
 ---
 
@@ -364,7 +364,7 @@ graph LR
 
 ### 1. Commission Model
 - **Rate:** 10% on each transaction
-- **Flow:** Buyer pays → Platform holds → 90% to seller, 10% retained
+- **Flow:** Buyer pays â†’ Platform holds â†’ 90% to seller, 10% retained
 
 ### 2. Payment Flow
 ```mermaid
@@ -438,7 +438,7 @@ graph LR
 
 ### Required Environment Variables
 
-#### Frontend (.env)
+#### Frontend (frontend/.env)
 ```
 VITE_API_URL=http://localhost:5000
 VITE_SUPABASE_URL=...
@@ -467,69 +467,67 @@ ALLOW_SIMULATED_WALLET_TOPUP=true
 
 ```
 white-market/
-├── frontend/                    # Vite + React frontend
-│   ├── src/
-│   │   ├── api.ts              # API client layer
-│   │   ├── App.tsx             # Main app component
-│   │   ├── components/         # Reusable components
-│   │   ├── pages/              # Page components
-│   │   └── hooks/              # Custom React hooks
-│   └── package.json
-│
-├── backend/                    # Express.js backend
-│   ├── src/
-│   │   ├── index.js           # Express app setup
-│   │   ├── routes/            # API route handlers
-│   │   ├── middleware/        # Auth middleware
-│   │   └── lib/               # Utilities
-│   └── package.json
-│
-├── supabase/                   # Database migrations
-│   └── migrations/
-│       ├── 20260307_security_hardening.sql
-│       └── 20260308_payment_atomicity.sql
-│
-└── package.json               # Root package.json
+|-- frontend/                     # Vite + React frontend
+|   |-- src/
+|   |   |-- api.ts                # API client layer
+|   |   |-- App.tsx               # Main app component
+|   |   `-- hooks/                # Custom React hooks
+|   `-- package.json
+|
+|-- backend/                      # Express.js backend
+|   |-- src/
+|   |   |-- index.js              # Express app setup
+|   |   |-- routes/               # API route handlers
+|   |   |-- middleware/           # Auth middleware
+|   |   `-- lib/                  # Utilities
+|   `-- package.json
+|
+|-- supabase/                     # Database migrations
+|   `-- migrations/
+|       |-- 20260307_security_hardening.sql
+|       `-- 20260308_payment_atomicity.sql
+|
+`-- package.json                  # Root package.json
 ```
 
 ---
 
 ## Completed Features Summary
 
-### Core Marketplace Features ✅
+### Core Marketplace Features âœ…
 - [x] User authentication (signup, login)
 - [x] Product listing and browsing
 - [x] Product search functionality
 - [x] Order creation and management
 - [x] Real-time messaging between buyers/sellers
 
-### Payment System ✅
+### Payment System âœ…
 - [x] Paystack integration for card payments
 - [x] Internal wallet system
 - [x] Wallet top-up (simulated in dev)
 - [x] Payment via wallet balance
 - [x] Webhook handling for payment confirmation
 
-### Payout System ✅
+### Payout System âœ…
 - [x] Automatic commission calculation (10%)
 - [x] Seller pending earnings tracking
 - [x] Payout request system
 - [x] Paystack transfer recipient creation
 - [x] MoMo transfer to sellers (MTN/Vodafone/AirtelTigo)
 
-### Verification System ✅
+### Verification System âœ…
 - [x] Auto-verification for UG email domains
 - [x] Manual verification request (student ID/admission letter)
 - [x] Admin verification approval/rejection
 
-### Admin Features ✅
+### Admin Features âœ…
 - [x] Dashboard with statistics
 - [x] User management (view, ban, unban, role changes)
 - [x] Product moderation (view, delete)
 - [x] Order management (view, status updates)
 - [x] Verification request review
 
-### Frontend UI ✅
+### Frontend UI âœ…
 - [x] Landing page with hero section
 - [x] Product grid with search
 - [x] Seller profiles
@@ -538,7 +536,7 @@ white-market/
 - [x] Mobile-responsive design
 - [x] Mobile bottom navigation
 
-### Security ✅
+### Security âœ…
 - [x] Row Level Security on all tables
 - [x] JWT authentication
 - [x] Rate limiting
@@ -573,17 +571,18 @@ white-market/
 
 From `PREHOSTING_CHECKLIST.md`:
 
-1. ✅ Set `NODE_ENV=production` in backend
-2. ✅ Configure non-localhost URLs for FRONTEND_URL, PAYSTACK_CALLBACK_URL
-3. ✅ Set real SUPABASE_* and PAYSTACK_SECRET_KEY values
-4. ✅ Disable test routes (`ENABLE_TEST_ROUTES=false`)
-5. ✅ Block simulated wallet top-up (`ALLOW_SIMULATED_WALLET_TOPUP=false`)
-6. ✅ Run database migrations in Supabase SQL editor
-7. ✅ Configure Paystack webhook to `/payments/webhook`
-8. ✅ Test all payment flows in staging
+1. âœ… Set `NODE_ENV=production` in backend
+2. âœ… Configure non-localhost URLs for FRONTEND_URL, PAYSTACK_CALLBACK_URL
+3. âœ… Set real SUPABASE_* and PAYSTACK_SECRET_KEY values
+4. âœ… Disable test routes (`ENABLE_TEST_ROUTES=false`)
+5. âœ… Block simulated wallet top-up (`ALLOW_SIMULATED_WALLET_TOPUP=false`)
+6. âœ… Run database migrations in Supabase SQL editor
+7. âœ… Configure Paystack webhook to `/payments/webhook`
+8. âœ… Test all payment flows in staging
 
 ---
 
 *Document Version: 1.0*
 *Last Updated: March 2026*
 *Project: White Market - University of Ghana Student Marketplace*
+
