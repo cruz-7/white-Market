@@ -1,5 +1,5 @@
 // cspell:ignore Jollof
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Upload, X, ImagePlus, Loader2 } from "lucide-react";
@@ -10,33 +10,52 @@ import { Input } from "./input";
 import { Textarea } from "./textarea";
 import { Label } from "./label";
 import { Badge } from "./badge";
-import { productsApi } from "./api";
-
-const CATEGORIES = [
-  "Food",
-  "Clothing",
-  "Beauty",
-  "Accessories",
-  "Electronics",
-  "Stationery",
-  "Books",
-  "Services",
-  "Other",
-];
+import { categoriesApi, productsApi, type Category } from "./api";
 
 function AddProduct() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
   
   const [form, setForm] = useState({
     title: "",
     description: "",
     price: "",
-    category: "Other",
+    category_id: "",
     image_url: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setCategoriesLoading(true);
+      const { data, error } = await categoriesApi.getAll();
+      if (cancelled) return;
+      if (!error && data) {
+        setCategories(data);
+      } else {
+        setCategories([]);
+      }
+      setCategoriesLoading(false);
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (form.category_id || categories.length === 0) return;
+    const other = categories.find((cat) => cat.slug === "other") || categories[0];
+    if (other) {
+      setForm((prev) => ({ ...prev, category_id: other.id }));
+    }
+  }, [categories, form.category_id]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -93,6 +112,11 @@ function AddProduct() {
       return;
     }
 
+    if (!form.category_id) {
+      toast.error("Please select a category");
+      return;
+    }
+
     setLoading(true);
 
     const result = await productsApi.create({
@@ -100,6 +124,7 @@ function AddProduct() {
       description: form.description.trim() || undefined,
       price,
       image_url: form.image_url || undefined,
+      category_id: form.category_id,
     });
 
     setLoading(false);
@@ -257,15 +282,22 @@ function AddProduct() {
                       id="category"
                       aria-label="Product category"
                       title="Product category"
-                      value={form.category}
-                      onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                      value={form.category_id}
+                      onChange={(e) => setForm((prev) => ({ ...prev, category_id: e.target.value }))}
+                      disabled={categoriesLoading || categories.length === 0}
                       className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
-                      {CATEGORIES.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
+                      {categoriesLoading ? (
+                        <option value="">Loading categories...</option>
+                      ) : categories.length === 0 ? (
+                        <option value="">No categories available</option>
+                      ) : (
+                        categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
                 </div>

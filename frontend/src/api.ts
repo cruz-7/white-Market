@@ -119,6 +119,18 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
+
+  forgotPassword: (email: string) =>
+    fetchApi<{ message: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    fetchApi<{ message: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
 };
 
 // ==================== PRODUCTS API ====================
@@ -130,27 +142,66 @@ export interface Product {
   description?: string;
   price: number;
   image_url?: string;
+  category_id?: string;
   category?: string;
   is_active?: boolean;
+  view_count?: number;
   created_at?: string;
   users?: {
     full_name: string;
     email: string;
+    verified?: boolean;
+    avatar_url?: string;
+  };
+  categories?: {
+    name: string;
+    slug: string;
   };
 }
 
 export const productsApi = {
-  getAll: (query?: string) => {
-    const endpoint = query ? `/products?q=${encodeURIComponent(query)}` : "/products";
+  getAll: (params?: string | { 
+    q?: string; 
+    category_id?: string; 
+    min_price?: number; 
+    max_price?: number; 
+    sort?: "price_asc" | "price_desc" | "newest" | "oldest";
+    page?: number;
+    limit?: number;
+    seller_id?: string;
+    is_active?: boolean;
+  }) => {
+    const normalized = typeof params === "string" ? { q: params } : params;
+    const queryParams = new URLSearchParams();
+    if (normalized?.q) queryParams.set("q", normalized.q);
+    if (normalized?.category_id) queryParams.set("category_id", normalized.category_id);
+    if (normalized?.min_price !== undefined) queryParams.set("min_price", String(normalized.min_price));
+    if (normalized?.max_price !== undefined) queryParams.set("max_price", String(normalized.max_price));
+    if (normalized?.sort) queryParams.set("sort", normalized.sort);
+    if (normalized?.page !== undefined) queryParams.set("page", String(normalized.page));
+    if (normalized?.limit !== undefined) queryParams.set("limit", String(normalized.limit));
+    if (normalized?.seller_id) queryParams.set("seller_id", normalized.seller_id);
+    if (normalized?.is_active !== undefined) queryParams.set("is_active", String(normalized.is_active));
+    
+    const endpoint = queryParams.toString() ? `/products?${queryParams.toString()}` : "/products";
     return fetchApi<Product[]>(endpoint);
   },
+
+  getById: (id: string) =>
+    fetchApi<Product>(`/products/${id}`),
 
   getBySeller: (sellerId: string) =>
     fetchApi<Product[]>(`/products/seller/${sellerId}`),
 
-  create: (product: { title: string; description?: string; price: number; image_url?: string }) =>
+  create: (product: { title: string; description?: string; price: number; image_url?: string; category_id?: string }) =>
     fetchApi<{ message: string }>("/products", {
       method: "POST",
+      body: JSON.stringify(product),
+    }),
+
+  update: (id: string, product: { title?: string; description?: string; price?: number; image_url?: string; category_id?: string; is_active?: boolean }) =>
+    fetchApi<{ message: string; product: Product }>(`/products/${id}`, {
+      method: "PUT",
       body: JSON.stringify(product),
     }),
 
@@ -159,11 +210,15 @@ export const productsApi = {
       method: "DELETE",
     }),
 
+  recordView: (id: string) =>
+    fetchApi<{ message: string }>(`/products/${id}/view`, {
+      method: "POST",
+    }),
+
   uploadImage: async (file: File): Promise<ApiResponse<{ image_url: string }>> => {
     const formData = new FormData();
     formData.append("image", file);
 
-    // Get token
     let token: string | null = null;
     const userJson = localStorage.getItem("wm_user");
     if (userJson) {
@@ -202,9 +257,10 @@ export interface Order {
   buyer_id: string;
   seller_id: string;
   amount: number;
-  status: "pending" | "paid" | "cancelled";
+  status: "pending" | "paid" | "cancelled" | "completed" | "disputed";
   created_at: string;
   paid_at?: string;
+  completed_at?: string;
   products?: {
     title: string;
     image_url: string;
@@ -240,6 +296,20 @@ export const ordersApi = {
       method: "PATCH",
       body: JSON.stringify(params),
     }),
+
+  completeOrder: (id: string) =>
+    fetchApi<{ message: string; order: Order; seller_amount: number }>(`/orders/${id}/complete`, {
+      method: "POST",
+    }),
+
+  createDispute: (id: string, reason: string) =>
+    fetchApi<{ message: string; dispute: any }>(`/orders/${id}/dispute`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  getDispute: (id: string) =>
+    fetchApi<{ dispute: any }>(`/orders/${id}/dispute`),
 };
 
 // ==================== PAYMENTS API ====================
@@ -513,6 +583,51 @@ export const adminApi = {
       totalProducts?: number;
       commission?: number;
     }>("/admin/stats"),
+};
+
+// ==================== SELLERS API ====================
+
+export interface SellerStats {
+  profile: UserProfile;
+  stats: {
+    products: number;
+    totalOrders: number;
+    completedOrders: number;
+    totalRevenue: number;
+    availableBalance: number;
+    pendingEarnings: number;
+    averageRating: string;
+    totalReviews: number;
+  };
+  recentOrders: Order[];
+  topProducts: Product[];
+}
+
+export interface SellerPublicProfile {
+  seller: {
+    id: string;
+    full_name: string;
+    avatar_url?: string;
+    verified: boolean;
+    created_at: string;
+  };
+  stats: {
+    products: number;
+    averageRating: string;
+    totalReviews: number;
+  };
+  products: Product[];
+}
+
+export const sellersApi = {
+  getMe: () =>
+    fetchApi<SellerStats>("/sellers/me"),
+
+  getById: (id: string) =>
+    fetchApi<SellerPublicProfile>(`/sellers/${id}`),
+
+  getAll: () =>
+    fetchApi<{ sellers: any[] }>("/sellers"),
 };
 
 // ==================== CATEGORIES API ====================

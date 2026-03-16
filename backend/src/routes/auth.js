@@ -133,4 +133,54 @@ authRouter.post("/confirm-email", requireAuth, requireAdmin, async (req, res) =>
 
   return res.json({ message: "Email confirmed successfully", user_id: targetUserId });
 });
+
+// POST /auth/forgot-password - Request password reset
+authRouter.post("/forgot-password", async (req, res) => {
+  const { email } = req.body || {};
+
+  if (!email) {
+    return res.status(400).json({ error: "email is required" });
+  }
+
+  if (!supabasePublic) {
+    return res.status(500).json({ error: "SUPABASE_ANON_KEY is not configured in backend/.env" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Generate password reset link
+  const { error } = await supabasePublic.auth.resetPasswordForEmail(normalizedEmail, {
+    redirectTo: `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password`,
+  });
+
+  if (error) {
+    console.error("Password reset error:", error);
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.json({ message: "If an account exists with this email, a password reset link has been sent" });
+});
+
+// POST /auth/reset-password - Reset password with token
+authRouter.post("/reset-password", async (req, res) => {
+  const { token, password } = req.body || {};
+
+  if (!token || !password) {
+    return res.status(400).json({ error: "token and password are required" });
+  }
+
+  if (!supabasePublic) {
+    return res.status(500).json({ error: "SUPABASE_ANON_KEY is not configured in backend/.env" });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+  }
+
+  // Note: Supabase handles the token verification through the OAuth flow
+  // For API-based reset, we'd need to use the admin API
+  // This endpoint is a placeholder for the frontend redirect flow
+  return res.json({ message: "Password reset functionality configured. Please use the frontend reset flow." });
+});
+
 export default authRouter;

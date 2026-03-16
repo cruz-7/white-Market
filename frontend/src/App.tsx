@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import MobileBottomNav from "./MobileBottomNav";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
 import { Input } from "./input";
@@ -163,11 +164,11 @@ function toLocalProduct(product: ApiProduct) {
     price: Number(product.price || 0),
     sellerId: product.seller_id,
     sellerName: product.users?.full_name || "Seller",
-    category: product.category || "General",
+    category: product.category || product.categories?.name || "General",
     image: product.image_url || "https://via.placeholder.com/640x360?text=White+Market",
     is_active: product.is_active ?? true,
     stock_status: "in_stock" as const,
-    views: 0,
+    views: Number(product.view_count || 0),
     rating: 4.5,
     reviews: 0,
     eta: "Same day",
@@ -318,7 +319,7 @@ function BackendUnavailablePage() {
   );
 }
 
-function App() {
+function AppContent() {
   const currentUser = useCurrentUser();
   const { isBackendReady, checked } = useBackendGuard();
 
@@ -2540,5 +2541,11 @@ function SimplePage({ title, message }: { title: string; message: string }) {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
 

@@ -109,10 +109,11 @@ searchRouter.get("/suggestions", async (req, res) => {
     }
 
     // Get popular searches from other users (excluding current user's searches)
+    const currentUserId = req.user?.id || "00000000-0000-0000-0000-000000000000";
     const { data: popularSearches } = await supabase
       .from("search_history")
       .select("query")
-      .neq("user_id", req.user.id || "00000000-0000-0000-0000-000000000000")
+      .neq("user_id", currentUserId)
       .ilike("query", `%${q.trim()}%`)
       .order("created_at", { ascending: false })
       .limit(Number(limit));
