@@ -1,7 +1,7 @@
 // Internationalization (i18n) support for White Market
 // Provides translations for multiple languages and language switching functionality
 
-export type Language = 'en' | 'tw' | 'ga' | 'fr' | 'es';
+export type Language = 'en' | 'fr' | 'es';
 
 export interface TranslationKeys {
   // General
@@ -755,16 +755,12 @@ export const getTranslations = (lang: Language): TranslationKeys => {
 
 export const languageNames: Record<Language, string> = {
   en: 'English',
-  tw: 'Twi',
-  ga: 'Ga',
   fr: 'Français',
   es: 'Español',
 };
 
 export const languageFlags: Record<Language, string> = {
   en: '🇬🇭',
-  tw: '🇬🇭',
-  ga: '🇬🇭',
   fr: '🇫🇷',
   es: '🇪🇸',
 };

@@ -11,7 +11,7 @@ import { Language, languageNames, languageFlags } from "./i18n";
 
 interface UserData { id: string; email?: string; full_name?: string; avatar_url?: string; campus?: string; role?: string; }
 interface PasswordStrength { hasLength: boolean; hasUpper: boolean; hasLower: boolean; hasNumber: boolean; }
-type SettingsTab = "profile" | "password" | "notifications" | "privacy" | "theme" | "language" | "danger";
+type SettingsTab = "profile" | "password" | "notifications" | "privacy" | "language" | "danger";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -33,7 +33,6 @@ export default function SettingsPage() {
     { id: "password" as const, label: translations.changePasswordTab, icon: Lock },
     { id: "notifications" as const, label: translations.notificationsTab, icon: Bell },
     { id: "privacy" as const, label: translations.privacy, icon: Shield },
-    { id: "theme" as const, label: translations.theme, icon: Palette },
     { id: "language" as const, label: translations.language, icon: Globe },
     { id: "danger" as const, label: translations.dangerZone, icon: Trash2 },
   ];
@@ -81,7 +80,6 @@ export default function SettingsPage() {
             {activeTab === "password" && <PasswordSettings />}
             {activeTab === "notifications" && <NotificationSettingsComponent />}
             {activeTab === "privacy" && <PrivacySettingsComponent />}
-            {activeTab === "theme" && <ThemeSettingsComponent />}
             {activeTab === "language" && <LanguageSettingsComponent />}
             {activeTab === "danger" && <DangerZoneSettings />}
           </div>

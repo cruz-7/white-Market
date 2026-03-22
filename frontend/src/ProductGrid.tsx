@@ -16,17 +16,19 @@ type Product = {
 
 interface ProductGridProps {
   products: Product[];
-  onProductUpdate: (updatedProducts: Product[]) => void;
+  onProductUpdate?: (updatedProducts: Product[]) => void;
 }
 
 const ProductGrid = ({ products, onProductUpdate }: ProductGridProps) => {
   const toggleActive = (productId: string, currentlyActive: boolean) => {
+    if (!onProductUpdate) return;
     const next = products.map((p) => (p.id === productId ? { ...p, is_active: !currentlyActive } : p));
     onProductUpdate(next);
     toast.success(currentlyActive ? "Product hidden from marketplace" : "Product is now live!");
   };
 
   const deleteProduct = (productId: string) => {
+    if (!onProductUpdate) return;
     if (!confirm("Delete this product? This cannot be undone.")) return;
     onProductUpdate(products.filter((p) => p.id !== productId));
     toast.success("Product deleted");
@@ -70,17 +72,19 @@ const ProductGrid = ({ products, onProductUpdate }: ProductGridProps) => {
                       <Badge variant="outline" className="text-[10px] bg-background">Hidden</Badge>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                    <Button size="icon" variant="secondary" className="h-8 w-8" asChild>
-                      <Link to={`/product/${p.id}`}><Eye className="h-3.5 w-3.5" /></Link>
-                    </Button>
-                    <Button size="icon" variant="secondary" className="h-8 w-8" onClick={() => toggleActive(p.id, p.is_active)}>
-                      {p.is_active ? <ToggleLeft className="h-3.5 w-3.5" /> : <ToggleRight className="h-3.5 w-3.5" />}
-                    </Button>
-                    <Button size="icon" variant="destructive" className="h-8 w-8" onClick={() => deleteProduct(p.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {onProductUpdate && (
+                    <div className="absolute inset-0 bg-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                      <Button size="icon" variant="secondary" className="h-8 w-8" asChild>
+                        <Link to={`/product/${p.id}`}><Eye className="h-3.5 w-3.5" /></Link>
+                      </Button>
+                      <Button size="icon" variant="secondary" className="h-8 w-8" onClick={() => toggleActive(p.id, p.is_active)}>
+                        {p.is_active ? <ToggleLeft className="h-3.5 w-3.5" /> : <ToggleRight className="h-3.5 w-3.5" />}
+                      </Button>
+                      <Button size="icon" variant="destructive" className="h-8 w-8" onClick={() => deleteProduct(p.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="p-3">
                   <h3 className="font-semibold text-sm line-clamp-1">{p.title}</h3>

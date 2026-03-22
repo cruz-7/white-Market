@@ -419,19 +419,28 @@ function AppContent() {
         saveWalletTransactions(currentUser.id, tx);
       }
 
-      if (conversationsRes.data) {
-        const localConversations = conversationsRes.data.conversations.map(toLocalConversation);
-        saveConversations(localConversations);
+      if (conversationsRes.data?.conversations) {
+        try {
+          const localConversations = conversationsRes.data.conversations.map(toLocalConversation);
+          saveConversations(localConversations);
 
-        const allMessages: Message[] = [];
-        await Promise.all(
-          localConversations.map(async (conversation) => {
-            const conversationMessages = await messagesApi.getConversationMessages(conversation.id);
-            if (!conversationMessages.data) return;
-            allMessages.push(...conversationMessages.data.messages.map(toLocalMessage));
-          }),
-        );
-        saveMessages(allMessages.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at)));
+          const allMessages: Message[] = [];
+          await Promise.all(
+            localConversations.map(async (conversation) => {
+              try {
+                const conversationMessages = await messagesApi.getConversationMessages(conversation.id);
+                if (conversationMessages.data?.messages) {
+                  allMessages.push(...conversationMessages.data.messages.map(toLocalMessage));
+                }
+              } catch (e) {
+                console.error("Error fetching conversation messages:", e);
+              }
+            }),
+          );
+          saveMessages(allMessages.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at)));
+        } catch (e) {
+          console.error("Error processing conversations:", e);
+        }
       }
     };
 
