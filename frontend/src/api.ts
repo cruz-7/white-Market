@@ -42,8 +42,36 @@ async function fetchApi<T>(
   
   // If no token in localStorage, try to get from Supabase session
   if (!token && supabase) {
-    const { data: { session } } = await supabase.auth.getSession();
-    token = session?.access_token || null;
+    try {
+      // First try to get the session - wait a bit for it to load on page refresh
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      // If no session, wait briefly and try again (handles page refresh race condition)
+      if (!session?.access_token) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const result = await supabase.auth.getSession();
+        session = result.data.session;
+      }
+      
+      if (session?.access_token) {
+        token = session.access_token;
+      } else {
+        // Try getUser as fallback - it works with persisted session
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // Try getting session again after getUser refreshes it
+          const { data: { session: newSession } } = await supabase.auth.getSession();
+          token = newSession?.access_token || null;
+        }
+      }
+      
+      // Debug: log token status
+      console.log('Token retrieval:', token ? 'Token found' : 'No token found');
+    } catch (err) {
+      console.error('Error getting Supabase session:', err);
+    }
+  } else if (!token) {
+    console.log('No supabase client or token already found');
   }
   
   const headers: HeadersInit = {
@@ -126,10 +154,21 @@ export const authApi = {
       body: JSON.stringify({ email }),
     }),
 
-  resetPassword: (token: string, password: string) =>
-    fetchApi<{ message: string }>("/auth/reset-password", {
+  resetPassword: (access_token: string, password: string) =>
+    fetchApi<{ message: string; user?: { id: string; email: string } }>("/auth/reset-password", {
       method: "POST",
-      body: JSON.stringify({ token, password }),
+      body: JSON.stringify({ access_token, password }),
+    }),
+
+  changePassword: (current_password: string, new_password: string) =>
+    fetchApi<{ message: string; user?: { id: string; email: string } }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+
+  verifyResetToken: (access_token: string) =>
+    fetchApi<{ valid: boolean; user_id?: string; error?: string }>("/auth/verify-reset-token?access_token=" + encodeURIComponent(access_token), {
+      method: "GET",
     }),
 };
 
@@ -192,6 +231,18 @@ export const productsApi = {
 
   getBySeller: (sellerId: string) =>
     fetchApi<Product[]>(`/products/seller/${sellerId}`),
+
+  // Get trending products
+  getTrending: (limit = 10) =>
+    fetchApi<{ products: Product[]; count: number }>(`/products/trending?limit=${limit}`),
+
+  // Track product view
+  trackView: (productId: string) =>
+    fetchApi<any>(`/products/${productId}/view`, { method: "POST" }),
+
+  // Track product click
+  trackClick: (productId: string) =>
+    fetchApi<any>(`/products/${productId}/click`, { method: "POST" }),
 
   create: (product: { title: string; description?: string; price: number; image_url?: string; category_id?: string }) =>
     fetchApi<{ message: string }>("/products", {
@@ -413,22 +464,22 @@ export const userApi = {
     }),
 
   getWallet: () =>
-    fetchApi<{ balance: number; pending_earnings: number }>("/protected/wallet"),
+    fetchApi<{ balance: number; pending_earnings: number }>("/protected/profile/wallet"),
 
   topUp: (amount: number) =>
-    fetchApi<{ message: string }>("/protected/wallet/topup", {
+    fetchApi<{ message: string }>("/protected/profile/wallet/topup", {
       method: "POST",
       body: JSON.stringify({ amount }),
     }),
 
   withdraw: (amount: number, momo_number?: string) =>
-    fetchApi<{ message: string }>("/protected/wallet/withdraw", {
+    fetchApi<{ message: string }>("/protected/profile/wallet/withdraw", {
       method: "POST",
       body: JSON.stringify({ amount, momo_number }),
     }),
 
   getTransactions: () =>
-    fetchApi<any[]>("/protected/wallet/transactions"),
+    fetchApi<any[]>("/protected/profile/wallet/transactions"),
 };
 
 // ==================== VERIFICATION API ====================
@@ -498,6 +549,7 @@ export interface AdminUser {
   email: string;
   role: AdminUserRole;
   created_at?: string;
+  momo_number?: string | null;
 }
 
 export interface AdminProduct {
@@ -583,6 +635,106 @@ export const adminApi = {
       totalProducts?: number;
       commission?: number;
     }>("/admin/stats"),
+
+  // Enhanced stats with more details
+  getDashboardStats: () =>
+    fetchApi<{
+      users: { total: number; active: number; newToday: number; newThisWeek: number };
+      orders: { total: number; pending: number; completed: number; cancelled: number; revenue: number };
+      products: { total: number; active: number; pending: number };
+      revenue: { total: number; thisMonth: number; lastMonth: number; averageOrder: number };
+      referrals: { total: number; qualified: number; creditsIssued: number };
+      growth: { userGrowth: number; orderGrowth: number; revenueGrowth: number };
+    }>("/admin/dashboard-stats"),
+
+  // System health
+  getSystemHealth: () =>
+    fetchApi<{
+      status: string;
+      database: { connected: boolean; responseTime: number };
+      api: { responseTime: number; uptime: number };
+      storage: { used: number; total: number };
+    }>("/admin/system-health"),
+
+  // Get recent activity
+  getRecentActivity: (limit = 20) =>
+    fetchApi<any[]>(`/admin/activity?limit=${limit}`),
+
+  // Get top sellers
+  getTopSellers: (limit = 10) =>
+    fetchApi<any[]>(`/admin/top-sellers?limit=${limit}`),
+
+  // Get revenue analytics
+  getRevenueAnalytics: (period: "week" | "month" | "year" = "month") =>
+    fetchApi<{ daily: any[]; weekly: any[]; monthly: any[] }>(`/admin/revenue-analytics?period=${period}`),
+
+  // Get user analytics
+  getUserAnalytics: () =>
+    fetchApi<{ registrations: any[]; byRole: any; byVerification: any }>("/admin/user-analytics"),
+
+  // Get financial stats
+  getFinancialStats: () =>
+    fetchApi<{
+      total_wallet_balance: number;
+      total_platform_credit: number;
+      seller_liability: number;
+      total_transaction_volume: number;
+      total_commission: number;
+      platform_profit: number;
+      paystack_balance: number;
+      available_for_withdrawal: number;
+      pending_payouts: number;
+      completed_payouts: number;
+      failed_payouts: number;
+      total_referral_credits: number;
+      active_referral_credits: number;
+      cash_flow: {
+        paystack_balance: number;
+        seller_liability: number;
+        net_platform_funds: number;
+      };
+      settings: {
+        commission_rate: number;
+        min_withdrawal: number;
+        withdrawal_percentage: number;
+        payout_cooldown_hours: number;
+      };
+    }>("/admin/financial-stats"),
+
+  // Approve payout
+  approvePayout: (payoutId: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/admin/payouts/${payoutId}/approve`, { method: "POST" }),
+
+  // Reject payout
+  rejectPayout: (payoutId: string, reason: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/admin/payouts/${payoutId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  // Freeze/unfreeze user wallet
+  freezeWallet: (userId: string, freeze: boolean, fraudFlags?: string[]) =>
+    fetchApi<{ success: boolean; message: string }>(`/admin/users/${userId}/freeze-wallet`, {
+      method: "POST",
+      body: JSON.stringify({ freeze, fraud_flags: fraudFlags }),
+    }),
+
+  // Bulk actions
+  bulkUpdateUsers: (userIds: string[], action: "ban" | "unban" | "verify") =>
+    fetchApi<{ message: string; updated: number }>("/admin/bulk-users", {
+      method: "POST",
+      body: JSON.stringify({ userIds, action }),
+    }),
+
+  bulkUpdateProducts: (productIds: string[], action: "approve" | "reject" | "delete") =>
+    fetchApi<{ message: string; updated: number }>("/admin/bulk-products", {
+      method: "POST",
+      body: JSON.stringify({ productIds, action }),
+    }),
+
+  // Export data
+  exportData: (type: "users" | "orders" | "products" | "revenue", format: "csv" | "json" = "csv") =>
+    fetchApi<any>(`/admin/export?type=${type}&format=${format}`),
 };
 
 // ==================== SELLERS API ====================
@@ -747,13 +899,27 @@ export const searchApi = {
 
 export interface ReferralStats {
   referral_code: string;
+  referral_link?: string;
   total_referrals: number;
-  recent_referrals: { referred_id: string; created_at: string }[];
+  recent_referrals?: { referred_id: string; created_at: string }[];
+  qualified_buyer_referrals?: number;
+  qualified_seller_referrals?: number;
+  referral_level?: number;
+  is_campus_ambassador?: boolean;
 }
 
 export const referralsApi = {
   getCode: () =>
     fetchApi<ReferralStats>("/referrals/code"),
+
+  getDashboard: () =>
+    fetchApi<any>("/referrals/dashboard"),
+
+  getLeaderboard: (limit = 20) =>
+    fetchApi<any[]>(`/referrals/leaderboard?limit=${limit}`),
+
+  getMilestones: () =>
+    fetchApi<any[]>("/referrals/milestones"),
 
   verify: (referral_code?: string, referrer_email?: string) =>
     fetchApi<{ valid: boolean; referrer: { id: string; name: string } }>("/referrals/verify", {
@@ -770,10 +936,20 @@ export const referralsApi = {
   getStats: () =>
     fetchApi<{
       total_referrals: number;
-      claimed_rewards: number;
-      pending_rewards: number;
+      qualified_referrals: number;
+      pending_referrals: number;
+      buyer_referrals: number;
+      seller_referrals: number;
+      platform_credit: number;
+      commission_discount_remaining: number;
+      referral_level: number;
+      is_campus_ambassador: boolean;
       referrals: any[];
+      rewards: any[];
     }>("/referrals/stats"),
+
+  getAdminStats: () =>
+    fetchApi<any>("/referrals/admin-stats"),
 };
 
 // ==================== NOTIFICATIONS API ====================
@@ -831,6 +1007,297 @@ export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
 
+// ============== Services API ==============
+export interface ServiceType {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  count?: number;
+}
+
+export interface Service {
+  id: string;
+  user_id: string;
+  service_type: string;
+  title: string;
+  description: string;
+  price: number;
+  price_type: 'fixed' | 'hourly' | 'starting_from';
+  location: string;
+  availability: string;
+  response_time: string;
+  is_active: boolean;
+  is_verified: boolean;
+  rating: number;
+  review_count: number;
+  completed_jobs: number;
+  images: string[];
+  created_at: string;
+  provider?: {
+    id: string;
+    full_name: string;
+    avatar_url: string;
+    is_verified: boolean;
+  };
+}
+
+export interface ServiceReview {
+  id: string;
+  service_id: string;
+  user_id: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+  reviewer?: {
+    id: string;
+    full_name: string;
+    avatar_url: string;
+  };
+}
+
+export interface ServiceBooking {
+  id: string;
+  service_id: string;
+  user_id: string;
+  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  notes: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  created_at: string;
+  service?: Service;
+}
+
+export const servicesApi = {
+  // Get all services with optional filters
+  getAll: async (
+    serviceType?: string,
+    limit = 20,
+    offset = 0,
+    sort = 'created_at.desc'
+  ): Promise<ApiResponse<{ services: Service[]; total: number }>> => {
+    const params = new URLSearchParams();
+    if (serviceType) params.append('service_type', serviceType);
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    params.append('sort', sort);
+    return fetchApi(`/services?${params.toString()}`);
+  },
+
+  // Get service by ID
+  getById: async (id: string): Promise<ApiResponse<{ service: Service; reviews: ServiceReview[] }>> => {
+    return fetchApi(`/services/${id}`);
+  },
+
+  // Get service types with counts
+  getTypes: async (): Promise<ApiResponse<ServiceType[]>> => {
+    return fetchApi('/services/meta/types');
+  },
+
+  // Get provider's own services
+  getMyServices: async (): Promise<ApiResponse<Service[]>> => {
+    return fetchApi('/services/provider/me');
+  },
+
+  // Create new service
+  create: async (data: {
+    service_type: string;
+    title: string;
+    description: string;
+    price: number;
+    price_type: 'fixed' | 'hourly' | 'starting_from';
+    location: string;
+    availability: string;
+    response_time: string;
+    images?: string[];
+  }): Promise<ApiResponse<{ service: Service }>> => {
+    return fetchApi('/services', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Update service
+  update: async (
+    id: string,
+    data: Partial<{
+      service_type: string;
+      title: string;
+      description: string;
+      price: number;
+      price_type: 'fixed' | 'hourly' | 'starting_from';
+      location: string;
+      availability: string;
+      response_time: string;
+      images: string[];
+    }>
+  ): Promise<ApiResponse<{ service: Service }>> => {
+    return fetchApi(`/services/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete service
+  delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
+    return fetchApi(`/services/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Toggle service active status
+  toggle: async (id: string): Promise<ApiResponse<{ service: Service }>> => {
+    return fetchApi(`/services/${id}/toggle`, {
+      method: 'PATCH',
+    });
+  },
+
+  // Create service review
+  createReview: async (
+    serviceId: string,
+    data: { rating: number; comment: string }
+  ): Promise<ApiResponse<{ review: ServiceReview }>> => {
+    return fetchApi(`/services/${serviceId}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Create service booking
+  createBooking: async (
+    serviceId: string,
+    data: {
+      notes: string;
+      scheduled_date: string;
+      scheduled_time: string;
+    }
+  ): Promise<ApiResponse<{ booking: ServiceBooking }>> => {
+    return fetchApi(`/services/${serviceId}/bookings`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Get user's bookings (as customer or provider)
+  getMyBookings: async (role: 'customer' | 'provider' = 'customer'): Promise<ApiResponse<{ bookings: ServiceBooking[] }>> => {
+    return fetchApi(`/services/bookings/me?role=${role}`);
+  },
+
+  // Update booking status (provider only)
+  updateBooking: async (
+    id: string,
+    status: 'confirmed' | 'in_progress' | 'completed' | 'cancelled'
+  ): Promise<ApiResponse<{ booking: ServiceBooking }>> => {
+    return fetchApi(`/services/bookings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+};
+
+// ==================== WALLET & PAYOUTS API ====================
+export interface WalletInfo {
+  wallet_balance: number;
+  platform_credit: number;
+  account_weight: number;
+  total_sales: number;
+  successful_transactions: number;
+  last_sale_at: string | null;
+  is_payout_frozen: boolean;
+  fraud_flags: string[];
+  referral_earnings: number;
+  total_referral_credits: number;
+  daily_limit: number;
+}
+
+export interface WithdrawalLimits {
+  wallet_balance: number;
+  account_weight: number;
+  daily_limit: number;
+  min_withdrawal: number;
+  withdrawal_percentage: number;
+  cooldown_hours: number;
+  last_sale_at: string | null;
+  is_frozen: boolean;
+  fraud_flags: string[];
+}
+
+export interface Transaction {
+  id: string;
+  buyer_id: string;
+  seller_id: string;
+  order_id: string;
+  amount: number;
+  commission: number;
+  seller_earning: number;
+  credit_used: number;
+  status: string;
+  created_at: string;
+}
+
+export interface Payout {
+  id: string;
+  user_id: string;
+  amount: number;
+  fee: number;
+  net_amount: number;
+  momo_number: string;
+  network: string;
+  status: string;
+  failure_reason: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export const walletApi = {
+  // Get wallet information
+  getWallet: () =>
+    fetchApi<{ wallet: WalletInfo }>("/payouts/wallet"),
+
+  // Get withdrawal limits
+  getLimits: () =>
+    fetchApi<WithdrawalLimits>("/payouts/limits"),
+
+  // Request withdrawal
+  withdraw: (amount: number, momoNumber: string, network: string) =>
+    fetchApi<{ success: boolean; message: string; wallet: WalletInfo; payout: any }>(
+      "/payouts/withdraw",
+      {
+        method: "POST",
+        body: JSON.stringify({ amount, momo_number: momoNumber, network }),
+      }
+    ),
+
+  // Check withdrawal eligibility
+  checkEligibility: (amount: number) =>
+    fetchApi<{ eligible: boolean; reason: string; wallet_balance: number; daily_limit: number }>(
+      "/payouts/check-eligibility",
+      {
+        method: "POST",
+        body: JSON.stringify({ amount }),
+      }
+    ),
+
+  // Get transaction history
+  getTransactions: (limit = 50, offset = 0, type?: string) => {
+    let url = `/payouts/transactions?limit=${limit}&offset=${offset}`;
+    if (type) url += `&type=${type}`;
+    return fetchApi<{ transactions: Transaction[]; has_more: boolean }>(url);
+  },
+
+  // Get payout history
+  getPayoutHistory: (limit = 20, offset = 0) =>
+    fetchApi<{ payouts: Payout[]; has_more: boolean }>(
+      `/payouts/history?limit=${limit}&offset=${offset}`
+    ),
+
+  // Get wallet ledger/history
+  getLedger: (limit = 50, offset = 0) =>
+    fetchApi<{ ledger: any[]; has_more: boolean }>(
+      `/payouts/ledger?limit=${limit}&offset=${offset}`
+    ),
+};
+
 export const healthApi = {
   check: async (): Promise<ApiResponse<{ status: string }>> => {
     let primaryError: string | undefined;
@@ -883,5 +1350,382 @@ export const healthApi = {
     }
 
     return { error: primaryError || "Backend health check failed" };
+  },
+};
+
+// ==================== BOOKS AND NOTES API ====================
+
+export interface BooksAndNotesItem {
+  id: string;
+  user_id: string;
+  title: string;
+  description?: string;
+  // Book specific fields
+  isbn?: string;
+  author?: string;
+  edition?: string;
+  publisher?: string;
+  // Categorization
+  book_type: string;
+  subject?: string;
+  course_code?: string;
+  academic_level?: string;
+  // Condition and pricing
+  condition: string;
+  price: number;
+  price_negotiable: boolean;
+  // Details
+  page_count?: number;
+  language?: string;
+  location?: string;
+  images?: string[];
+  // Status
+  is_active: boolean;
+  is_sold: boolean;
+  // Stats
+  view_count: number;
+  rating: number;
+  review_count: number;
+  created_at: string;
+  updated_at: string;
+  seller?: {
+    id: string;
+    full_name: string;
+    avatar_url?: string;
+    campus?: string;
+    role: string;
+  };
+  reviews?: {
+    id: string;
+    rating: number;
+    comment?: string;
+    created_at: string;
+    reviewer?: {
+      id: string;
+      full_name: string;
+      avatar_url?: string;
+    };
+  }[];
+}
+
+export const booksApi = {
+  // Get all books and notes with filters
+  getAll: async (
+    book_type?: string,
+    subject?: string,
+    course_code?: string,
+    academic_level?: string,
+    condition?: string,
+    min_price?: number,
+    max_price?: number,
+    search?: string,
+    limit = 20,
+    offset = 0,
+    sort = 'newest'
+  ): Promise<ApiResponse<BooksAndNotesItem[]>> => {
+    const params = new URLSearchParams();
+    if (book_type) params.append('book_type', book_type);
+    if (subject) params.append('subject', subject);
+    if (course_code) params.append('course_code', course_code);
+    if (academic_level) params.append('academic_level', academic_level);
+    if (condition) params.append('condition', condition);
+    if (min_price) params.append('min_price', min_price.toString());
+    if (max_price) params.append('max_price', max_price.toString());
+    if (search) params.append('search', search);
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    params.append('sort', sort);
+    return fetchApi(`/books?${params.toString()}`);
+  },
+
+  // Get by ID
+  getById: async (id: string): Promise<ApiResponse<BooksAndNotesItem>> => {
+    return fetchApi(`/books/${id}`);
+  },
+
+  // Get book types
+  getTypes: async (): Promise<ApiResponse<string[]>> => {
+    return fetchApi('/books/meta/types');
+  },
+
+  // Get subjects
+  getSubjects: async (): Promise<ApiResponse<string[]>> => {
+    return fetchApi('/books/meta/subjects');
+  },
+
+  // Create listing
+  create: async (data: {
+    title: string;
+    description?: string;
+    isbn?: string;
+    author?: string;
+    edition?: string;
+    publisher?: string;
+    book_type: string;
+    subject?: string;
+    course_code?: string;
+    academic_level?: string;
+    condition: string;
+    price: number;
+    price_negotiable?: boolean;
+    page_count?: number;
+    language?: string;
+    location?: string;
+    images?: string[];
+  }): Promise<ApiResponse<BooksAndNotesItem>> => {
+    return fetchApi('/books', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Update listing
+  update: async (
+    id: string,
+    data: Partial<{
+      title: string;
+      description: string;
+      isbn: string;
+      author: string;
+      edition: string;
+      book_type: string;
+      subject: string;
+      course_code: string;
+      academic_level: string;
+      condition: string;
+      price: number;
+      price_negotiable: boolean;
+      location: string;
+      images: string[];
+    }>
+  ): Promise<ApiResponse<BooksAndNotesItem>> => {
+    return fetchApi(`/books/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete listing
+  delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
+    return fetchApi(`/books/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Mark as sold
+  markAsSold: async (id: string): Promise<ApiResponse<BooksAndNotesItem>> => {
+    return fetchApi(`/books/${id}/sold`, {
+      method: 'POST',
+    });
+  },
+
+  // Create review
+  createReview: async (
+    id: string,
+    data: { rating: number; comment?: string }
+  ): Promise<ApiResponse<any>> => {
+    return fetchApi(`/books/${id}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Get user's books
+  getUserBooks: async (userId: string, limit = 20, offset = 0): Promise<ApiResponse<BooksAndNotesItem[]>> => {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    return fetchApi(`/books/user/${userId}?${params.toString()}`);
+  },
+};
+
+// ==================== FASHION API ====================
+
+export interface FashionItem {
+  id: string;
+  user_id: string;
+  title: string;
+  description?: string;
+  // Fashion specific fields
+  category: string;
+  gender: string;
+  size?: string;
+  color?: string;
+  brand?: string;
+  material?: string;
+  pattern?: string;
+  // Condition
+  condition: string;
+  // Pricing
+  price: number;
+  price_negotiable: boolean;
+  original_price?: number;
+  // Details
+  location?: string;
+  images?: string[];
+  // Status
+  is_active: boolean;
+  is_sold: boolean;
+  // Stats
+  view_count: number;
+  rating: number;
+  review_count: number;
+  created_at: string;
+  updated_at: string;
+  seller?: {
+    id: string;
+    full_name: string;
+    avatar_url?: string;
+    campus?: string;
+    role: string;
+  };
+  reviews?: {
+    id: string;
+    rating: number;
+    comment?: string;
+    created_at: string;
+    reviewer?: {
+      id: string;
+      full_name: string;
+      avatar_url?: string;
+    };
+  }[];
+}
+
+export interface FashionFilters {
+  sizes: string[];
+  colors: string[];
+  conditions: string[];
+  brands: string[];
+  genders: string[];
+}
+
+export const fashionApi = {
+  // Get all fashion items with filters
+  getAll: async (
+    category?: string,
+    size?: string,
+    color?: string,
+    brand?: string,
+    condition?: string,
+    gender?: string,
+    limit = 20,
+    offset = 0,
+    sort = 'rating'
+  ): Promise<ApiResponse<FashionItem[]>> => {
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    if (size) params.append('size', size);
+    if (color) params.append('color', color);
+    if (brand) params.append('brand', brand);
+    if (condition) params.append('condition', condition);
+    if (gender) params.append('gender', gender);
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    params.append('sort', sort);
+    return fetchApi(`/fashion?${params.toString()}`);
+  },
+
+  // Get by ID
+  getById: async (id: string): Promise<ApiResponse<FashionItem>> => {
+    return fetchApi(`/fashion/${id}`);
+  },
+
+  // Get categories
+  getCategories: async (): Promise<ApiResponse<string[]>> => {
+    return fetchApi('/fashion/meta/categories');
+  },
+
+  // Get available filters
+  getFilters: async (): Promise<ApiResponse<FashionFilters>> => {
+    return fetchApi('/fashion/meta/filters');
+  },
+
+  // Create listing
+  create: async (data: {
+    title: string;
+    description?: string;
+    price: number;
+    price_type?: 'fixed' | 'hourly' | 'from';
+    location?: string;
+    size?: string;
+    color?: string;
+    brand?: string;
+    condition?: string;
+    gender?: string;
+    images?: string[];
+  }): Promise<ApiResponse<{ service: FashionItem }>> => {
+    return fetchApi('/fashion', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Update listing
+  update: async (
+    id: string,
+    data: Partial<{
+      title: string;
+      description: string;
+      price: number;
+      price_type: 'fixed' | 'hourly' | 'from';
+      location: string;
+      size: string;
+      color: string;
+      brand: string;
+      condition: string;
+      gender: string;
+      images: string[];
+    }>
+  ): Promise<ApiResponse<{ service: FashionItem }>> => {
+    return fetchApi(`/fashion/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Delete listing
+  delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
+    return fetchApi(`/fashion/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Toggle active status
+  toggle: async (id: string): Promise<ApiResponse<{ service: FashionItem }>> => {
+    return fetchApi(`/fashion/${id}/toggle`, {
+      method: 'PATCH',
+    });
+  },
+
+  // Create review
+  createReview: async (
+    id: string,
+    data: { rating: number; comment?: string }
+  ): Promise<ApiResponse<any>> => {
+    return fetchApi(`/fashion/${id}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Mark as sold
+  markAsSold: async (id: string): Promise<ApiResponse<FashionItem>> => {
+    return fetchApi(`/fashion/${id}/sold`, {
+      method: 'POST',
+    });
+  },
+
+  // Get user's fashion items
+  getUserFashion: async (userId: string, limit = 20, offset = 0): Promise<ApiResponse<FashionItem[]>> => {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    return fetchApi(`/fashion/user/${userId}?${params.toString()}`);
+  },
+
+  // Get brands
+  getBrands: async (): Promise<ApiResponse<string[]>> => {
+    return fetchApi('/fashion/meta/brands');
   },
 };

@@ -34,3 +34,5 @@ export async function requireAuth(req, res, next) {
 
   return next();
 }
+
+export default requireAuth;

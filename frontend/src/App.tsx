@@ -39,6 +39,10 @@ import {
 } from "./data";
 import { supabase } from "./supabase-client";
 import Index from "./Index";
+import ForgotPasswordPage from "./ForgotPasswordPage";
+import ResetPasswordPage from "./ResetPasswordPage";
+import ChangePasswordPage from "./ChangePasswordPage";
+import SettingsPage from "./SettingsPage";
 import {
   productsApi,
   ordersApi,
@@ -66,9 +70,12 @@ import AddProduct from "./AddProduct";
 import SellerProfile from "./SellerProfile";
 import ProfessionalOrdersPage from "./ProfessionalOrdersPage";
 import CategoriesPage from "./CategoriesPage";
+import BooksAndNotesPage from "./BooksAndNotesPage";
+import FashionPage from "./FashionPage";
 import FavoritesPage from "./FavoritesPage";
 import NotificationsPage from "./NotificationsPage";
 import ReferralsPage from "./ReferralsPage";
+import LeaderboardPage from "./LeaderboardPage";
 
 declare global {
   interface Window {
@@ -455,6 +462,10 @@ function AppContent() {
       <Route path="/messages" element={backendElement(<MessagesPage />)} />
       <Route path="/orders" element={backendElement(<ProfessionalOrdersPage user={currentUser} />)} />
       <Route path="/auth" element={backendElement(<AuthPage />)} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/change-password" element={backendElement(<ChangePasswordPage />)} />
+      <Route path="/settings" element={backendElement(<SettingsPage />)} />
       <Route path="/dashboard" element={backendElement(<DashboardRouter />)} />
       <Route path="/admin" element={backendElement(<AdminDashboard />)} />
       <Route path="/profile-setup" element={backendElement(<ProfileSetupPage />)} />
@@ -467,9 +478,14 @@ function AppContent() {
       <Route path="/seller/:id" element={backendElement(<SellerProfile />)} />
       <Route path="/categories" element={backendElement(<CategoriesPage />)} />
       <Route path="/categories/:slug" element={backendElement(<CategoriesPage />)} />
+      <Route path="/books-and-notes" element={<BooksAndNotesPage />} />
+      <Route path="/books-and-notes/:id" element={backendElement(<BooksAndNotesPage />)} />
+      <Route path="/fashion" element={<FashionPage />} />
+      <Route path="/fashion/:id" element={backendElement(<FashionPage />)} />
       <Route path="/favorites" element={backendElement(<FavoritesPage />)} />
       <Route path="/notifications" element={backendElement(<NotificationsPage />)} />
       <Route path="/referrals" element={backendElement(<ReferralsPage />)} />
+      <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -726,6 +742,14 @@ function AuthPage() {
                 <Button type="submit" className="h-11 w-full rounded-lg" disabled={tab === "login" ? !canSubmitLogin : !canSubmitSignup}>
                   {tab === "login" ? "Sign In" : "Create Account"}
                 </Button>
+
+                {tab === "login" && (
+                  <p className="text-center text-sm">
+                    <Link to="/forgot-password" className="text-purple-600 hover:underline font-medium">
+                      Forgot your password?
+                    </Link>
+                  </p>
+                )}
 
                 <p className="text-center text-xs text-slate-500">
                   By continuing, you agree to{" "}
@@ -1471,8 +1495,7 @@ toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spot
               <Button onClick={addNewProduct}>Add New Product</Button>
               <Button variant="outline" onClick={() => navigate(`/marketplace?seller=${user.id}`)}>View My Store</Button>
               <Button variant="outline" onClick={openWithdrawFromWallet}>Withdraw Funds</Button>
-              <Button variant="outline" onClick={() => navigate('/profile-setup')}>Edit Business Profile</Button>
-              <Button variant="outline" onClick={shareStoreLink}>Share Store Link</Button>
+              <Button variant="outline" onClick={() => navigate('/settings')}>Settings</Button>
             </div>
           </CardContent>
         </Card>

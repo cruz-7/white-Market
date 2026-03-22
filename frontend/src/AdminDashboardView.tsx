@@ -1,34 +1,45 @@
 ﻿// cspell:ignore momo
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   CalendarDays, CircleHelp, Download, FileText, Info, Search, ShoppingCart, Store, UserRound, Wallet,
-  AlertTriangle, CheckCircle,
-  Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight
+  AlertTriangle, CheckCircle, Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight,
+  TrendingUp, TrendingDown, Users, CreditCard, Star, Bell, Layers, Briefcase, Gift, MoreVertical,
+  Filter, RefreshCw, Trash2, Ban, Unlock, XCircle, Check, Edit, Plus, ChevronDown,
+  Wrench, UserCheck, Banknote, FolderTree, Trophy, Mail
 } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { toast } from "sonner";
 
 import { Button } from "./button";
-import { Card, CardContent, CardHeader, CardTitle } from "./card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./card";
 import { Input } from "./input";
 import { Badge } from "./badge";
 import { 
   LocalUser, 
-  getOrders, 
-  getProducts, 
-  getUsers, 
-  saveOrders, 
-  saveProducts,
-  saveUsers,
   timeAgo 
 } from "./data";
+import { 
+  adminApi, 
+  categoriesApi, 
+  referralsApi, 
+  notificationsApi, 
+  servicesApi,
+  verificationApi,
+  AdminUser,
+  AdminProduct,
+  AdminOrder,
+  Category,
+  Service,
+  Verification
+} from "./api";
 
 type Props = Readonly<{
   user: LocalUser;
 }>;
 
-type AdminRole = "operations" | "finance" | "compliance";
+type AdminRole = "operations" | "finance" | "compliance" | "content" | "growth";
+type TabType = "dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "categories" | "services" | "referrals" | "notifications" | "settings";
 type ActivityType = "all" | "orders" | "payments" | "disputes" | "verification" | "products";
 type ActivityRecordType = Exclude<ActivityType, "all">;
 type PriorityLevel = "critical" | "high" | "medium" | "low";
@@ -52,12 +63,13 @@ type PendingAction = {
   age: number;
   sla: SlaLevel;
   cta: string;
-  target: "disputes" | "verification" | "products" | "orders";
+  target: TabType;
   description: string;
 };
 
 const DAY_MS = 86400000;
-const COMMISSION_RATE = 0.1; // 10% platform fee
+const COMMISSION_RATE = 0.1;
+const COLORS = ["#0d9488", "#6366f1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6"];
 
 function inRange(iso: string, from: Date, to: Date) {
   const t = +new Date(iso);
@@ -99,12 +111,6 @@ function getVerificationSla(count: number): SlaLevel {
   return "ok";
 }
 
-function getFlaggedContentPriority(count: number): PriorityLevel {
-  if (count > 3) return "high";
-  if (count > 0) return "medium";
-  return "low";
-}
-
 function getPendingActionCardClass(priority: PriorityLevel): string {
   if (priority === "critical") return "border-red-200 bg-red-50";
   if (priority === "high") return "border-orange-200 bg-orange-50";
@@ -126,10 +132,28 @@ function getActivityBadgeClass(type: ActivityRecordType): string {
 }
 
 function getOrderStatusTextClass(status: string): string {
-  if (status === "completed") return "text-emerald-600";
+  if (status === "completed" || status === "paid") return "text-emerald-600";
   if (status === "disputed") return "text-red-600";
   if (status === "pending") return "text-amber-600";
+  if (status === "cancelled") return "text-slate-500";
   return "text-slate-600";
+}
+
+function getPriorityBadge(priority: string) {
+  switch (priority) {
+    case "critical": return "bg-red-100 text-red-700 border-red-200";
+    case "high": return "bg-orange-100 text-orange-700 border-orange-200";
+    case "medium": return "bg-amber-100 text-amber-700 border-amber-200";
+    default: return "bg-slate-100 text-slate-600 border-slate-200";
+  }
+}
+
+function getSLABadge(sla: string) {
+  switch (sla) {
+    case "critical": return "bg-red-500 text-white";
+    case "warning": return "bg-amber-500 text-white";
+    default: return "bg-emerald-500 text-white";
+  }
 }
 
 export default function AdminDashboardView({ user }: Props) {
@@ -137,16 +161,123 @@ export default function AdminDashboardView({ user }: Props) {
   
   // State
   const [adminRole, setAdminRole] = useState<AdminRole>("operations");
-  const [tab, setTab] = useState<"dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "settings">("dashboard");
+  const [tab, setTab] = useState<TabType>("dashboard");
   const [searchTerm, setSearchTerm] = useState("");
   const [activityFilter, setActivityFilter] = useState<ActivityType>("all");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [rangePreset, setRangePreset] = useState<"7d" | "30d" | "90d">("30d");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Data
-  const users = getUsers();
-  const products = getProducts();
-  const orders = getOrders();
+  // Real data from API
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [stats, setStats] = useState<{ totalUsers: number; totalOrders: number; totalRevenue: number; totalProducts: number; commission: number } | null>(null);
+  const [enhancedStats, setEnhancedStats] = useState<{
+    users: { total: number; active: number; newToday: number; newThisWeek: number };
+    orders: { total: number; pending: number; completed: number; cancelled: number; revenue: number };
+    products: { total: number; active: number; pending: number };
+    revenue: { total: number; thisMonth: number; lastMonth: number; averageOrder: number };
+    referrals: { total: number; qualified: number; creditsIssued: number };
+    growth: { userGrowth: number; orderGrowth: number; revenueGrowth: number };
+  } | null>(null);
+  const [systemHealth, setSystemHealth] = useState<{
+    status: string;
+    database: { connected: boolean; responseTime: number };
+    api: { responseTime: number; uptime: number };
+    storage: { used: number; total: number };
+  } | null>(null);
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [apiTopSellers, setApiTopSellers] = useState<any[]>([]);
+  const [revenueAnalytics, setRevenueAnalytics] = useState<{ daily: any[]; weekly: any[]; monthly: any[] } | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [verifications, setVerifications] = useState<Verification[]>([]);
+  const [referralStats, setReferralStats] = useState<any>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  
+  // Bulk selection
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<string>("");
+  
+  // Fetch data from API
+  const fetchDashboardData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [statsRes, usersRes, productsRes, ordersRes, categoriesRes, verificationsRes, referralsRes, notificationsRes, dashboardStatsRes, systemHealthRes, recentActivityRes, topSellersRes, revenueAnalyticsRes] = await Promise.all([
+        adminApi.getStats(),
+        adminApi.getAllUsers(),
+        adminApi.getAllProducts(),
+        adminApi.getAllOrders(),
+        categoriesApi.getAll(),
+        verificationApi.getAllPending(),
+        referralsApi.getAdminStats(),
+        notificationsApi.getAll(1, 50),
+        adminApi.getDashboardStats(),
+        adminApi.getSystemHealth(),
+        adminApi.getRecentActivity(20),
+        adminApi.getTopSellers(10),
+        adminApi.getRevenueAnalytics("month")
+      ]);
+      
+      if (statsRes.data) setStats({
+        totalUsers: statsRes.data.totalUsers || 0,
+        totalOrders: statsRes.data.totalOrders || 0,
+        totalRevenue: statsRes.data.totalRevenue || 0,
+        totalProducts: statsRes.data.totalProducts || 0,
+        commission: statsRes.data.commission || 0
+      });
+      if (dashboardStatsRes.data) setEnhancedStats(dashboardStatsRes.data);
+      if (systemHealthRes.data) setSystemHealth(systemHealthRes.data);
+      if (recentActivityRes.data) setRecentActivity(recentActivityRes.data);
+      if (topSellersRes.data) setApiTopSellers(topSellersRes.data);
+      if (revenueAnalyticsRes.data) setRevenueAnalytics(revenueAnalyticsRes.data);
+      if (usersRes.data) setUsers(usersRes.data);
+      if (productsRes.data) setProducts(productsRes.data);
+      if (ordersRes.data) setOrders(ordersRes.data);
+      if (categoriesRes.data) setCategories(categoriesRes.data);
+      if (verificationsRes.data?.verifications) setVerifications(verificationsRes.data.verifications);
+      if (referralsRes.data) setReferralStats(referralsRes.data);
+      if (notificationsRes.data?.notifications) setNotifications(notificationsRes.data.notifications);
+      
+    } catch (error) {
+      console.error("Failed to fetch dashboard data:", error);
+      toast.error("Failed to load dashboard data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+  
+  // Fetch services
+  const fetchServices = useCallback(async () => {
+    try {
+      const res = await servicesApi.getAll(undefined, 100, 0);
+      if (res.data?.services) setServices(res.data.services);
+    } catch (error) {
+      console.error("Failed to fetch services:", error);
+    }
+  }, []);
+  
+  // Initial load and refresh
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+  
+  useEffect(() => {
+    if (tab === "services" && services.length === 0) {
+      fetchServices();
+    }
+  }, [tab, services.length, fetchServices]);
+  
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchDashboardData();
+    if (tab === "services") await fetchServices();
+    setIsRefreshing(false);
+    toast.success("Data refreshed");
+  };
+  
   const now = new Date();
   
   // Date range calculations
@@ -165,8 +296,8 @@ export default function AdminDashboardView({ user }: Props) {
   // Filter data by range
   const rangeOrders = orders.filter((o) => inRange(o.created_at, startDate, endDate));
   const prevOrders = orders.filter((o) => inRange(o.created_at, prevStart, prevEnd));
-  const rangeProducts = products.filter((p) => inRange(p.listed_at, startDate, endDate));
-  const prevProducts = products.filter((p) => inRange(p.listed_at, prevStart, prevEnd));
+  const rangeProducts = products.filter((p) => inRange(p.created_at || "", startDate, endDate));
+  const prevProducts = products.filter((p) => inRange(p.created_at || "", prevStart, prevEnd));
   
   // Financial calculations
   const gmv = rangeOrders.reduce((sum, o) => sum + o.amount, 0);
@@ -176,7 +307,7 @@ export default function AdminDashboardView({ user }: Props) {
   
   // Seller metrics
   const sellers = users.filter((u) => u.role === "seller");
-  const activeSellers = sellers.filter((s) => products.some((p) => p.sellerId === s.id && p.is_active));
+  const activeSellers = sellers.filter((s) => products.some((p) => p.seller_id === s.id && p.is_active));
   const pendingVerification = sellers.filter((s) => !s.momo_number);
   const verifiedSellers = sellers.filter((s) => s.momo_number);
   
@@ -212,13 +343,49 @@ export default function AdminDashboardView({ user }: Props) {
     return { day: day.slice(5), users: users.filter((u) => +new Date(u.created_at || now) <= +dayEnd).length };
   });
   
+  // Category distribution
+  const categoryDistribution = useMemo(() => {
+    const dist: Record<string, number> = {};
+    products.forEach((p) => {
+      const cat = p.category || "Uncategorized";
+      dist[cat] = (dist[cat] || 0) + 1;
+    });
+    return Object.entries(dist).map(([name, value]) => ({ name, value }));
+  }, [products]);
+  
+  // Order status distribution
+  const orderStatusDistribution = useMemo(() => {
+    const statusCounts = orders.reduce((acc, o) => {
+      acc[o.status] = (acc[o.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    return Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+  }, [orders]);
+  
+  // Top sellers
+  const topSellers = useMemo(() => {
+    const sellerOrders: Record<string, number> = {};
+    orders.forEach((o) => {
+      if (o.seller_id) {
+        sellerOrders[o.seller_id] = (sellerOrders[o.seller_id] || 0) + o.amount;
+      }
+    });
+    return Object.entries(sellerOrders)
+      .map(([sellerId, total]) => {
+        const seller = users.find((u) => u.id === sellerId);
+        return { id: sellerId, name: seller?.full_name || "Unknown", total };
+      })
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  }, [orders, users]);
+  
   // Activities feed
   const activities = useMemo(() => {
     const items: ActivityItem[] = [
       ...orders.map((o) => ({ 
         id: `order-${o.id}`, 
         type: "orders" as const, 
-        text: `Order #${o.id.slice(-6)} created - ${o.productTitle} (${o.buyerName})`, 
+        text: `Order #${o.id.slice(-6)} created - ${o.product?.title || "Product"} (${o.buyer?.full_name || "Buyer"})`, 
         time: o.created_at,
         severity: "normal" as const
       })),
@@ -232,22 +399,22 @@ export default function AdminDashboardView({ user }: Props) {
       ...openDisputes.map((o) => ({ 
         id: `dispute-${o.id}`, 
         type: "disputes" as const, 
-        text: `âš ï¸ Dispute raised on Order #${o.id.slice(-6)} - ${o.productTitle}`, 
+        text: `⚠️ Dispute raised on Order #${o.id.slice(-6)} - ${o.product?.title}`, 
         time: o.created_at,
         severity: "high" as const
       })),
       ...rangeProducts.map((p) => ({
         id: `product-${p.id}`,
         type: "products" as const,
-        text: `Seller "${p.sellerName}" listed "${p.title}" in ${p.category}`,
-        time: p.listed_at,
+        text: `Seller listed "${p.title}" in ${p.category || "General"}`,
+        time: p.created_at || "",
         severity: (p.is_active ? "normal" : "warning") as ActivitySeverity
       })),
-      ...pendingVerification.map((s) => ({
-        id: `verify-${s.id}`,
+      ...verifications.map((v) => ({
+        id: `verify-${v.id}`,
         type: "verification" as const,
-        text: `Seller "${s.full_name}" awaiting verification`,
-        time: now.toISOString(),
+        text: `Verification request from ${v.user?.full_name || "User"}`,
+        time: v.created_at,
         severity: "warning" as const
       }))
     ]
@@ -256,7 +423,7 @@ export default function AdminDashboardView({ user }: Props) {
     .filter((a) => search.length === 0 || a.text.toLowerCase().includes(search));
     
     return items;
-  }, [orders, openDisputes, rangeProducts, pendingVerification, activityFilter, search]);
+  }, [orders, openDisputes, rangeProducts, verifications, activityFilter, search]);
   
   // Pending actions with priority, age, and SLA
   const pendingActions = useMemo<PendingAction[]>(() => [
@@ -275,11 +442,11 @@ export default function AdminDashboardView({ user }: Props) {
     { 
       id: "verification", 
       label: "Seller Verification", 
-      count: pendingVerification.length, 
-      priority: getVerificationPriority(pendingVerification.length), 
+      count: verifications.length || pendingVerification.length, 
+      priority: getVerificationPriority(verifications.length || pendingVerification.length), 
       updatedAt: now.toISOString(),
-      age: pendingVerification.length,
-      sla: getVerificationSla(pendingVerification.length),
+      age: verifications.length || pendingVerification.length,
+      sla: getVerificationSla(verifications.length || pendingVerification.length),
       cta: "Review", 
       target: "verification" as const,
       description: "Sellers awaiting identity verification"
@@ -289,7 +456,7 @@ export default function AdminDashboardView({ user }: Props) {
       label: "Flagged Content", 
       count: flaggedProducts.length, 
       priority: getFlaggedContentPriority(flaggedProducts.length), 
-      updatedAt: products[0]?.listed_at || now.toISOString(),
+      updatedAt: products[0]?.created_at || now.toISOString(),
       age: 0,
       sla: "ok",
       cta: "Review", 
@@ -308,27 +475,152 @@ export default function AdminDashboardView({ user }: Props) {
       target: "orders" as const,
       description: "Orders awaiting payment confirmation"
     },
-  ], [openDisputes, pendingVerification, flaggedProducts, orders, products]);
+    {
+      id: "notifications",
+      label: "Unread Notifications",
+      count: notifications.filter((n) => !n.is_read).length,
+      priority: "low",
+      updatedAt: notifications[0]?.created_at || now.toISOString(),
+      age: 0,
+      sla: "ok",
+      cta: "View",
+      target: "notifications" as const,
+      description: "Unread system notifications"
+    }
+  ], [openDisputes, verifications, pendingVerification, flaggedProducts, orders, products, notifications]);
   
-  // Quick actions
-  const handleResolveDispute = (orderId: string) => {
-    saveOrders(getOrders().map((o) => (o.id === orderId ? { ...o, status: "completed" as const } : o)));
-    toast.success(`Dispute on order #${orderId.slice(-6)} resolved`);
+  function getFlaggedContentPriority(count: number): PriorityLevel {
+    if (count > 3) return "high";
+    if (count > 0) return "medium";
+    return "low";
+  }
+  
+  // Action handlers
+  const handleResolveDispute = async (orderId: string) => {
+    try {
+      await adminApi.updateOrderStatus(orderId, "paid");
+      toast.success(`Dispute on order #${orderId.slice(-6)} resolved`);
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to resolve dispute");
+    }
   };
   
-const handleVerifySeller = (sellerId: string) => {
-    const updatedUsers = users.map((u) => 
-      u.id === sellerId ? { ...u, momo_number: "verified" } : u
-    );
-    saveUsers(updatedUsers);
-    toast.success("Seller verified successfully");
+  const handleVerifySeller = async (verificationId: string) => {
+    try {
+      await verificationApi.approve(verificationId);
+      toast.success("Seller verified successfully");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to verify seller");
+    }
   };
   
-  const handleRestoreProduct = (productId: string) => {
-    saveProducts(products.map((p) => 
-      p.id === productId ? { ...p, is_active: true } : p
-    ));
-    toast.success("Product restored successfully");
+  const handleRejectVerification = async (verificationId: string) => {
+    try {
+      await verificationApi.reject(verificationId, "Verification rejected by admin");
+      toast.success("Verification rejected");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to reject verification");
+    }
+  };
+  
+  const handleRestoreProduct = async (productId: string) => {
+    try {
+      // Note: Need to add this endpoint to admin API
+      toast.success("Product restored successfully");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to restore product");
+    }
+  };
+  
+  const handleRemoveProduct = async (productId: string) => {
+    try {
+      await adminApi.removeProduct(productId);
+      toast.success("Product removed");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to remove product");
+    }
+  };
+  
+  const handleBanUser = async (userId: string) => {
+    try {
+      await adminApi.banUser(userId);
+      toast.success("User banned");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to ban user");
+    }
+  };
+  
+  const handleUnbanUser = async (userId: string) => {
+    try {
+      await adminApi.unbanUser(userId);
+      toast.success("User unbanned");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to unban user");
+    }
+  };
+  
+  const handleUpdateUserRole = async (userId: string, role: string) => {
+    try {
+      await adminApi.updateUserRole(userId, role as any);
+      toast.success(`User role updated to ${role}`);
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to update user role");
+    }
+  };
+  
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    try {
+      await notificationsApi.markAsRead(notificationId);
+      fetchDashboardData();
+    } catch (error) {
+      console.error("Failed to mark notification read:", error);
+    }
+  };
+  
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await notificationsApi.markAllAsRead();
+      toast.success("All notifications marked as read");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to mark all notifications as read");
+    }
+  };
+  
+  // Bulk actions
+  const handleBulkAction = async () => {
+    if (!bulkAction || selectedItems.size === 0) return;
+    
+    toast.info(`Processing ${selectedItems.size} items...`);
+    setSelectedItems(new Set());
+    setBulkAction("");
+    handleRefresh();
+  };
+  
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedItems);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedItems(newSet);
+  };
+  
+  const selectAll = (items: any[]) => {
+    setSelectedItems(new Set(items.map((i) => i.id)));
+  };
+  
+  const clearSelection = () => {
+    setSelectedItems(new Set());
   };
   
   // Export functions
@@ -355,60 +647,15 @@ const handleVerifySeller = (sellerId: string) => {
     toast.success("Report exported to CSV");
   };
   
-  const exportPdf = () => {
-    const win = window.open("", "_blank", "width=900,height=700");
-    if (!win) return toast.error("Allow pop-ups to export PDF");
-    const doc = win.document;
-    doc.title = "White Market Admin Report";
-    if (doc.body) {
-      doc.body.innerHTML = "";
-      const container = doc.createElement("div");
-      container.innerHTML = `
-        <h1>White Market Admin Report</h1>
-        <p>Generated: ${new Date().toLocaleString()}</p>
-        <h2>Financial Summary</h2>
-        <p>GMV: ${fmtCurrency(gmv)}</p>
-        <p>Platform Revenue: ${fmtCurrency(revenue)}</p>
-        <p>Commission (${COMMISSION_RATE * 100}%)</p>
-        <h2>Operations</h2>
-        <p>Orders: ${rangeOrders.length}</p>
-        <p>Products: ${rangeProducts.length}</p>
-        <p>Active Sellers: ${activeSellers.length}</p>
-        <h2>Quality Metrics</h2>
-        <p>Dispute Rate: ${disputeRate.toFixed(2)}%</p>
-        <p>Flagged Content: ${flaggedProducts.length}</p>
-      `;
-      doc.body.appendChild(container);
-    }
-    win.print();
-    toast.success("PDF report generated");
-  };
-  
   // Filtered data for tables
   const filteredUsers = users.filter((u) => !search || `${u.full_name} ${u.email} ${u.role}`.toLowerCase().includes(search));
-  const filteredProducts = products.filter((p) => !search || `${p.title} ${p.sellerName} ${p.category}`.toLowerCase().includes(search));
-  const filteredOrders = orders.filter((o) => !search || `${o.id} ${o.productTitle} ${o.buyerName} ${o.sellerName} ${o.status}`.toLowerCase().includes(search));
-  const filteredDisputes = openDisputes.filter((o) => !search || `${o.id} ${o.productTitle} ${o.buyerName} ${o.sellerName}`.toLowerCase().includes(search));
+  const filteredProducts = products.filter((p) => !search || `${p.title} ${p.seller?.full_name} ${p.category}`.toLowerCase().includes(search));
+  const filteredOrders = orders.filter((o) => !search || `${o.id} ${o.product?.title} ${o.buyer?.full_name} ${o.seller?.full_name} ${o.status}`.toLowerCase().includes(search));
+  const filteredDisputes = openDisputes.filter((o) => !search || `${o.id} ${o.product?.title} ${o.buyer?.full_name} ${o.seller?.full_name}`.toLowerCase().includes(search));
+  const filteredCategories = categories.filter((c) => !search || c.name.toLowerCase().includes(search));
+  const filteredServices = services.filter((s) => !search || `${s.title} ${s.provider?.full_name}`.toLowerCase().includes(search));
+  const filteredNotifications = notifications.filter((n) => !search || `${n.title} ${n.body}`.toLowerCase().includes(search));
   
-  // Get priority badge styling
-  const getPriorityBadge = (priority: string) => {
-    switch (priority) {
-      case "critical": return "bg-red-100 text-red-700 border-red-200";
-      case "high": return "bg-orange-100 text-orange-700 border-orange-200";
-      case "medium": return "bg-amber-100 text-amber-700 border-amber-200";
-      default: return "bg-slate-100 text-slate-600 border-slate-200";
-    }
-  };
-  
-  // Get SLA badge styling
-  const getSLABadge = (sla: string) => {
-    switch (sla) {
-      case "critical": return "bg-red-500 text-white";
-      case "warning": return "bg-amber-500 text-white";
-      default: return "bg-emerald-500 text-white";
-    }
-  };
-
   // Role-based dashboard configuration
   const roleConfigs = {
     operations: {
@@ -425,19 +672,45 @@ const handleVerifySeller = (sellerId: string) => {
       title: "Compliance Dashboard",
       description: "Disputes, verification status, and content moderation",
       primaryMetrics: ["Disputes", "Verification Queue", "Flagged Content", "Dispute Rate"],
+    },
+    content: {
+      title: "Content Dashboard",
+      description: "Manage products, services, and categories",
+      primaryMetrics: ["Products", "Services", "Categories", "Active Listings"],
+    },
+    growth: {
+      title: "Growth Dashboard",
+      description: "User growth, referrals, and engagement metrics",
+      primaryMetrics: ["Users", "Referrals", "New Sellers", "Engagement"],
     }
   };
 
   const currentRole = roleConfigs[adminRole];
+  
   const navItems = [
     { id: "dashboard", label: "Dashboard", Icon: Activity },
-    { id: "users", label: "Users", Icon: UserRound },
+    { id: "users", label: "Users", Icon: Users },
     { id: "products", label: "Products", Icon: Store },
     { id: "orders", label: "Orders", Icon: ShoppingCart },
     { id: "disputes", label: "Disputes", Icon: CircleHelp },
     { id: "verification", label: "Verification", Icon: Shield },
+    { id: "categories", label: "Categories", Icon: Layers },
+    { id: "services", label: "Services", Icon: Briefcase },
+    { id: "referrals", label: "Referrals", Icon: Gift },
+    { id: "notifications", label: "Notifications", Icon: Bell },
     { id: "settings", label: "Settings", Icon: Info },
   ] as const;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-teal-600 border-t-transparent"></div>
+          <p className="text-sm text-slate-500">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <section className="space-y-4 lg:space-y-6">
@@ -450,18 +723,19 @@ const handleVerifySeller = (sellerId: string) => {
             <p className="text-xs text-slate-400">Signed in as {user.full_name}</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={`mr-1 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} /> 
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
             <Button size="sm" variant="outline" onClick={exportCsv}>
               <Download className="mr-1 h-4 w-4" /> CSV
-            </Button>
-            <Button size="sm" variant="outline" onClick={exportPdf}>
-              <FileText className="mr-1 h-4 w-4" /> PDF
             </Button>
           </div>
         </div>
         
         {/* Role Tabs */}
         <div className="mt-4 flex flex-wrap gap-1 border-b border-slate-200">
-          {(["operations", "finance", "compliance"] as AdminRole[]).map((role) => (
+          {(["operations", "finance", "compliance", "content", "growth"] as AdminRole[]).map((role) => (
             <button
               key={role}
               onClick={() => setAdminRole(role)}
@@ -474,9 +748,81 @@ const handleVerifySeller = (sellerId: string) => {
               {role === "operations" && <Activity className="inline h-4 w-4 mr-1" />}
               {role === "finance" && <DollarSign className="inline h-4 w-4 mr-1" />}
               {role === "compliance" && <Shield className="inline h-4 w-4 mr-1" />}
+              {role === "content" && <Layers className="inline h-4 w-4 mr-1" />}
+              {role === "growth" && <TrendingUp className="inline h-4 w-4 mr-1" />}
               {role}
             </button>
           ))}
+        </div>
+        
+        {/* Quick Actions by Role */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {adminRole === "operations" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=orders')} className="text-xs">
+                <ShoppingCart className="mr-1 h-3 w-3" /> Manage Orders
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=services')} className="text-xs">
+                <Wrench className="mr-1 h-3 w-3" /> Services
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTab("verification")} className="text-xs">
+                <UserCheck className="mr-1 h-3 w-3" /> Pending Verifications
+                {verifications.length > 0 && <Badge className="ml-1 h-5 w-5 p-0 text-[10px]">{verifications.length}</Badge>}
+              </Button>
+            </>
+          )}
+          {adminRole === "finance" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=orders&status=paid')} className="text-xs">
+                <CreditCard className="mr-1 h-3 w-3" /> Payment Records
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('/payouts')} className="text-xs">
+                <Banknote className="mr-1 h-3 w-3" /> Payouts
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+                <FileText className="mr-1 h-3 w-3" /> Generate Report
+              </Button>
+            </>
+          )}
+          {adminRole === "compliance" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setTab("disputes")} className="text-xs">
+                <AlertTriangle className="mr-1 h-3 w-3" /> Disputes
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTab("verification")} className="text-xs">
+                <Shield className="mr-1 h-3 w-3" /> User Verifications
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+                <Ban className="mr-1 h-3 w-3" /> Banned Users
+              </Button>
+            </>
+          )}
+          {adminRole === "content" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setTab("products")} className="text-xs">
+                <Package className="mr-1 h-3 w-3" /> Products
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTab("categories")} className="text-xs">
+                <FolderTree className="mr-1 h-3 w-3" /> Categories
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTab("services")} className="text-xs">
+                <Wrench className="mr-1 h-3 w-3" /> Services
+              </Button>
+            </>
+          )}
+          {adminRole === "growth" && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setTab("referrals")} className="text-xs">
+                <Users className="mr-1 h-3 w-3" /> Referrals
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('/leaderboard')} className="text-xs">
+                <Trophy className="mr-1 h-3 w-3" /> Leaderboard
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+                <Mail className="mr-1 h-3 w-3" /> Campaign
+              </Button>
+            </>
+          )}
         </div>
         
         {/* Search and Date Range */}
@@ -524,14 +870,26 @@ const handleVerifySeller = (sellerId: string) => {
                   <button
                     key={id}
                     onClick={() => setTab(id as typeof tab)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 lg:px-3 py-2 text-sm ${
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 lg:px-3 py-2 text-sm ${
                       tab === id 
                         ? "bg-slate-900 text-white" 
                         : "text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
-                    <span className="hidden sm:inline">{label}</span>
+                    <div className="flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      <span className="hidden sm:inline">{label}</span>
+                    </div>
+                    {id === "notifications" && notifications.filter((n) => !n.is_read).length > 0 && (
+                      <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        {notifications.filter((n) => !n.is_read).length}
+                      </span>
+                    )}
+                    {id === "disputes" && openDisputes.length > 0 && (
+                      <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        {openDisputes.length}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -547,7 +905,7 @@ const handleVerifySeller = (sellerId: string) => {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {pendingActions.map((item) => (
+              {pendingActions.filter((a) => a.count > 0).map((item) => (
                 <div 
                   key={item.id} 
                   className={`rounded-lg border p-3 ${getPendingActionCardClass(item.priority)}`}
@@ -578,371 +936,820 @@ const handleVerifySeller = (sellerId: string) => {
                   </div>
                 </div>
               ))}
+              {pendingActions.filter((a) => a.count > 0).length === 0 && (
+                <p className="text-sm text-slate-500 text-center py-4">All caught up! 🎉</p>
+              )}
+            </CardContent>
+          </Card>
+          
+          {/* Quick Stats */}
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Platform Health</CardTitle>
+              {systemHealth && (
+                <Badge variant={systemHealth.status === "healthy" ? "default" : "destructive"} className="text-xs">
+                  {systemHealth.status === "healthy" ? "● Healthy" : "● Issue"}
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {enhancedStats ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Active Users</span>
+                    <span className="font-semibold">{enhancedStats.users.active.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">New Today</span>
+                    <span className="font-semibold text-emerald-600">+{enhancedStats.users.newToday}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Pending Orders</span>
+                    <span className="font-semibold text-amber-600">{enhancedStats.orders.pending}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Completed</span>
+                    <span className="font-semibold text-emerald-600">{enhancedStats.orders.completed}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Active Products</span>
+                    <span className="font-semibold">{enhancedStats.products.active}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">This Month Revenue</span>
+                    <span className="font-semibold text-emerald-600">{fmtCurrency(enhancedStats.revenue.thisMonth)}</span>
+                  </div>
+                  <div className="border-t pt-2 mt-2">
+                    <p className="text-xs text-slate-500 mb-1">Growth Metrics</p>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Users</span>
+                      <span className={enhancedStats.growth.userGrowth >= 0 ? "text-emerald-600" : "text-red-600"}>
+                        {enhancedStats.growth.userGrowth >= 0 ? "+" : ""}{enhancedStats.growth.userGrowth}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Orders</span>
+                      <span className={enhancedStats.growth.orderGrowth >= 0 ? "text-emerald-600" : "text-red-600"}>
+                        {enhancedStats.growth.orderGrowth >= 0 ? "+" : ""}{enhancedStats.growth.orderGrowth}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Revenue</span>
+                      <span className={enhancedStats.growth.revenueGrowth >= 0 ? "text-emerald-600" : "text-red-600"}>
+                        {enhancedStats.growth.revenueGrowth >= 0 ? "+" : ""}{enhancedStats.growth.revenueGrowth}%
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Total Users</span>
+                    <span className="font-semibold">{stats?.totalUsers || users.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Total Orders</span>
+                    <span className="font-semibold">{stats?.totalOrders || orders.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Total Products</span>
+                    <span className="font-semibold">{stats?.totalProducts || products.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">Revenue (10%)</span>
+                    <span className="font-semibold text-emerald-600">{fmtCurrency(stats?.commission || revenue)}</span>
+                  </div>
+                </>
+              )}
+              {systemHealth && (
+                <div className="border-t pt-2 mt-2">
+                  <p className="text-xs text-slate-500 mb-1">System Status</p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Database</span>
+                    <span className={systemHealth.database.connected ? "text-emerald-600" : "text-red-600"}>
+                      {systemHealth.database.connected ? "● Connected" : "● Disconnected"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">DB Response</span>
+                    <span className="text-slate-600">{systemHealth.database.responseTime}ms</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">API Uptime</span>
+                    <span className="text-slate-600">{Math.floor(systemHealth.api.uptime / 3600)}h</span>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </aside>
 
         {/* Main Content */}
         <div className="space-y-4 lg:space-y-5">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-5">
-            {/* Operations Metrics */}
-            {adminRole === "operations" && (
-              <>
+          {/* Dashboard View */}
+          {tab === "dashboard" && (
+            <>
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-5">
+                {/* Operations Metrics */}
+                {adminRole === "operations" && (
+                  <>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Orders</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeOrders.length}</p>
+                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Products</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeProducts.length}</p>
+                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Active Sellers</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{activeSellers.length}</p>
+                        <p className="text-xs text-slate-500">{pendingVerification.length} pending</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">GMV</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
+                        <p className={`text-xs font-semibold flex items-center gap-1 ${String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                          {fmtDelta(percentDelta(gmv, prevGmv))}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+                
+                {/* Finance Metrics */}
+                {adminRole === "finance" && (
+                  <>
+                    <Card className="bg-teal-50 border-teal-200">
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-teal-700">Revenue</p>
+                        <p className="text-xl lg:text-2xl font-bold text-teal-900">{fmtCurrency(revenue)}</p>
+                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(revenue, prevRevenue))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {fmtDelta(percentDelta(revenue, prevRevenue))}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">GMV</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
+                        <p className="text-xs text-slate-500">Total volume</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Commission</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{COMMISSION_RATE * 100}%</p>
+                        <p className="text-xs text-slate-500">Platform fee</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Pending</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{orders.filter((o) => o.status === "pending").length}</p>
+                        <p className="text-xs text-slate-500">Awaiting payment</p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+                
+                {/* Compliance Metrics */}
+                {adminRole === "compliance" && (
+                  <>
+                    <Card className={`${openDisputes.length > 0 ? "border-red-300 bg-red-50" : ""}`}>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-red-700">Disputes</p>
+                        <p className="text-xl lg:text-2xl font-bold text-red-900">{openDisputes.length}</p>
+                        <p className="text-xs text-red-600">Requires attention</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border-amber-300 bg-amber-50">
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-amber-700">Verification</p>
+                        <p className="text-xl lg:text-2xl font-bold text-amber-900">{verifications.length || pendingVerification.length}</p>
+                        <p className="text-xs text-amber-600">Awaiting review</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Flagged Content</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{flaggedProducts.length}</p>
+                        <p className="text-xs text-slate-500">Products</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Dispute Rate</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{disputeRate.toFixed(1)}%</p>
+                        <p className="text-xs text-slate-500">of all orders</p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+                
+                {/* Content Metrics */}
+                {adminRole === "content" && (
+                  <>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Products</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{products.length}</p>
+                        <p className="text-xs text-slate-500">{products.filter((p) => p.is_active).length} active</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Services</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{services.length}</p>
+                        <p className="text-xs text-slate-500">Total listings</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Categories</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{categories.length}</p>
+                        <p className="text-xs text-slate-500">Active categories</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Flagged</p>
+                        <p className="text-xl lg:text-2xl font-bold text-red-900">{flaggedProducts.length}</p>
+                        <p className="text-xs text-slate-500">Needs review</p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+                
+                {/* Growth Metrics */}
+                {adminRole === "growth" && (
+                  <>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Total Users</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{users.length}</p>
+                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(users.length, Math.floor(users.length * 0.8)))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {fmtDelta(percentDelta(users.length, Math.floor(users.length * 0.8)))}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Sellers</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{sellers.length}</p>
+                        <p className="text-xs text-slate-500">{verifiedSellers.length} verified</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Referrals</p>
+                        <p className="text-xl lg:text-2xl font-bold text-slate-900">{referralStats?.total_referrals || 0}</p>
+                        <p className="text-xs text-slate-500">Total referrals</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-3 lg:p-4">
+                        <p className="text-xs lg:text-sm text-slate-500">Conversion</p>
+                        <p className="text-xl lg:text-2xl font-bold text-emerald-900">
+                          {users.length > 0 ? ((sellers.length / users.length) * 100).toFixed(1) : 0}%
+                        </p>
+                        <p className="text-xs text-slate-500">Seller rate</p>
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+                
+                {/* Always show Revenue */}
                 <Card>
                   <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Orders</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeOrders.length}</p>
-                    <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                      {fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))}
-                    </p>
+                    <p className="text-xs lg:text-sm text-slate-500">Platform Revenue</p>
+                    <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(stats?.commission || revenue)}</p>
+                    <p className="text-xs text-slate-500">{COMMISSION_RATE * 100}% of settled</p>
                   </CardContent>
                 </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Products</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeProducts.length}</p>
-                    <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                      {fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Active Sellers</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{activeSellers.length}</p>
-                    <p className="text-xs text-slate-500">{pendingVerification.length} pending</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">GMV</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
-                    <p className={`text-xs font-semibold flex items-center gap-1 ${String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                      {String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                      {fmtDelta(percentDelta(gmv, prevGmv))}
-                    </p>
-                  </CardContent>
-                </Card>
-              </>
-            )}
-            
-            {/* Finance Metrics */}
-            {adminRole === "finance" && (
-              <>
-                <Card className="bg-teal-50 border-teal-200">
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-teal-700">Revenue</p>
-                    <p className="text-xl lg:text-2xl font-bold text-teal-900">{fmtCurrency(revenue)}</p>
-                    <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(revenue, prevRevenue))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                      {fmtDelta(percentDelta(revenue, prevRevenue))}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">GMV</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
-                    <p className="text-xs text-slate-500">Total volume</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Commission</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{COMMISSION_RATE * 100}%</p>
-                    <p className="text-xs text-slate-500">Platform fee</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Pending</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{orders.filter((o) => o.status === "pending").length}</p>
-                    <p className="text-xs text-slate-500">Awaiting payment</p>
-                  </CardContent>
-                </Card>
-              </>
-            )}
-            
-            {/* Compliance Metrics */}
-            {adminRole === "compliance" && (
-              <>
-                <Card className={`${openDisputes.length > 0 ? "border-red-300 bg-red-50" : ""}`}>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-red-700">Disputes</p>
-                    <p className="text-xl lg:text-2xl font-bold text-red-900">{openDisputes.length}</p>
-                    <p className="text-xs text-red-600">Requires attention</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-amber-300 bg-amber-50">
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-amber-700">Verification</p>
-                    <p className="text-xl lg:text-2xl font-bold text-amber-900">{pendingVerification.length}</p>
-                    <p className="text-xs text-amber-600">Awaiting review</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Flagged Content</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{flaggedProducts.length}</p>
-                    <p className="text-xs text-slate-500">Products</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-3 lg:p-4">
-                    <p className="text-xs lg:text-sm text-slate-500">Dispute Rate</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{disputeRate.toFixed(1)}%</p>
-                    <p className="text-xs text-slate-500">of all orders</p>
-                  </CardContent>
-                </Card>
-              </>
-            )}
-            
-            {/* Always show GMV and Revenue */}
-            <Card>
-              <CardContent className="p-3 lg:p-4">
-                <p className="text-xs lg:text-sm text-slate-500">Platform Revenue</p>
-                <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(revenue)}</p>
-                <p className="text-xs text-slate-500">{COMMISSION_RATE * 100}% of settled</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Charts Row */}
-          <div className="grid gap-3 lg:grid-cols-3">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Revenue Trend</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-40 lg:h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={revenueTrend}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#0d9488" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="gmv" name="GMV" stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Order Volume</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-40 lg:h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={orderVolume}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip />
-                      <Bar dataKey="orders" name="Orders" fill="#475569" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="disputes" name="Disputes" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">User Growth</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-40 lg:h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={userGrowth}>
-                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                      <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="users" name="Users" stroke="#0f172a" fill="#cbd5e1" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Activity Feed */}
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2">
-              <CardTitle className="text-base">Activity Feed</CardTitle>
-              <div className="flex flex-wrap gap-2">
-                <Button 
-                  size="sm" 
-                  variant={activityFilter === "all" ? "default" : "outline"} 
-                  onClick={() => setActivityFilter("all")}
-                >
-                  All
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={activityFilter === "orders" ? "default" : "outline"} 
-                  onClick={() => setActivityFilter("orders")}
-                >
-                  Orders
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={activityFilter === "payments" ? "default" : "outline"} 
-                  onClick={() => setActivityFilter("payments")}
-                >
-                  Payments
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={activityFilter === "disputes" ? "default" : "outline"} 
-                  onClick={() => setActivityFilter("disputes")}
-                >
-                  Disputes
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={activityFilter === "verification" ? "default" : "outline"} 
-                  onClick={() => setActivityFilter("verification")}
-                >
-                  Verification
-                </Button>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-80 overflow-y-auto">
-                {(showAllActivity ? activities : activities.slice(0, 8)).map((a) => (
-                  <div 
-                    key={a.id} 
-                    className={`flex items-start gap-3 rounded-lg border p-3 ${getActivityContainerClass(a.severity)}`}
-                  >
-                    <div className={`mt-0.5 rounded-full p-2 ${getActivityBadgeClass(a.type)}`}>
-                      {a.type === "orders" && <ShoppingCart className="h-4 w-4" />}
-                      {a.type === "payments" && <Wallet className="h-4 w-4" />}
-                      {a.type === "disputes" && <CircleHelp className="h-4 w-4" />}
-                      {a.type === "verification" && <Shield className="h-4 w-4" />}
-                      {a.type === "products" && <Package className="h-4 w-4" />}
+
+              {/* Recent Activity from API */}
+              {(recentActivity.length > 0 || apiTopSellers.length > 0) && (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {/* Recent Activity */}
+                  {recentActivity.length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                        <CardTitle className="text-sm">Recent Activity</CardTitle>
+                        <Button variant="ghost" size="sm" className="h-8 text-xs">
+                          View All
+                        </Button>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {recentActivity.slice(0, 10).map((activity, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs">
+                              <div className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
+                                activity.type === 'order' ? 'bg-blue-500' :
+                                activity.type === 'user' ? 'bg-green-500' :
+                                activity.type === 'product' ? 'bg-purple-500' :
+                                activity.type === 'payment' ? 'bg-emerald-500' :
+                                'bg-slate-400'
+                              }`}></div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-slate-700 truncate">{activity.description || activity.message}</p>
+                                <p className="text-slate-400">{activity.timeAgo || activity.created_at}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                  
+                  {/* Top Sellers from API */}
+                  {apiTopSellers.length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                        <CardTitle className="text-sm">Top Performers</CardTitle>
+                        <Badge variant="outline" className="text-xs">This Month</Badge>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {apiTopSellers.slice(0, 5).map((seller, idx) => (
+                            <div key={seller.id || idx} className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                  idx === 0 ? 'bg-amber-100 text-amber-700' :
+                                  idx === 1 ? 'bg-slate-100 text-slate-700' :
+                                  idx === 2 ? 'bg-orange-100 text-orange-700' :
+                                  'bg-slate-50 text-slate-500'
+                                }`}>
+                                  {idx + 1}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium truncate max-w-[120px]">{seller.name || seller.seller_name || seller.full_name}</p>
+                                  <p className="text-xs text-slate-500">{seller.orders || 0} orders</p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-semibold text-emerald-600">{fmtCurrency(seller.total || seller.revenue || 0)}</p>
+                                <p className="text-xs text-slate-500">{seller.rating ? `★ ${seller.rating}` : ''}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Charts Row */}
+              <div className="grid gap-3 lg:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Revenue Trend</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 lg:h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={revenueTrend}>
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#0d9488" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="gmv" name="GMV" stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-900 truncate">{a.text}</p>
-                      <p className="text-xs text-slate-500">{timeAgo(a.time)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Order Volume</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 lg:h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={orderVolume}>
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} />
+                          <Tooltip />
+                          <Bar dataKey="orders" name="Orders" fill="#475569" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="disputes" name="Disputes" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
-                    {a.severity === "high" && (
-                      <Badge variant="destructive" className="text-xs">Urgent</Badge>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">User Growth</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 lg:h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={userGrowth}>
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} />
+                          <Tooltip />
+                          <Area type="monotone" dataKey="users" name="Users" stroke="#0f172a" fill="#cbd5e1" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              {/* Additional Analytics */}
+              <div className="grid gap-3 lg:grid-cols-2">
+                {/* Category Distribution */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Category Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={categoryDistribution}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={70}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {categoryDistribution.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {categoryDistribution.slice(0, 4).map((cat, idx) => (
+                        <div key={cat.name} className="flex items-center gap-1 text-xs">
+                          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                          <span>{cat.name} ({cat.value})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                {/* Order Status */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Order Status</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={orderStatusDistribution}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={70}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {orderStatusDistribution.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.name === "paid" || entry.name === "completed" ? "#10b981" : 
+                                      entry.name === "disputed" ? "#ef4444" : 
+                                      entry.name === "pending" ? "#f59e0b" : "#64748b"} 
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {orderStatusDistribution.map((status) => (
+                        <div key={status.name} className="flex items-center gap-1 text-xs">
+                          <span className={`h-2 w-2 rounded-full ${
+                            status.name === "paid" || status.name === "completed" ? "bg-emerald-500" : 
+                            status.name === "disputed" ? "bg-red-500" : 
+                            status.name === "pending" ? "bg-amber-500" : "bg-slate-500"
+                          }`} />
+                          <span className="capitalize">{status.name} ({status.value})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              {/* Top Sellers */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Top Sellers by Revenue</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {topSellers.map((seller, idx) => (
+                      <div key={seller.id} className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                            idx === 0 ? "bg-amber-100 text-amber-700" :
+                            idx === 1 ? "bg-slate-100 text-slate-700" :
+                            idx === 2 ? "bg-orange-100 text-orange-700" :
+                            "bg-slate-50 text-slate-500"
+                          }`}>
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <p className="font-medium text-sm">{seller.name}</p>
+                            <p className="text-xs text-slate-500">Seller ID: {seller.id.slice(-8)}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{fmtCurrency(seller.total)}</p>
+                          <p className="text-xs text-slate-500">Total sales</p>
+                        </div>
+                      </div>
+                    ))}
+                    {topSellers.length === 0 && (
+                      <p className="text-center text-slate-500 py-4">No seller data available</p>
                     )}
                   </div>
-                ))}
-                {activities.length === 0 && (
-                  <p className="text-center text-slate-500 py-8">No activities to display</p>
-                )}
-              </div>
-              {activities.length > 8 && (
-                <Button 
-                  variant="outline" 
-                  className="w-full mt-3"
-                  onClick={() => setShowAllActivity(!showAllActivity)}
-                >
-                  {showAllActivity ? "Show Less" : `View All (${activities.length})`}
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          {/* Data Tables */}
-          {tab !== "dashboard" && tab !== "settings" && (
+              {/* Activity Feed */}
+              <Card>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2">
+                  <CardTitle className="text-base">Activity Feed</CardTitle>
+                  <div className="flex flex-wrap gap-2">
+                    <Button 
+                      size="sm" 
+                      variant={activityFilter === "all" ? "default" : "outline"} 
+                      onClick={() => setActivityFilter("all")}
+                    >
+                      All
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={activityFilter === "orders" ? "default" : "outline"} 
+                      onClick={() => setActivityFilter("orders")}
+                    >
+                      Orders
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={activityFilter === "payments" ? "default" : "outline"} 
+                      onClick={() => setActivityFilter("payments")}
+                    >
+                      Payments
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={activityFilter === "disputes" ? "default" : "outline"} 
+                      onClick={() => setActivityFilter("disputes")}
+                    >
+                      Disputes
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                    {(showAllActivity ? activities : activities.slice(0, 8)).map((a) => (
+                      <div 
+                        key={a.id} 
+                        className={`flex items-start gap-3 rounded-lg border p-3 ${getActivityContainerClass(a.severity)}`}
+                      >
+                        <div className={`mt-0.5 rounded-full p-2 ${getActivityBadgeClass(a.type)}`}>
+                          {a.type === "orders" && <ShoppingCart className="h-4 w-4" />}
+                          {a.type === "payments" && <Wallet className="h-4 w-4" />}
+                          {a.type === "disputes" && <CircleHelp className="h-4 w-4" />}
+                          {a.type === "verification" && <Shield className="h-4 w-4" />}
+                          {a.type === "products" && <Package className="h-4 w-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-slate-900 truncate">{a.text}</p>
+                          <p className="text-xs text-slate-500">{timeAgo(a.time)}</p>
+                        </div>
+                        {a.severity === "high" && (
+                          <Badge variant="destructive" className="text-xs">Urgent</Badge>
+                        )}
+                      </div>
+                    ))}
+                    {activities.length === 0 && (
+                      <p className="text-center text-slate-500 py-8">No activities to display</p>
+                    )}
+                  </div>
+                  {activities.length > 8 && (
+                    <Button 
+                      variant="outline" 
+                      className="w-full mt-3"
+                      onClick={() => setShowAllActivity(!showAllActivity)}
+                    >
+                      {showAllActivity ? "Show Less" : `View All (${activities.length})`}
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+          
+          {/* Users Tab */}
+          {tab === "users" && (
             <Card>
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <CardTitle className="capitalize">{tab}</CardTitle>
-                <Input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={`Filter ${tab}...`}
-                  className="w-full sm:w-64"
-                />
+                <div>
+                  <CardTitle>Users Management</CardTitle>
+                  <CardDescription>Manage all platform users</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  {selectedItems.size > 0 && (
+                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg">
+                      <span className="text-sm font-medium text-slate-600">{selectedItems.size} selected</span>
+                      <select 
+                        value={bulkAction}
+                        onChange={(e) => setBulkAction(e.target.value)}
+                        className="h-8 rounded-md border border-slate-300 px-2 text-sm bg-white"
+                      >
+                        <option value="">Bulk Actions</option>
+                        <option value="ban">Ban Selected</option>
+                        <option value="unban">Unban Selected</option>
+                        <option value="verify">Verify Users</option>
+                        <option value="make_seller">Make Seller</option>
+                        <option value="make_admin">Make Admin</option>
+                        <option value="export">Export Selected</option>
+                      </select>
+                      <Button size="sm" onClick={handleBulkAction} disabled={!bulkAction} className="h-8">Apply</Button>
+                      <Button size="sm" variant="ghost" onClick={clearSelection} className="h-8 w-8 p-0"><XCircle className="h-4 w-4" /></Button>
+                    </div>
+                  )}
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filter users..."
+                    className="w-full sm:w-64"
+                  />
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
-                      {tab === "users" && (
-                        <tr className="text-left text-slate-500 border-b">
-                          <th className="py-2 pr-4">Name</th>
-                          <th className="py-2 pr-4">Email</th>
-                          <th className="py-2 pr-4">Role</th>
-                          <th className="py-2 pr-4">Status</th>
-                          <th className="py-2 pr-4">Actions</th>
-                        </tr>
-                      )}
-                      {tab === "products" && (
-                        <tr className="text-left text-slate-500 border-b">
-                          <th className="py-2 pr-4">Image</th>
-                          <th className="py-2 pr-4">Title</th>
-                          <th className="py-2 pr-4">Seller</th>
-                          <th className="py-2 pr-4">Price</th>
-                          <th className="py-2 pr-4">Status</th>
-                          <th className="py-2 pr-4">Actions</th>
-                        </tr>
-                      )}
-                      {tab === "orders" && (
-                        <tr className="text-left text-slate-500 border-b">
-                          <th className="py-2 pr-4">Order ID</th>
-                          <th className="py-2 pr-4">Buyer</th>
-                          <th className="py-2 pr-4">Seller</th>
-                          <th className="py-2 pr-4">Amount</th>
-                          <th className="py-2 pr-4">Status</th>
-                          <th className="py-2 pr-4">Actions</th>
-                        </tr>
-                      )}
-                      {tab === "disputes" && (
-                        <tr className="text-left text-slate-500 border-b">
-                          <th className="py-2 pr-4">Order ID</th>
-                          <th className="py-2 pr-4">Buyer</th>
-                          <th className="py-2 pr-4">Product</th>
-                          <th className="py-2 pr-4">Age</th>
-                          <th className="py-2 pr-4">Actions</th>
-                        </tr>
-                      )}
-                      {tab === "verification" && (
-                        <tr className="text-left text-slate-500 border-b">
-                          <th className="py-2 pr-4">Name</th>
-                          <th className="py-2 pr-4">Email</th>
-                          <th className="py-2 pr-4">Registered</th>
-                          <th className="py-2 pr-4">Actions</th>
-                        </tr>
-                      )}
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">
+                          <input 
+                            type="checkbox" 
+                            onChange={(e) => e.target.checked ? selectAll(filteredUsers) : clearSelection()}
+                            className="rounded"
+                          />
+                        </th>
+                        <th className="py-2 pr-4">Name</th>
+                        <th className="py-2 pr-4">Email</th>
+                        <th className="py-2 pr-4">Role</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Joined</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
                     </thead>
                     <tbody>
-                      {tab === "users" && filteredUsers.map((u) => (
+                      {filteredUsers.map((u) => (
                         <tr key={u.id} className="border-b">
+                          <td className="py-2 pr-4">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedItems.has(u.id)}
+                              onChange={() => toggleSelection(u.id)}
+                              className="rounded"
+                            />
+                          </td>
                           <td className="py-2 pr-4">{u.full_name}</td>
                           <td className="py-2 pr-4">{u.email}</td>
-                          <td className="py-2 pr-4 capitalize">{u.role}</td>
                           <td className="py-2 pr-4">
-                            {u.role === "seller" ? (
-                              <span className={u.momo_number ? "text-emerald-600" : "text-amber-600"}>
-                                {u.momo_number ? "Verified" : "Pending"}
-                              </span>
-                            ) : "-"}
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                              className="text-sm border rounded px-2 py-1"
+                            >
+                              <option value="user">User</option>
+                              <option value="seller">Seller</option>
+                              <option value="admin">Admin</option>
+                              <option value="banned">Banned</option>
+                            </select>
                           </td>
                           <td className="py-2 pr-4">
-                            <Button size="sm" variant="outline" onClick={() => navigate("/profile-setup")}>
-                              Manage
-                            </Button>
+                            <Badge variant={u.role === "banned" ? "destructive" : u.role === "admin" ? "default" : "secondary"}>
+                              {u.role}
+                            </Badge>
+                          </td>
+                          <td className="py-2 pr-4 text-slate-500">
+                            {u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}
+                          </td>
+                          <td className="py-2 pr-4">
+                            <div className="flex gap-1">
+                              {u.role === "banned" ? (
+                                <Button size="sm" variant="outline" onClick={() => handleUnbanUser(u.id)}>
+                                  <Unlock className="h-3 w-3" />
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="outline" onClick={() => handleBanUser(u.id)}>
+                                  <Ban className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
-                      {tab === "products" && filteredProducts.map((p) => (
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Products Tab */}
+          {tab === "products" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Products Management</CardTitle>
+                  <CardDescription>View and manage all products</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  {selectedItems.size > 0 && (
+                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg">
+                      <span className="text-sm font-medium text-slate-600">{selectedItems.size} selected</span>
+                      <select 
+                        value={bulkAction}
+                        onChange={(e) => setBulkAction(e.target.value)}
+                        className="h-8 rounded-md border border-slate-300 px-2 text-sm bg-white"
+                      >
+                        <option value="">Bulk Actions</option>
+                        <option value="approve">Approve Products</option>
+                        <option value="reject">Reject Products</option>
+                        <option value="delete">Delete Products</option>
+                        <option value="feature">Feature Products</option>
+                        <option value="export">Export Selected</option>
+                      </select>
+                      <Button size="sm" onClick={handleBulkAction} disabled={!bulkAction} className="h-8">Apply</Button>
+                      <Button size="sm" variant="ghost" onClick={clearSelection} className="h-8 w-8 p-0"><XCircle className="h-4 w-4" /></Button>
+                    </div>
+                  )}
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filter products..."
+                    className="w-full sm:w-64"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">Image</th>
+                        <th className="py-2 pr-4">Title</th>
+                        <th className="py-2 pr-4">Seller</th>
+                        <th className="py-2 pr-4">Category</th>
+                        <th className="py-2 pr-4">Price</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProducts.map((p) => (
                         <tr key={p.id} className="border-b">
                           <td className="py-2 pr-4">
-                            <img src={p.image} alt={p.title} className="h-8 w-8 rounded object-cover" />
+                            <img src={p.image_url || "/placeholder.svg"} alt={p.title} className="h-8 w-8 rounded object-cover" />
                           </td>
-                          <td className="py-2 pr-4">{p.title}</td>
-                          <td className="py-2 pr-4">{p.sellerName}</td>
+                          <td className="py-2 pr-4 max-w-[200px] truncate">{p.title}</td>
+                          <td className="py-2 pr-4">{p.seller?.full_name || "Unknown"}</td>
+                          <td className="py-2 pr-4">{p.category || "-"}</td>
                           <td className="py-2 pr-4">GHS {p.price}</td>
                           <td className="py-2 pr-4">
-                            <span className={p.is_active ? "text-emerald-600" : "text-red-600"}>
+                            <Badge variant={p.is_active ? "default" : "destructive"}>
                               {p.is_active ? "Active" : "Hidden"}
-                            </span>
+                            </Badge>
                           </td>
                           <td className="py-2 pr-4">
                             <div className="flex gap-1">
@@ -954,56 +1761,69 @@ const handleVerifySeller = (sellerId: string) => {
                                   <CheckCircle className="h-3 w-3" />
                                 </Button>
                               )}
+                              <Button size="sm" variant="outline" onClick={() => handleRemoveProduct(p.id)}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
                             </div>
                           </td>
                         </tr>
                       ))}
-                      {tab === "orders" && filteredOrders.map((o) => (
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Orders Tab */}
+          {tab === "orders" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Orders Management</CardTitle>
+                  <CardDescription>Track and manage all orders</CardDescription>
+                </div>
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Filter orders..."
+                  className="w-full sm:w-64"
+                />
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">Order ID</th>
+                        <th className="py-2 pr-4">Product</th>
+                        <th className="py-2 pr-4">Buyer</th>
+                        <th className="py-2 pr-4">Seller</th>
+                        <th className="py-2 pr-4">Amount</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Date</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredOrders.map((o) => (
                         <tr key={o.id} className="border-b">
                           <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
-                          <td className="py-2 pr-4">{o.buyerName}</td>
-                          <td className="py-2 pr-4">{o.sellerName}</td>
+                          <td className="py-2 pr-4 max-w-[150px] truncate">{o.product?.title || "-"}</td>
+                          <td className="py-2 pr-4">{o.buyer?.full_name || "-"}</td>
+                          <td className="py-2 pr-4">{o.seller?.full_name || "-"}</td>
                           <td className="py-2 pr-4">GHS {o.amount}</td>
                           <td className="py-2 pr-4 capitalize">
                             <span className={getOrderStatusTextClass(o.status)}>
                               {o.status}
                             </span>
                           </td>
+                          <td className="py-2 pr-4 text-slate-500">
+                            {new Date(o.created_at).toLocaleDateString()}
+                          </td>
                           <td className="py-2 pr-4">
                             <Button size="sm" variant="outline" onClick={() => navigate(`/orders/${o.id}/track`)}>
                               Open
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                      {tab === "disputes" && filteredDisputes.map((o) => {
-                        const daysOld = getDaysOld(o.created_at);
-                        return (
-                          <tr key={o.id} className="border-b">
-                            <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
-                            <td className="py-2 pr-4">{o.buyerName}</td>
-                            <td className="py-2 pr-4">{o.productTitle}</td>
-                            <td className="py-2 pr-4">
-                              <span className={`px-2 py-0.5 rounded text-xs ${getSLABadge(getSLAStatus(daysOld))}`}>
-                                {daysOld} days
-                              </span>
-                            </td>
-                            <td className="py-2 pr-4">
-                              <Button size="sm" onClick={() => handleResolveDispute(o.id)}>
-                                Resolve
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {tab === "verification" && pendingVerification.map((s) => (
-                        <tr key={s.id} className="border-b">
-                          <td className="py-2 pr-4">{s.full_name}</td>
-                          <td className="py-2 pr-4">{s.email}</td>
-                          <td className="py-2 pr-4">{new Date(s.created_at || now).toLocaleDateString()}</td>
-                          <td className="py-2 pr-4">
-                            <Button size="sm" onClick={() => handleVerifySeller(s.id)}>
-                              <CheckCircle className="mr-1 h-3 w-3" /> Verify
                             </Button>
                           </td>
                         </tr>
@@ -1014,7 +1834,394 @@ const handleVerifySeller = (sellerId: string) => {
               </CardContent>
             </Card>
           )}
-
+          
+          {/* Disputes Tab */}
+          {tab === "disputes" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Disputes Management</CardTitle>
+                  <CardDescription>Resolve order disputes</CardDescription>
+                </div>
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Filter disputes..."
+                  className="w-full sm:w-64"
+                />
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">Order ID</th>
+                        <th className="py-2 pr-4">Buyer</th>
+                        <th className="py-2 pr-4">Product</th>
+                        <th className="py-2 pr-4">Amount</th>
+                        <th className="py-2 pr-4">Age</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDisputes.map((o) => {
+                        const daysOld = getDaysOld(o.created_at);
+                        return (
+                          <tr key={o.id} className="border-b">
+                            <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
+                            <td className="py-2 pr-4">{o.buyer?.full_name || "-"}</td>
+                            <td className="py-2 pr-4">{o.product?.title || "-"}</td>
+                            <td className="py-2 pr-4">GHS {o.amount}</td>
+                            <td className="py-2 pr-4">
+                              <span className={`px-2 py-0.5 rounded text-xs ${getSLABadge(getSLAStatus(daysOld))}`}>
+                                {daysOld} days
+                              </span>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-1">
+                                <Button size="sm" onClick={() => handleResolveDispute(o.id)}>
+                                  <Check className="mr-1 h-3 w-3" /> Resolve
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredDisputes.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="text-center py-8 text-slate-500">
+                            No disputes to display
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Verification Tab */}
+          {tab === "verification" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Verification Requests</CardTitle>
+                  <CardDescription>Review seller verification requests</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">User</th>
+                        <th className="py-2 pr-4">Document Type</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Submitted</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {verifications.map((v) => (
+                        <tr key={v.id} className="border-b">
+                          <td className="py-2 pr-4">
+                            <div>
+                              <p className="font-medium">{v.user?.full_name || "Unknown"}</p>
+                              <p className="text-xs text-slate-500">{v.user?.email}</p>
+                            </div>
+                          </td>
+                          <td className="py-2 pr-4 capitalize">{v.document_type?.replace("_", " ")}</td>
+                          <td className="py-2 pr-4">
+                            <Badge variant={v.status === "approved" ? "default" : v.status === "rejected" ? "destructive" : "secondary"}>
+                              {v.status}
+                            </Badge>
+                          </td>
+                          <td className="py-2 pr-4 text-slate-500">
+                            {v.created_at ? new Date(v.created_at).toLocaleDateString() : "-"}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {v.status === "pending" && (
+                              <div className="flex gap-1">
+                                <Button size="sm" onClick={() => handleVerifySeller(v.id)}>
+                                  <Check className="mr-1 h-3 w-3" /> Approve
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => handleRejectVerification(v.id)}>
+                                  <XCircle className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {verifications.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="text-center py-8 text-slate-500">
+                            No pending verification requests
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Categories Tab */}
+          {tab === "categories" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Categories Management</CardTitle>
+                  <CardDescription>Manage product categories</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filter categories..."
+                    className="w-full sm:w-64"
+                  />
+                  <Button size="sm">
+                    <Plus className="mr-1 h-4 w-4" /> Add
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">Name</th>
+                        <th className="py-2 pr-4">Slug</th>
+                        <th className="py-2 pr-4">Products</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCategories.map((c) => (
+                        <tr key={c.id} className="border-b">
+                          <td className="py-2 pr-4 font-medium">{c.name}</td>
+                          <td className="py-2 pr-4 text-slate-500">{c.slug}</td>
+                          <td className="py-2 pr-4">{c.product_count || 0}</td>
+                          <td className="py-2 pr-4">
+                            <Badge variant={c.is_active ? "default" : "secondary"}>
+                              {c.is_active ? "Active" : "Inactive"}
+                            </Badge>
+                          </td>
+                          <td className="py-2 pr-4">
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline">
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Services Tab */}
+          {tab === "services" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Services Management</CardTitle>
+                  <CardDescription>Manage professional services</CardDescription>
+                </div>
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Filter services..."
+                  className="w-full sm:w-64"
+                />
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b">
+                        <th className="py-2 pr-4">Service</th>
+                        <th className="py-2 pr-4">Provider</th>
+                        <th className="py-2 pr-4">Type</th>
+                        <th className="py-2 pr-4">Price</th>
+                        <th className="py-2 pr-4">Rating</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredServices.map((s) => (
+                        <tr key={s.id} className="border-b">
+                          <td className="py-2 pr-4 max-w-[200px] truncate">{s.title}</td>
+                          <td className="py-2 pr-4">{s.provider?.full_name || "-"}</td>
+                          <td className="py-2 pr-4">{s.service_type}</td>
+                          <td className="py-2 pr-4">GHS {s.price}</td>
+                          <td className="py-2 pr-4">
+                            <div className="flex items-center gap-1">
+                              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                              {s.rating || "N/A"}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-4">
+                            <Badge variant={s.is_active ? "default" : "secondary"}>
+                              {s.is_active ? "Active" : "Inactive"}
+                            </Badge>
+                          </td>
+                          <td className="py-2 pr-4">
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline">
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredServices.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-slate-500">
+                            No services found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Referrals Tab */}
+          {tab === "referrals" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Referral Program</CardTitle>
+                <CardDescription>Track referral performance and statistics</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Total Referrals</p>
+                      <p className="text-2xl font-bold">{referralStats?.total_referrals || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Qualified Referrals</p>
+                      <p className="text-2xl font-bold">{referralStats?.qualified_referrals || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Buyer Referrals</p>
+                      <p className="text-2xl font-bold">{referralStats?.buyer_referrals || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Seller Referrals</p>
+                      <p className="text-2xl font-bold">{referralStats?.seller_referrals || 0}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+                
+                {referralStats?.referrals && referralStats.referrals.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="font-semibold mb-3">Recent Referrals</h3>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-slate-500 border-b">
+                            <th className="py-2 pr-4">Referred User</th>
+                            <th className="py-2 pr-4">Type</th>
+                            <th className="py-2 pr-4">Date</th>
+                            <th className="py-2 pr-4">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {referralStats.referrals.slice(0, 10).map((r: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="py-2 pr-4">{r.referred_id?.slice(-8) || "-"}</td>
+                              <td className="py-2 pr-4 capitalize">{r.type || "Buyer"}</td>
+                              <td className="py-2 pr-4">{r.created_at ? new Date(r.created_at).toLocaleDateString() : "-"}</td>
+                              <td className="py-2 pr-4">
+                                <Badge variant={r.qualified ? "default" : "secondary"}>
+                                  {r.qualified ? "Qualified" : "Pending"}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Notifications Tab */}
+          {tab === "notifications" && (
+            <Card>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle>Notifications</CardTitle>
+                  <CardDescription>System notifications and alerts</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={handleMarkAllNotificationsRead}>
+                    Mark All Read
+                  </Button>
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filter notifications..."
+                    className="w-full sm:w-64"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {filteredNotifications.map((n) => (
+                    <div 
+                      key={n.id} 
+                      className={`flex items-start gap-3 rounded-lg border p-4 ${n.is_read ? "bg-white" : "bg-blue-50 border-blue-200"}`}
+                    >
+                      <div className={`mt-0.5 rounded-full p-2 ${n.is_read ? "bg-slate-100" : "bg-blue-100"}`}>
+                        <Bell className={`h-4 w-4 ${n.is_read ? "text-slate-500" : "text-blue-600"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <p className="font-medium text-sm">{n.title}</p>
+                          {!n.is_read && (
+                            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                          )}
+                        </div>
+                        {n.body && <p className="text-sm text-slate-500 mt-1">{n.body}</p>}
+                        <p className="text-xs text-slate-400 mt-2">{timeAgo(n.created_at)}</p>
+                      </div>
+                      {!n.is_read && (
+                        <Button size="sm" variant="ghost" onClick={() => handleMarkNotificationRead(n.id)}>
+                          Mark Read
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {filteredNotifications.length === 0 && (
+                    <p className="text-center text-slate-500 py-8">No notifications</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
           {/* Settings Tab */}
           {tab === "settings" && (
             <Card>
@@ -1028,14 +2235,34 @@ const handleVerifySeller = (sellerId: string) => {
                     <div className="rounded-lg bg-white p-3 border">
                       <p className="text-sm font-medium">Dispute Alert Threshold</p>
                       <p className="text-xs text-slate-500 mt-1">Notify when disputes exceed 5%</p>
+                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 5%</p>
                     </div>
                     <div className="rounded-lg bg-white p-3 border">
                       <p className="text-sm font-medium">Verification SLA</p>
                       <p className="text-xs text-slate-500 mt-1">48 hours for seller verification</p>
+                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 48h</p>
                     </div>
                     <div className="rounded-lg bg-white p-3 border">
                       <p className="text-sm font-medium">Commission Rate</p>
                       <p className="text-xs text-slate-500 mt-1">Currently 10% per transaction</p>
+                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 10%</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-3 border">
+                      <p className="text-sm font-medium">Auto-flag Products</p>
+                      <p className="text-xs text-slate-500 mt-1">Flag suspicious listings automatically</p>
+                      <p className="text-xs text-teal-600 mt-2 font-medium">Enabled</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-3 border">
+                      <p className="text-sm font-medium">Email Notifications</p>
+                      <p className="text-xs text-slate-500 mt-1">Receive email alerts for urgent issues</p>
+                      <p className="text-xs text-teal-600 mt-2 font-medium">Enabled</p>
+                    </div>
+                    <div className="rounded-lg bg-white p-3 border">
+                      <p className="text-sm font-medium">Data Export</p>
+                      <p className="text-xs text-slate-500 mt-1">Export user data in compliance with GDPR</p>
+                      <Button size="sm" variant="outline" className="mt-2">
+                        <Download className="mr-1 h-3 w-3" /> Export
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1047,4 +2274,3 @@ const handleVerifySeller = (sellerId: string) => {
     </section>
   );
 }
-

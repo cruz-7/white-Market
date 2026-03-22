@@ -257,6 +257,31 @@ productsRouter.post("/:id/view", async (req, res) => {
   return res.json({ message: "View recorded" });
 });
 
+// POST /products/:id/click - Track product click
+productsRouter.post("/:id/click", async (req, res) => {
+  const { id } = req.params;
+
+  // Try RPC first, fallback to manual
+  const { error } = await supabase.rpc("increment_click_count", { product_id: id });
+  
+  if (error) {
+    const { data: product } = await supabase
+      .from("products")
+      .select("click_count")
+      .eq("id", id)
+      .single();
+
+    if (product) {
+      await supabase
+        .from("products")
+        .update({ click_count: (product.click_count || 0) + 1 })
+        .eq("id", id);
+    }
+  }
+
+  return res.json({ success: true });
+});
+
 // GET /products/:id - Get single product with view count
 productsRouter.get("/:id", async (req, res) => {
   const { id } = req.params;
@@ -285,6 +310,65 @@ productsRouter.get("/:id", async (req, res) => {
   }
 
   return res.json(product);
+});
+
+// GET /products/trending - Get trending products based on views, clicks, and purchases
+productsRouter.get("/trending", async (req, res) => {
+  const { limit = 10 } = req.query;
+  
+  try {
+    // Get products with their stats
+    const { data: products, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        users!products_seller_id_fkey(full_name, verified),
+        categories!products_category_id_fkey(name, slug)
+      `)
+      .eq("is_active", true)
+      .order("view_count", { ascending: false })
+      .limit(parseInt(limit));
+
+    if (error) throw error;
+
+    // Calculate trending score for each product
+    // Score = views * 1 + clicks * 2 + purchases * 5 + recency boost
+    const now = new Date();
+    const scoredProducts = products?.map(product => {
+      let score = 0;
+      
+      // Base score from views
+      score += (product.view_count || 0) * 1;
+      
+      // Clicks worth more
+      score += (product.click_count || 0) * 2;
+      
+      // Purchases worth most
+      score += (product.purchase_count || 0) * 5;
+      
+      // Recency boost (products created in last 7 days get extra points)
+      if (product.created_at) {
+        const createdAt = new Date(product.created_at);
+        const daysSinceCreation = (now - createdAt) / (1000 * 60 * 60 * 24);
+        if (daysSinceCreation <= 7) {
+          score += (7 - daysSinceCreation) * 2; // Up to 14 points boost
+        }
+      }
+      
+      return { ...product, trending_score: score };
+    }) || [];
+
+    // Sort by trending score
+    scoredProducts.sort((a, b) => b.trending_score - a.trending_score);
+
+    return res.json({
+      products: scoredProducts.slice(0, parseInt(limit)),
+      count: scoredProducts.length
+    });
+  } catch (err) {
+    console.error("Trending products error:", err);
+    return res.status(500).json({ error: "Failed to fetch trending products" });
+  }
 });
 
 export default productsRouter;

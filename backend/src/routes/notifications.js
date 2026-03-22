@@ -4,11 +4,18 @@ import { requireAuth } from "../middleware/requireAuth.js";
 
 const notificationsRouter = Router();
 
+function isMissingNotificationsTable(error) {
+  const message = String(error?.message || "");
+  return error?.code === "PGRST205" || message.includes("Could not find the table 'public.notifications'");
+}
+
 // GET /notifications - Get user's notifications
 notificationsRouter.get("/", requireAuth, async (req, res) => {
   try {
     const { page = 1, limit = 20, unread_only } = req.query;
-    const offset = (page - 1) * limit;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limitNumber = Math.max(1, Number(limit) || 20);
+    const offset = (pageNumber - 1) * limitNumber;
 
     let query = supabase
       .from("notifications")
@@ -20,10 +27,19 @@ notificationsRouter.get("/", requireAuth, async (req, res) => {
     }
 
     const { data: notifications, error } = await query
-      .range(offset, offset + limit - 1)
+      .range(offset, offset + limitNumber - 1)
       .order("created_at", { ascending: false });
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Returning empty notifications list.");
+        return res.json({
+          notifications: [],
+          unread_count: 0,
+          pagination: { page: pageNumber, limit: limitNumber, total: 0 },
+          disabled: true,
+        });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -34,6 +50,15 @@ notificationsRouter.get("/", requireAuth, async (req, res) => {
       .eq("is_read", false);
 
     if (countError) {
+      if (isMissingNotificationsTable(countError)) {
+        console.warn("Notifications table is missing. Returning empty unread count.");
+        return res.json({
+          notifications: notifications || [],
+          unread_count: 0,
+          pagination: { page: pageNumber, limit: limitNumber, total: 0 },
+          disabled: true,
+        });
+      }
       return res.status(400).json({ error: countError.message });
     }
 
@@ -41,8 +66,8 @@ notificationsRouter.get("/", requireAuth, async (req, res) => {
       notifications: notifications || [],
       unread_count: count || 0,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
+        page: pageNumber,
+        limit: limitNumber,
         total: count || 0,
       },
     });
@@ -62,6 +87,10 @@ notificationsRouter.get("/unread-count", requireAuth, async (req, res) => {
       .eq("is_read", false);
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Returning unread_count=0.");
+        return res.json({ unread_count: 0, disabled: true });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -84,6 +113,10 @@ notificationsRouter.patch("/:id/read", requireAuth, async (req, res) => {
       .eq("user_id", req.user.id);
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Treating mark-as-read as a no-op.");
+        return res.json({ message: "Notifications are currently disabled", disabled: true });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -104,6 +137,10 @@ notificationsRouter.patch("/read-all", requireAuth, async (req, res) => {
       .eq("is_read", false);
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Treating mark-all-as-read as a no-op.");
+        return res.json({ message: "Notifications are currently disabled", disabled: true });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -126,6 +163,10 @@ notificationsRouter.delete("/:id", requireAuth, async (req, res) => {
       .eq("user_id", req.user.id);
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Treating delete as a no-op.");
+        return res.json({ message: "Notifications are currently disabled", disabled: true });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -145,6 +186,10 @@ notificationsRouter.delete("/clear-all", requireAuth, async (req, res) => {
       .eq("user_id", req.user.id);
 
     if (error) {
+      if (isMissingNotificationsTable(error)) {
+        console.warn("Notifications table is missing. Treating clear-all as a no-op.");
+        return res.json({ message: "Notifications are currently disabled", disabled: true });
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -186,6 +231,10 @@ notificationsRouter.post("/", requireAuth, async (req, res) => {
       });
 
       if (error) {
+        if (isMissingNotificationsTable(error)) {
+          console.warn("Notifications table is missing. Treating send notification as a no-op.");
+          return res.json({ message: "Notifications are currently disabled", disabled: true });
+        }
         return res.status(400).json({ error: error.message });
       }
 
@@ -203,6 +252,10 @@ notificationsRouter.post("/", requireAuth, async (req, res) => {
       const { error } = await supabase.from("notifications").insert(notifications);
 
       if (error) {
+        if (isMissingNotificationsTable(error)) {
+          console.warn("Notifications table is missing. Treating send notifications as a no-op.");
+          return res.json({ message: "Notifications are currently disabled", disabled: true });
+        }
         return res.status(400).json({ error: error.message });
       }
 

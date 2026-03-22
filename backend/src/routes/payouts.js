@@ -2,6 +2,7 @@ import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { requireAdmin } from "../middleware/requireAdmin.js";
+import walletService from "../services/walletService.js";
 
 const router = express.Router();
 
@@ -337,6 +338,282 @@ router.post("/send", requireAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Send payout error:", error);
     return res.status(500).json({ error: error.message || "Internal server error" });
+  }
+});
+
+// ==================== NEW WALLET-BASED WITHDRAWAL SYSTEM ====================
+
+/**
+ * GET /payouts/wallet - Get user's wallet information
+ */
+router.get("/wallet", requireAuth, async (req, res) => {
+  try {
+    const wallet = await walletService.getWallet(req.user.id);
+    return res.json({ wallet });
+  } catch (error) {
+    console.error("Get wallet error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /payouts/withdraw - Withdraw from wallet with limit checking
+ */
+router.post("/withdraw", requireAuth, async (req, res) => {
+  try {
+    const { amount, momo_number, network } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Valid amount is required" });
+    }
+
+    if (!momo_number) {
+      return res.status(400).json({ error: "MoMo number is required" });
+    }
+
+    // Validate network
+    const validNetworks = ["MTN", "Vodafone", "AirtelTigo"];
+    const normalizedNetwork = network || "MTN";
+    if (!validNetworks.includes(normalizedNetwork)) {
+      return res.status(400).json({ error: "Invalid network. Use MTN, Vodafone, or AirtelTigo" });
+    }
+
+    // Check withdrawal eligibility
+    const { canWithdraw, reason } = await walletService.canWithdraw(req.user.id, amount);
+    if (!canWithdraw) {
+      return res.status(400).json({ error: reason });
+    }
+
+    // Get user info
+    const { data: user } = await supabase
+      .from("users")
+      .select("full_name, paystack_recipient_code")
+      .eq("id", req.user.id)
+      .single();
+
+    // Create or get recipient
+    let recipientCode = user?.paystack_recipient_code;
+    
+    if (!recipientCode) {
+      // Create new recipient via Paystack
+      const { createMoMoRecipient } = await import("../services/paystack.js");
+      const result = await createMoMoRecipient(
+        user?.full_name || "User",
+        momo_number
+      );
+
+      if (!result.status) {
+        return res.status(400).json({ error: result.message || "Failed to create payment recipient" });
+      }
+
+      recipientCode = result.data.recipient_code;
+
+      // Store recipient code
+      await supabase
+        .from("users")
+        .update({ paystack_recipient_code: recipientCode })
+        .eq("id", req.user.id);
+    }
+
+    // Request payout using database function (this handles wallet deduction atomically)
+    let payoutResult;
+    try {
+      payoutResult = await walletService.requestPayout(
+        req.user.id,
+        amount,
+        momo_number,
+        normalizedNetwork
+      );
+    } catch (payoutError) {
+      return res.status(400).json({ error: payoutError.message });
+    }
+
+    // Try to send the payout via Paystack (async)
+    // In production, this would be handled by a background job
+    try {
+      const { sendTransfer } = await import("../services/paystack.js");
+      const paystackResult = await sendTransfer(amount, recipientCode, "Wallet withdrawal");
+
+      // Update payout status based on Paystack response
+      if (paystackResult.status) {
+        await supabase
+          .from("payouts")
+          .update({ status: "completed", processed_at: new Date().toISOString() })
+          .eq("id", payoutResult.payout_id);
+      } else {
+        await supabase
+          .from("payouts")
+          .update({ status: "failed", failure_reason: paystackResult.message })
+          .eq("id", payoutResult.payout_id);
+      }
+    } catch (paystackError) {
+      console.log("Paystack transfer will be processed later:", paystackError.message);
+      // Payout is queued, will be processed by job
+    }
+
+    // Get updated wallet
+    const updatedWallet = await walletService.getWallet(req.user.id);
+
+    return res.json({
+      success: true,
+      message: "Withdrawal request submitted",
+      wallet: updatedWallet,
+      payout: {
+        id: payoutResult.payout_id,
+        amount,
+        momo_number,
+      },
+    });
+  } catch (error) {
+    console.error("Withdraw error:", error);
+    return res.status(500).json({ error: error.message || "Withdrawal failed" });
+  }
+});
+
+/**
+ * GET /payouts/limits - Get user's withdrawal limits
+ */
+router.get("/limits", requireAuth, async (req, res) => {
+  try {
+    const wallet = await walletService.getWallet(req.user.id);
+    
+    // Get system settings
+    const { data: settings } = await supabase
+      .from("system_settings")
+      .select("key, value")
+      .in("key", ["min_withdrawal", "withdrawal_percentage", "payout_cooldown_hours"]);
+
+    const settingsObj = {};
+    settings?.forEach(s => { settingsObj[s.key] = s.value; });
+
+    return res.json({
+      wallet_balance: wallet.wallet_balance,
+      account_weight: wallet.account_weight,
+      daily_limit: wallet.daily_limit,
+      min_withdrawal: parseFloat(settingsObj.min_withdrawal) || 20,
+      withdrawal_percentage: parseFloat(settingsObj.withdrawal_percentage) || 0.5,
+      cooldown_hours: parseFloat(settingsObj.payout_cooldown_hours) || 24,
+      last_sale_at: wallet.last_sale_at,
+      is_frozen: wallet.is_payout_frozen,
+      fraud_flags: wallet.fraud_flags,
+    });
+  } catch (error) {
+    console.error("Get limits error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /payouts/transactions - Get user's transaction history
+ */
+router.get("/transactions", requireAuth, async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, type } = req.query;
+
+    let query = supabase
+      .from("transactions")
+      .select(`
+        *,
+        buyer:users!buyer_id(id, full_name, email),
+        seller:users!seller_id(id, full_name, email)
+      `)
+      .eq("seller_id", req.user.id)
+      .order("created_at", { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (type) {
+      query = query.eq("status", type);
+    }
+
+    const { data: transactions, error } = await query;
+
+    if (error) throw error;
+
+    return res.json({
+      transactions: transactions || [],
+      has_more: transactions?.length === parseInt(limit),
+    });
+  } catch (error) {
+    console.error("Get transactions error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /payouts/ledger - Get user's wallet ledger/history
+ */
+router.get("/ledger", requireAuth, async (req, res) => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+
+    const { data: ledger, error } = await supabase
+      .from("wallet_ledger")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    return res.json({
+      ledger: ledger || [],
+      has_more: ledger?.length === parseInt(limit),
+    });
+  } catch (error) {
+    console.error("Get ledger error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /payouts/history - Get user's payout history
+ */
+router.get("/history", requireAuth, async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+
+    const { data: payouts, error } = await supabase
+      .from("payouts")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+    if (error) throw error;
+
+    return res.json({
+      payouts: payouts || [],
+      has_more: payouts?.length === parseInt(limit),
+    });
+  } catch (error) {
+    console.error("Get payout history error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /payouts/check-eligibility - Check if user can withdraw
+ */
+router.post("/check-eligibility", requireAuth, async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Valid amount is required" });
+    }
+
+    const { canWithdraw, reason } = await walletService.canWithdraw(req.user.id, amount);
+    const wallet = await walletService.getWallet(req.user.id);
+
+    return res.json({
+      eligible: canWithdraw,
+      reason,
+      wallet_balance: wallet.wallet_balance,
+      daily_limit: wallet.daily_limit,
+    });
+  } catch (error) {
+    console.error("Check eligibility error:", error);
+    return res.status(500).json({ error: error.message });
   }
 });
 

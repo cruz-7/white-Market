@@ -45,10 +45,14 @@ Run:
 
 1. `supabase/migrations/20260307_security_hardening.sql`
 2. `supabase/migrations/20260308_payment_atomicity.sql`
+3. `supabase/migrations/20260314_phase2_features.sql`
 
 Notes:
 - These are the canonical migrations.
 - Legacy files under `backend/sql` are for historical/dev bootstrapping and include testing-era settings.
+
+If you see an error like `Could not find the table 'public.notifications' in the schema cache`, it means
+you have not applied the Phase 2 migration (or your Supabase REST schema cache has not reloaded yet).
 
 ## 4) Start Services
 

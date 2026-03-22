@@ -4,13 +4,16 @@ import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import App from "./App";
+import { SettingsProvider } from "./SettingsContext";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
-      <Toaster richColors position="top-right" />
+      <SettingsProvider>
+        <App />
+        <Toaster richColors position="top-right" />
+      </SettingsProvider>
     </BrowserRouter>
   </React.StrictMode>,
 );

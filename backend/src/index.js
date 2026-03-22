@@ -20,6 +20,9 @@ import favoritesRouter from "./routes/favorites.js";
 import searchRouter from "./routes/search.js";
 import referralsRouter from "./routes/referrals.js";
 import notificationsRouter from "./routes/notifications.js";
+import servicesRouter from "./routes/services.js";
+import booksRouter from "./routes/books.js";
+import fashionRouter from "./routes/fashion.js";
 
 function parseOrigins(originsInput) {
   if (Array.isArray(originsInput)) {
@@ -198,6 +201,9 @@ export function createApp(options = {}) {
   app.use("/search", searchRouter);
   app.use("/referrals", referralsRouter);
   app.use("/notifications", notificationsRouter);
+  app.use("/services", servicesRouter);
+  app.use("/books", booksRouter);
+  app.use("/fashion", fashionRouter);
 
   if (enableTestRoutes) {
     app.use(testRouter);
