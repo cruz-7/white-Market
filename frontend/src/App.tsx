@@ -1326,8 +1326,10 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
 function DashboardRouter() {
   const user = useCurrentUser();
   if (!user) return <Navigate to="/auth" replace />;
-  if (user.role === "admin") return <Navigate to="/admin" replace />;
-  return user.role === "seller" ? <SellerDashboard /> : <StudentDashboard />;
+  // Admins can also access seller dashboard (for admins who sell)
+  // They can access /admin separately for admin controls
+  if (user.role === "seller" || user.role === "admin") return <SellerDashboard />;
+  return <StudentDashboard />;
 }
 function SellerDashboard() {
   useDataRefresh();
@@ -1411,10 +1413,29 @@ toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spot
     navigate("/marketplace");
   };
 
+  const isAdmin = user.role === "admin";
+
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]}!</h1><p className="body-text">Manage your store, orders, and payouts with a clear business view.</p></div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]}!</h1>
+              <p className="body-text">Manage your store, orders, and payouts with a clear business view.</p>
+            </div>
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => navigate("/admin")}
+                className="ml-4 border-amber-500 text-amber-600 hover:bg-amber-50"
+              >
+                ⚡ Admin Panel
+              </Button>
+            )}
+          </div>
+        </div>
         <div id="wallet-card"><WalletCard user={user} sellerMode /></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {[["Total Sales", `GHS ${revenueAll.toFixed(2)}`], ["This Month", `GHS ${monthRevenue.toFixed(2)}`], ["Active Listings", String(products.filter((p) => p.is_active).length)], ["Total Orders", String(orders.length)], ["Pending Orders", String(pendingCount)]].map(([label, value], i) => (
@@ -1848,7 +1869,22 @@ function AdminDashboard() {
   return (
     <AppScaffold>
       <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm"><h1 className="page-title">Admin Dashboard</h1><p className="body-text">Monitor marketplace health, compliance, and operations from one control center.</p></div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="page-title">Admin Dashboard</h1>
+              <p className="body-text">Monitor marketplace health, compliance, and operations from one control center.</p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => navigate("/dashboard")}
+              className="ml-4 border-primary text-primary hover:bg-primary/10"
+            >
+              🏪 My Store
+            </Button>
+          </div>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[["Total Users", totalUsers, "+6%"], ["Products Listed", totalProducts, "+9%"], ["Total Orders", totalOrders, "+11%"], ["Platform Revenue / GMV", `GHS ${gmv.toFixed(2)}`, "+14%"]].map(([title, value, growth]) => (<Card key={String(title)} className="shadow-sm"><CardContent className="p-4"><p className="label-text">{String(title)}</p><p className="mt-1 text-2xl font-bold text-primary">{String(value)}</p><p className="text-xs text-green-600">{String(growth)} vs last week</p></CardContent></Card>))}</div>
         <div className="grid gap-4 lg:grid-cols-3">
           <Card><CardContent className="p-4"><h2 className="section-title mb-2">Recent Activity Feed</h2><div className="space-y-2">{activities.slice(0, 10).map((a: any) => (<div key={a.id} className="rounded-lg border p-2"><p className="text-sm">{a.text}</p><p className="text-xs text-gray-500">{timeAgo(a.time)}</p></div>))}</div></CardContent></Card>
@@ -2216,6 +2252,22 @@ function ProfileSetupPage() {
 
   useEffect(() => {
     if (!user) return;
+
+    // Check if profile setup was already completed
+    const completedSetup = localStorage.getItem("wm-profile-setup");
+    if (completedSetup) {
+      try {
+        const parsed = JSON.parse(completedSetup);
+        if (parsed.userId === user.id && parsed.completedAt) {
+          setCompleted(true);
+          return;
+        }
+      } catch {
+        // no-op
+      }
+    }
+
+    // Load draft if exists
     const key = `wm-profile-setup-draft-${user.id}`;
     const raw = localStorage.getItem(key);
     if (raw) {

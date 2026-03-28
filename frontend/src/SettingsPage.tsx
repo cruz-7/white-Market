@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Lock, Bell, Shield, LogOut, ChevronRight, Loader2, CheckCircle, AlertCircle, Eye, EyeOff, Palette, Globe, Trash2, Download, Moon, Sun, Share2, Database } from "lucide-react";
+import { ArrowLeft, User, Lock, Bell, Shield, LogOut, ChevronRight, Loader2, CheckCircle, AlertCircle, Eye, EyeOff, Palette, Globe, Trash2, Moon, Sun, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./card";
@@ -379,17 +379,7 @@ function DangerZoneSettings() {
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleExportData = async () => {
-    setLoading(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      toast.success(translations.success);
-    } catch {
-      toast.error(translations.error);
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const handleDeleteAccount = async () => {
     setLoading(true);
@@ -411,20 +401,7 @@ function DangerZoneSettings() {
     <Card className="shadow-sm border-red-200 dark:border-red-800 dark:bg-slate-800">
       <CardHeader><CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400"><Trash2 className="w-5 h-5" />{translations.dangerZone}</CardTitle><CardDescription className="text-red-500 dark:text-red-400">These actions are irreversible.</CardDescription></CardHeader>
       <CardContent className="space-y-6">
-        <div className="p-4 border border-slate-200 dark:border-slate-600 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Database className="w-5 h-5 text-slate-400 dark:text-slate-500" />
-              <div>
-                <p className="font-medium text-slate-900 dark:text-white">{translations.exportData}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Download all your data</p>
-              </div>
-            </div>
-            <Button variant="outline" onClick={handleExportData} disabled={loading} className="dark:border-slate-600 dark:text-white dark:hover:bg-slate-700">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Download className="w-4 h-4 mr-2" />Export</>}
-            </Button>
-          </div>
-        </div>
+
         <div className="p-4 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
