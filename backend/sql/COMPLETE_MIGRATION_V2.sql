@@ -63,10 +63,14 @@ alter table public.orders enable row level security;
 drop policy if exists users_select_own on public.users;
 drop policy if exists users_insert_own on public.users;
 drop policy if exists users_update_own on public.users;
+drop policy if exists users_insert_service_role on public.users;
 
 create policy users_select_own on public.users for select to authenticated using (auth.uid() = id);
 create policy users_insert_own on public.users for insert to authenticated with check (auth.uid() = id);
 create policy users_update_own on public.users for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
+
+-- Allow service role to insert users (for signup)
+create policy users_insert_service_role on public.users for insert to service_role with check (true);
 
 -- PRODUCTS policies
 drop policy if exists products_select_all on public.products;

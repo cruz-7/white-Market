@@ -1,7 +1,7 @@
 ﻿
 import { ChangeEvent, FormEvent, useEffect, useState, useRef } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, Flame, GraduationCap, ImagePlus, Info, Lock, Megaphone, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
+import { ArrowLeft, Award, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, Flame, GraduationCap, ImagePlus, Info, Lock, MapPin, Megaphone, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 
@@ -76,6 +76,7 @@ import FavoritesPage from "./FavoritesPage";
 import NotificationsPage from "./NotificationsPage";
 import ReferralsPage from "./ReferralsPage";
 import LeaderboardPage from "./LeaderboardPage";
+import SellerDashboard from "./SellerDashboard";
 
 declare global {
   interface Window {
@@ -101,7 +102,7 @@ function readCurrentUser() {
   }
 }
 
-function useCurrentUser() {
+export function useCurrentUser() {
   const [user, setUser] = useState<LocalUser | null>(readCurrentUser());
   useEffect(() => {
     const sync = () => setUser(readCurrentUser());
@@ -267,7 +268,7 @@ function useBackendGuard() {
 
 function BackendUnavailablePage() {
   const apiBaseUrl = getApiBaseUrl();
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const currentOrigin = typeof globalThis.window !== "undefined" && globalThis.window ? globalThis.window.location.origin : "";
   const apiLabel = apiBaseUrl || "(same origin)";
   const isProd = import.meta.env.PROD;
   const showMissingApiUrlHint = isProd && !apiBaseUrl;
@@ -476,6 +477,14 @@ function AppContent() {
       <Route path="/change-password" element={backendElement(<ChangePasswordPage />)} />
       <Route path="/settings" element={backendElement(<SettingsPage />)} />
       <Route path="/dashboard" element={backendElement(<DashboardRouter />)} />
+      <Route path="/dashboard/overview" element={backendElement(<SellerDashboard initialTab="overview" />)} />
+      <Route path="/dashboard/products" element={backendElement(<SellerDashboard initialTab="products" />)} />
+      <Route path="/dashboard/orders" element={backendElement(<SellerDashboard initialTab="orders" />)} />
+      <Route path="/dashboard/customers" element={backendElement(<SellerDashboard initialTab="customers" />)} />
+      <Route path="/dashboard/reviews" element={backendElement(<SellerDashboard initialTab="reviews" />)} />
+      <Route path="/dashboard/transactions" element={backendElement(<SellerDashboard initialTab="transactions" />)} />
+      <Route path="/dashboard/coupons" element={backendElement(<SellerDashboard initialTab="coupons" />)} />
+      <Route path="/dashboard/notifications" element={backendElement(<SellerDashboard initialTab="notifications" />)} />
       <Route path="/admin" element={backendElement(<AdminDashboard />)} />
       <Route path="/profile-setup" element={backendElement(<ProfileSetupPage />)} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
@@ -484,6 +493,7 @@ function AppContent() {
 <Route path="/report" element={backendElement(<ReportIssue />)} />
       <Route path="/buyer-protection" element={backendElement(<BuyerProtection />)} />
       <Route path="/add-product" element={backendElement(<AddProduct />)} />
+      <Route path="/edit-product/:id" element={backendElement(<AddProduct />)} />
       <Route path="/seller/:id" element={backendElement(<SellerProfile />)} />
       <Route path="/categories" element={backendElement(<CategoriesPage />)} />
       <Route path="/categories/:slug" element={backendElement(<CategoriesPage />)} />
@@ -876,51 +886,92 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
 
   return (
     <AppScaffold>
-      <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-green-50/70 p-4 sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h1 className="page-title">Marketplace</h1>
-              <p className="body-text">Find trusted campus listings with clear pricing, meetup options, and direct seller messaging.</p>
+      <section className="container space-y-8 py-10">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary/90 to-teal-600 p-6 sm:p-8 shadow-xl">
+          {/* Background Decoration */}
+          <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+          
+          <div className="relative z-10">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex-1">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/20 backdrop-blur-sm px-4 py-2 text-sm font-semibold text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                  Trusted Marketplace
+                </div>
+                <h1 className="mt-4 text-3xl sm:text-4xl font-bold text-white">Marketplace</h1>
+                <p className="mt-2 text-lg text-white/90 max-w-2xl">Find trusted campus listings with clear pricing, meetup options, and direct seller messaging.</p>
+              </div>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowVerification(true)}
+                className="border-2 border-white/30 bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 hover:text-white"
+              >
+                <Info className="h-4 w-4 mr-2" />
+                How Verification Works
+              </Button>
             </div>
-            <Button variant="outline" onClick={() => setShowVerification(true)}>
-              How Verification Works
-            </Button>
-          </div>
-          <div className="mt-4 rounded-xl border border-green-200 bg-white p-4">
-            <div className="flex items-start gap-2 text-slate-800">
-              <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
-              <p className="text-sm font-semibold">Buyer Protection</p>
-            </div>
-            <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
-              <p><span className="font-medium text-slate-800">Returns:</span> Request support within 24 hours if the item differs from the listing.</p>
-              <p><span className="font-medium text-slate-800">Refunds:</span> Approved cases are refunded to wallet balance after review.</p>
-              <p><span className="font-medium text-slate-800">Disputes:</span> Campus support reviews chat, order, and listing evidence fairly.</p>
+            
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/10 backdrop-blur-sm p-4 border border-white/20">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-white/20 p-2">
+                    <ShieldCheck className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-white">Returns</p>
+                    <p className="text-sm text-white/80">Request support within 24 hours if item differs from listing.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/10 backdrop-blur-sm p-4 border border-white/20">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-white/20 p-2">
+                    <Wallet className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-white">Refunds</p>
+                    <p className="text-sm text-white/80">Approved cases refunded to wallet balance after review.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/10 backdrop-blur-sm p-4 border border-white/20">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-white/20 p-2">
+                    <MessageCircle className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-white">Disputes</p>
+                    <p className="text-sm text-white/80">Campus support reviews evidence fairly.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <Card className="border-orange-200 bg-orange-50/60 shadow-sm">
-          <CardContent className="space-y-3 p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+        <Card className="border-orange-200 bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 shadow-lg overflow-hidden">
+          <CardContent className="space-y-4 p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700">
+                <div className="inline-flex items-center gap-2 rounded-full bg-orange-100 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-orange-800">
                   <Flame className="h-4 w-4" /> Campus Demand
-                </p>
-                <h2 className="section-title">Trending in Legon</h2>
-                <p className="text-sm text-slate-600">Students are actively browsing these right now.</p>
+                </div>
+                <h2 className="mt-3 text-2xl font-bold text-slate-900">🔥 Trending in Legon</h2>
+                <p className="mt-1 text-sm text-slate-600">Students are actively browsing these categories right now. Jump on the trend!</p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-3">
               {campusTrendingTopics.map((topic) => (
                 <button
                   key={topic}
-                  className="rounded-full border border-orange-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-orange-400 hover:text-orange-800"
+                  className="group inline-flex items-center gap-2 rounded-full border-2 border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:border-orange-400 hover:bg-orange-50 hover:text-orange-800 hover:shadow-md"
                   onClick={() => {
                     setSearchQuery(topic.toLowerCase());
                     setCategory("All");
                   }}
                 >
+                  <Search className="h-4 w-4 text-orange-500 group-hover:text-orange-600" />
                   {topic}
                 </button>
               ))}
@@ -928,31 +979,59 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
           </CardContent>
         </Card>
 
-        <Card className="border-amber-200 bg-amber-50/60 shadow-sm">
-          <CardContent className="space-y-4 p-4 sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+        <Card className="border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 shadow-lg overflow-hidden">
+          <CardContent className="space-y-5 p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-amber-800">
                   <Megaphone className="h-4 w-4" /> Growth Lever
-                </p>
-                <h2 className="section-title">Sponsored & Featured Listings</h2>
-<p className="text-sm text-slate-600">Sellers can pay GHS 50 - GHS 100 to appear at the top and get faster visibility.</p>
+                </div>
+                <h2 className="mt-3 text-2xl font-bold text-slate-900">Sponsored & Featured Listings</h2>
+                <p className="mt-1 text-sm text-slate-600">Boost your visibility! Sellers can pay GHS 50 - GHS 100 to appear at the top and get faster sales.</p>
               </div>
-              <Button onClick={openFeaturedListingFlow}>Promote a Listing</Button>
+              <Button onClick={openFeaturedListingFlow} className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-md">
+                <Megaphone className="h-4 w-4 mr-2" />
+                Promote a Listing
+              </Button>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               {sponsoredProducts.map((product, index) => {
-                const badge = index === 0 ? "Sponsored" : index === 1 ? "Featured Seller" : "Top Product";
+                const badges = [
+                  { label: "Sponsored", color: "bg-gradient-to-r from-amber-500 to-orange-500", icon: <Star className="h-3 w-3" /> },
+                  { label: "Featured Seller", color: "bg-gradient-to-r from-emerald-500 to-teal-500", icon: <ShieldCheck className="h-3 w-3" /> },
+                  { label: "Top Product", color: "bg-gradient-to-r from-purple-500 to-pink-500", icon: <Award className="h-3 w-3" /> }
+                ];
+                const badge = badges[index];
                 return (
-                  <Card key={`featured-${product.id}`} className="overflow-hidden border-amber-200 bg-white shadow-sm">
-                    <img src={product.image} alt={product.title} className="h-24 w-full object-cover" />
-                    <CardContent className="space-y-2 p-3">
-                      <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{badge}</span>
-                      <p className="line-clamp-1 text-sm font-semibold text-slate-900">{product.title}</p>
-                      <p className="text-xs text-slate-500">{product.sellerName}</p>
-                      <div className="flex items-center justify-between">
-                        <p className="font-bold text-primary">GHS {product.price.toFixed(2)}</p>
-                        <Button size="sm" variant="outline" asChild><Link to={`/product/${product.id}`}>View</Link></Button>
+                  <Card key={`featured-${product.id}`} className="group overflow-hidden border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                    <div className="relative">
+                      <img src={product.image} alt={product.title} className="h-32 w-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                      <div className="absolute top-3 left-3">
+                        <span className={`inline-flex items-center gap-1 rounded-full ${badge.color} px-3 py-1.5 text-xs font-semibold text-white shadow-lg`}>                          
+                          {badge.icon}
+                          {badge.label}
+                        </span>
+                      </div>
+                      <div className="absolute bottom-3 right-3">
+                        <span className="rounded-xl bg-white/95 backdrop-blur-sm px-3 py-1.5 text-lg font-bold text-primary shadow-lg">
+                          GHS {product.price.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <CardContent className="p-4 space-y-3">
+                      <p className="line-clamp-1 text-base font-bold text-slate-900 group-hover:text-primary transition-colors">{product.title}</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-700">{product.sellerName}</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+                            <span className="text-xs text-slate-600">{product.rating.toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <Button size="sm" variant="outline" className="border-2 hover:bg-slate-50" asChild>
+                          <Link to={`/product/${product.id}`}>View</Link>
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -962,53 +1041,123 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="grid gap-3 p-4 md:grid-cols-4">
+        <Card className="border-0 shadow-lg bg-white">
+          <CardContent className="grid gap-4 p-5 md:grid-cols-4">
             <div className="relative md:col-span-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search products or sellers" className="pl-9" />
+              <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <Input 
+                value={searchQuery} 
+                onChange={(e) => setSearchQuery(e.target.value)} 
+                placeholder="Search products or sellers" 
+                className="pl-11 h-12 border-2 focus:border-primary" 
+              />
             </div>
-            <select aria-label="Category" value={selectedCategory} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border bg-white px-3 py-2 text-sm">
+            <select 
+              aria-label="Category" 
+              value={selectedCategory} 
+              onChange={(e) => setCategory(e.target.value)} 
+              className="h-12 rounded-xl border-2 bg-white px-4 text-sm font-medium focus:border-primary focus:outline-none"
+            >
               {categories.map((cat) => <option key={cat}>{cat}</option>)}
             </select>
-            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)} className="rounded-lg border bg-white px-3 py-2 text-sm">
+            <select 
+              aria-label="Sort" 
+              value={sort} 
+              onChange={(e) => setSort(e.target.value)} 
+              className="h-12 rounded-xl border-2 bg-white px-4 text-sm font-medium focus:border-primary focus:outline-none"
+            >
               <option value="popular">Most Popular</option>
               <option value="price_asc">Price: Low to High</option>
               <option value="price_desc">Price: High to Low</option>
               <option value="newest">Newest</option>
             </select>
-            <div className="flex items-center justify-end text-sm text-slate-500">{products.length} listing{products.length === 1 ? "" : "s"}</div>
+            <div className="flex items-center justify-end">
+              <div className="rounded-xl bg-primary/10 px-4 py-2.5">
+                <p className="text-sm font-semibold text-primary">{products.length} listing{products.length === 1 ? "" : "s"}</p>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
-            <Card key={p.id} className="overflow-hidden">
-              <img src={p.image} alt={p.title} className="h-44 w-full object-cover" />
-              <CardContent className="space-y-3 p-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="section-title line-clamp-1">{p.title}</h3>
+            <Card key={p.id} className="group overflow-hidden border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1 bg-white">
+              {/* Product Image with Overlay */}
+              <div className="relative overflow-hidden">
+                <img src={p.image} alt={p.title} className="h-52 w-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                {/* Gradient Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                
+                {/* Top Badges */}
+                <div className="absolute top-3 left-3 right-3 flex items-start justify-between">
+                  <div className="flex flex-col gap-2">
+                    {p.verified_seller && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
+                        <ShieldCheck className="h-3 w-3" /> Verified Seller
+                      </span>
+                    )}
+                    {p.stock_status === "limited" && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
+                        <Clock3 className="h-3 w-3" /> Limited Stock
+                      </span>
+                    )}
+                    {p.stock_status === "out_of_stock" && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
+                        Sold Out
+                      </span>
+                    )}
+                  </div>
                   <button
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${p.verified_seller ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-                    title={p.verified_seller ? "Verified Student: identity and active student status confirmed." : "Verification pending for this seller."}
+                    className="rounded-full bg-white/90 backdrop-blur-sm p-2 shadow-lg hover:bg-white transition-colors"
                     onClick={() => setShowVerification(true)}
+                    title="Learn about verification"
                   >
-                    <ShieldCheck className="h-3.5 w-3.5" /> {p.verified_seller ? "Verified" : "Unverified"}
+                    <Info className="h-4 w-4 text-slate-700" />
                   </button>
                 </div>
-                <p className="text-sm text-slate-600 line-clamp-2">{describeProduct(p.title, p.category)}</p>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-800">{p.sellerName}</p>
-                  <button className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700" onClick={() => setShowVerification(true)} title="See verification details">
-                    <Info className="h-3.5 w-3.5" /> Verified Student
-                  </button>
+                
+                {/* Price Tag */}
+                <div className="absolute bottom-3 left-3">
+                  <div className="rounded-xl bg-white/95 backdrop-blur-sm px-4 py-2 shadow-lg">
+                    <p className="text-xl font-bold text-primary">GHS {p.price.toFixed(2)}</p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5 text-amber-500" /> {p.rating.toFixed(1)} ({p.reviews})</span>
-                  <span>{p.seller_sales} sales</span>
-                  <span>Responds {p.response_time}</span>
+              </div>
+              
+              <CardContent className="p-5 space-y-4">
+                {/* Title & Category */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{p.category}</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 line-clamp-2 group-hover:text-primary transition-colors">{p.title}</h3>
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs">
+                
+                {/* Description */}
+                <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{describeProduct(p.title, p.category)}</p>
+                
+                {/* Seller Info */}
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-900">{p.sellerName}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                        <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> {p.rating.toFixed(1)}
+                      </span>
+                      <span className="text-xs text-slate-400">•</span>
+                      <span className="text-xs text-slate-500">{p.reviews} reviews</span>
+                      <span className="text-xs text-slate-400">•</span>
+                      <span className="text-xs text-slate-500">{p.seller_sales} sales</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-500">Response time</p>
+                    <p className="text-sm font-medium text-slate-700">{p.response_time}</p>
+                  </div>
+                </div>
+                
+                {/* Tags */}
+                <div className="flex flex-wrap gap-2">
                   {(() => {
                     let deliveryLabel = "";
                     switch (p.delivery_type) {
@@ -1025,40 +1174,68 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                         deliveryLabel = String(p.delivery_type);
                     }
                     return (
-                      <span className="rounded-full bg-slate-100 px-2 py-1">{deliveryLabel}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
+                        <MapPin className="h-3 w-3" /> {deliveryLabel}
+                      </span>
                     );
                   })()}
-                  <span className={`rounded-full px-2 py-1 ${p.stock_status === "in_stock" ? "bg-green-100 text-green-700" : p.stock_status === "limited" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                    {p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Sold Out"}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700">
+                    <Clock3 className="h-3 w-3" /> {p.eta}
                   </span>
-                  <span className="rounded-full bg-slate-100 px-2 py-1">{p.eta}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700">
+                    {p.condition === "Used" ? "Used - Good" : p.condition}
+                  </span>
                 </div>
-                <p className="text-xs text-slate-500">Condition: {p.condition === "Used" ? "Used - Good Condition" : p.condition}. {p.condition === "Used" ? "Light wear, tested and fully functional." : "Clean and ready to use."}</p>
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-primary">? {p.price.toFixed(2)}</p>
-                  <p className="text-xs text-slate-500">{p.category}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button size="sm" variant="outline" onClick={() => messageSeller(p.id)}>Message Seller</Button>
-                  <Button size="sm" disabled={p.stock_status === "out_of_stock"} onClick={() => createOrder(p.id)}>Add to Cart</Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button size="sm" variant="outline" asChild><Link to={`/product/${p.id}`}>View Details</Link></Button>
-                  <Button size="sm" disabled={p.stock_status === "out_of_stock"} onClick={() => createOrder(p.id)}>
-                    Buy Now
+                
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="h-11 border-2 hover:bg-slate-50 hover:border-slate-300 transition-all"
+                    onClick={() => messageSeller(p.id)}
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Message
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    className="h-11 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all"
+                    disabled={p.stock_status === "out_of_stock"}
+                    onClick={() => createOrder(p.id)}
+                  >
+                    <ShoppingCart className="h-4 w-4 mr-2" />
+                    Add to Cart
                   </Button>
                 </div>
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  className="w-full h-10 text-primary hover:bg-primary/5"
+                  asChild
+                >
+                  <Link to={`/product/${p.id}`}>View Full Details</Link>
+                </Button>
               </CardContent>
             </Card>
           ))}
         </div>
 
         {products.length === 0 && (
-          <Card>
-            <CardContent className="p-6 text-center">
-              <p className="text-base font-semibold text-slate-800">No products match your filters right now.</p>
-              <p className="body-text">Adjust search, category, or sorting to discover more verified campus listings.</p>
-              <Button className="mt-3" variant="outline" onClick={() => { setSearchQuery(""); setCategory("All"); setSort("popular"); }}>
+          <Card className="border-2 border-dashed border-slate-200 bg-slate-50/50">
+            <CardContent className="p-12 text-center">
+              <div className="mx-auto w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6">
+                <Search className="h-10 w-10 text-slate-400" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">No products found</h3>
+              <p className="text-slate-600 mb-6 max-w-md mx-auto">
+                We couldn't find any products matching your search. Try adjusting your filters or browse all categories.
+              </p>
+              <Button 
+                className="bg-gradient-to-r from-primary to-primary/90 shadow-md hover:shadow-lg" 
+                onClick={() => { setSearchQuery(""); setCategory("All"); setSort("popular"); }}
+              >
+                <Search className="h-4 w-4 mr-2" />
                 Reset Filters
               </Button>
             </CardContent>
@@ -1328,211 +1505,10 @@ function DashboardRouter() {
   if (!user) return <Navigate to="/auth" replace />;
   // Admins can also access seller dashboard (for admins who sell)
   // They can access /admin separately for admin controls
-  if (user.role === "seller" || user.role === "admin") return <SellerDashboard />;
+  if (user.role === "seller" || user.role === "admin") return <SellerDashboard initialTab="overview" />;
   return <StudentDashboard />;
 }
-function SellerDashboard() {
-  useDataRefresh();
-  const navigate = useNavigate();
-  const user = useCurrentUser();
-  const [range, setRange] = useState<"7" | "30" | "all">("7");
-  if (!user) return <Navigate to="/auth" replace />;
-  const products = getProducts().filter((p) => p.sellerId === user.id || user.id === "u_seller_1");
-  const orders = getOrders().filter((o) => o.sellerId === user.id || user.id === "u_seller_1");
-  const revenueAll = orders.filter((o) => o.status === "completed").reduce((s, o) => s + o.amount, 0);
-  const monthRevenue = orders.filter((o) => Date.now() - +new Date(o.created_at) < 30 * 86400000).reduce((s, o) => s + o.amount, 0);
-  const pendingCount = orders.filter((o) => ["pending", "confirmed"].includes(o.status)).length;
-  const chartDays = range === "7" ? 7 : range === "30" ? 30 : 60;
-  const chartData = Array.from({ length: chartDays }, (_, i) => {
-    const date = new Date(Date.now() - (chartDays - i - 1) * 86400000);
-    const key = date.toISOString().slice(0, 10);
-    return { day: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }), revenue: orders.filter((o) => o.created_at.startsWith(key)).reduce((s, o) => s + o.amount, 0) };
-  });
 
-  const refreshProductsFromApi = async () => {
-    const result = await productsApi.getAll();
-    if (result.data) {
-      saveProducts(result.data.map(toLocalProduct));
-    }
-  };
-
-  const addNewProduct = async () => {
-    const created = await productsApi.create({
-      title: "New Campus Listing",
-      description: "Update this listing details from your dashboard.",
-      price: 40,
-      image_url: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&q=80",
-    });
-    if (created.error) {
-      toast.error(created.error);
-      return;
-    }
-    await refreshProductsFromApi();
-    toast.success("New product created");
-  };
-
-  const toggleProductVisibility = async (productId: string) => {
-    const target = products.find((item) => item.id === productId);
-    if (!target) return;
-    if (target.is_active) {
-      const removed = await productsApi.delete(productId);
-      if (removed.error) {
-        toast.error(removed.error);
-        return;
-      }
-      await refreshProductsFromApi();
-      toast.success("Listing hidden");
-      return;
-    }
-
-    toast.info("Re-enable by creating a new listing for now.");
-  };
-
-  const deleteProduct = async (productId: string) => {
-    const removed = await productsApi.delete(productId);
-    if (removed.error) {
-      toast.error(removed.error);
-      return;
-    }
-    await refreshProductsFromApi();
-    toast.success("Product deleted");
-  };
-
-  const openWithdrawFromWallet = () => {
-    document.getElementById("wallet-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    toast.info("Use the Withdraw button on the wallet card.");
-  };
-
-  const shareStoreLink = async () => {
-    await navigator.clipboard.writeText(`${window.location.origin}/marketplace?seller=${user.id}`);
-    toast.success("Store link copied");
-  };
-
-  const openFeaturedPlans = () => {
-toast.info("Promotion tiers: GHS 50 (Starter), GHS 75 (Boost), GHS 100 (Top Spotlight).");
-    navigate("/marketplace");
-  };
-
-  const isAdmin = user.role === "admin";
-
-  return (
-    <AppScaffold>
-      <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="page-title">Welcome back, {user.full_name.split(" ")[0]}!</h1>
-              <p className="body-text">Manage your store, orders, and payouts with a clear business view.</p>
-            </div>
-            {isAdmin && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => navigate("/admin")}
-                className="ml-4 border-amber-500 text-amber-600 hover:bg-amber-50"
-              >
-                ⚡ Admin Panel
-              </Button>
-            )}
-          </div>
-        </div>
-        <div id="wallet-card"><WalletCard user={user} sellerMode /></div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {[["Total Sales", `GHS ${revenueAll.toFixed(2)}`], ["This Month", `GHS ${monthRevenue.toFixed(2)}`], ["Active Listings", String(products.filter((p) => p.is_active).length)], ["Total Orders", String(orders.length)], ["Pending Orders", String(pendingCount)]].map(([label, value], i) => (
-            <Card key={label}><CardContent className="p-4"><p className="label-text">{label}</p><p className={`mt-1 text-2xl font-bold ${label === "Pending Orders" && pendingCount > 0 ? "text-amber-500" : "text-primary"}`}>{value}</p><p className="text-xs text-gray-500">{statDelta(i)} vs last period</p></CardContent></Card>
-          ))}
-        </div>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <div className="mb-4 flex items-center justify-between"><h2 className="section-title">Sales Performance</h2><div className="flex gap-2"><Button size="sm" variant={range === "7" ? "default" : "outline"} onClick={() => setRange("7")}>7 days</Button><Button size="sm" variant={range === "30" ? "default" : "outline"} onClick={() => setRange("30")}>30 days</Button><Button size="sm" variant={range === "all" ? "default" : "outline"} onClick={() => setRange("all")}>All time</Button></div></div>
-            <div className="h-64"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData}><defs><linearGradient id="sellRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#006633" stopOpacity={0.35} /><stop offset="95%" stopColor="#006633" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" hide={chartDays > 30} /><YAxis /><Tooltip /><Area dataKey="revenue" stroke="#006633" fill="url(#sellRev)" /></AreaChart></ResponsiveContainer></div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <h2 className="section-title mb-3">My Products</h2>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-              <button onClick={addNewProduct} className="text-left"><Card className="border-dashed"><CardContent className="p-4 text-center"><p className="text-sm font-semibold">+ List a Product</p></CardContent></Card></button>
-              {products.map((p) => (
-                <Card key={p.id}>
-                  <img src={p.image} alt={p.title} className="h-24 w-full rounded-t-xl object-cover" />
-                  <CardContent className="p-3">
-                    <p className="line-clamp-1 text-sm font-semibold">{p.title}</p>
-                    <p className="text-xs text-gray-500">{p.stock_status === "in_stock" ? "In Stock" : p.stock_status === "limited" ? "Limited" : "Out of Stock"} - {p.views} views</p>
-                    <p className="font-bold text-primary">GHS {p.price}</p>
-                    <div className="mt-2 flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Edit</Button>
-                      <Button size="sm" variant="outline" onClick={() => toggleProductVisibility(p.id)}>{p.is_active ? "Hide" : "Show"}</Button>
-                      <Button size="sm" variant="destructive" onClick={() => deleteProduct(p.id)}>Delete</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-amber-200 bg-amber-50/60 shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
-                  <Megaphone className="h-4 w-4" /> Monetize Visibility
-                </p>
-                <h2 className="section-title">Featured Listings</h2>
-                <p className="mt-1 text-sm text-slate-600">Pay once to push your product to the top of marketplace feeds.</p>
-              </div>
-              <Button onClick={openFeaturedPlans}>Start Promotion</Button>
-            </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              {[
-                ["GHS 50", "Starter", "Featured in homepage carousel for 7 days"],
-                ["GHS 75", "Boost", "Priority placement + Verified badge for 14 days"],
-                ["GHS 100", "Top Spotlight", "Pinned at top + Badge for 30 days"],
-              ].map(([price, tier, benefit]) => (
-                <div key={tier} className="rounded-xl border border-amber-200 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{tier}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-900">{price}</p>
-                  <p className="text-xs text-slate-600">{benefit}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <h2 className="section-title mb-3">Recent Orders</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-xs uppercase tracking-wide text-gray-500"><th className="py-2">Order ID</th><th>Product</th><th>Buyer Name</th><th>Amount</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
-                <tbody>
-                  {orders.map((o) => (
-                    <tr key={o.id} className="border-t"><td className="py-2">#{o.id}</td><td>{o.productTitle}</td><td>{o.buyerName}</td><td>GHS {o.amount}</td><td><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize">{o.status}</span></td><td>{new Date(o.created_at).toLocaleDateString()}</td><td><Button size="sm" variant="outline" onClick={() => navigate(`/checkout/${o.id}`)}>Open</Button></td></tr>
-                ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <h2 className="section-title mb-3">Quick Actions</h2>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              <Button onClick={addNewProduct}>Add New Product</Button>
-              <Button variant="outline" onClick={() => navigate(`/marketplace?seller=${user.id}`)}>View My Store</Button>
-              <Button variant="outline" onClick={openWithdrawFromWallet}>Withdraw Funds</Button>
-              <Button variant="outline" onClick={() => navigate('/settings')}>Settings</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </AppScaffold>
-  );
-}
 function EmptyStateCard({ title, description, cta, to }: { title: string; description: string; cta: string; to: string }) {
   return (
     <div className="rounded-xl border border-dashed bg-slate-50 p-6 text-center">

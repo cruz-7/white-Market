@@ -49,18 +49,41 @@ authRouter.post("/signup", async (req, res) => {
 
   const user = data.user;
   if (user) {
-    const { error: profileError } = await supabase.from("users").upsert(
-      {
-        id: user.id,
-        email: normalizedEmail,
-        full_name: full_name || null,
-        role: "user",
-      },
-      { onConflict: "id" },
-    );
+    // First check if user already exists
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
 
-    if (profileError) {
-      return res.status(400).json({ error: profileError.message });
+    if (existingUser) {
+      // Update existing user
+      const { error: profileError } = await supabase
+        .from("users")
+        .update({
+          id: user.id,
+          full_name: full_name || null,
+          role: "user",
+        })
+        .eq("email", normalizedEmail);
+
+      if (profileError) {
+        return res.status(400).json({ error: profileError.message });
+      }
+    } else {
+      // Insert new user
+      const { error: profileError } = await supabase
+        .from("users")
+        .insert({
+          id: user.id,
+          email: normalizedEmail,
+          full_name: full_name || null,
+          role: "user",
+        });
+
+      if (profileError) {
+        return res.status(400).json({ error: profileError.message });
+      }
     }
   }
 

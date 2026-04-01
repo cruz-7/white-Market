@@ -184,6 +184,7 @@ export interface Product {
   category_id?: string;
   category?: string;
   is_active?: boolean;
+  stock_quantity?: number;
   view_count?: number;
   created_at?: string;
   users?: {
@@ -250,7 +251,7 @@ export const productsApi = {
       body: JSON.stringify(product),
     }),
 
-  update: (id: string, product: { title?: string; description?: string; price?: number; image_url?: string; category_id?: string; is_active?: boolean }) =>
+  update: (id: string, product: { title?: string; description?: string; price?: number; image_url?: string; category_id?: string; is_active?: boolean; stock_quantity?: number }) =>
     fetchApi<{ message: string; product: Product }>(`/products/${id}`, {
       method: "PUT",
       body: JSON.stringify(product),
@@ -1727,5 +1728,115 @@ export const fashionApi = {
   // Get brands
   getBrands: async (): Promise<ApiResponse<string[]>> => {
     return fetchApi('/fashion/meta/brands');
+  },
+};
+
+// Ratings API
+export const ratingsApi = {
+  // Get seller rating stats
+  getSellerStats: async (sellerId: string): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/seller/${sellerId}/stats`);
+  },
+
+  // Get ratings for a seller
+  getSellerRatings: async (
+    sellerId: string,
+    page = 1,
+    limit = 10,
+    sort = 'recent'
+  ): Promise<ApiResponse<any>> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    params.append('sort', sort);
+    return fetchApi(`/ratings/seller/${sellerId}?${params.toString()}`);
+  },
+
+  // Get rating for a specific order
+  getOrderRating: async (orderId: string): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/order/${orderId}`);
+  },
+
+  // Submit a new rating
+  submitRating: async (data: {
+    order_id: string;
+    seller_id: string;
+    overall_rating: number;
+    product_quality_rating?: number;
+    communication_rating?: number;
+    delivery_speed_rating?: number;
+    packaging_rating?: number;
+    value_for_money_rating?: number;
+    review_text?: string;
+    review_title?: string;
+    feedback_tags?: string[];
+    review_photos?: string[];
+    is_anonymous?: boolean;
+  }): Promise<ApiResponse<any>> => {
+    return fetchApi('/ratings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Update an existing rating
+  updateRating: async (
+    ratingId: string,
+    data: {
+      overall_rating?: number;
+      product_quality_rating?: number;
+      communication_rating?: number;
+      delivery_speed_rating?: number;
+      packaging_rating?: number;
+      value_for_money_rating?: number;
+      review_text?: string;
+      review_title?: string;
+      feedback_tags?: string[];
+      review_photos?: string[];
+      is_anonymous?: boolean;
+    }
+  ): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/${ratingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Add seller response to a rating
+  addSellerResponse: async (
+    ratingId: string,
+    response: string
+  ): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/${ratingId}/response`, {
+      method: 'POST',
+      body: JSON.stringify({ response }),
+    });
+  },
+
+  // Vote on rating helpfulness
+  voteHelpful: async (
+    ratingId: string,
+    isHelpful: boolean
+  ): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/${ratingId}/helpful`, {
+      method: 'POST',
+      body: JSON.stringify({ is_helpful: isHelpful }),
+    });
+  },
+
+  // Get user's rating history
+  getUserHistory: async (
+    page = 1,
+    limit = 10
+  ): Promise<ApiResponse<any>> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    return fetchApi(`/ratings/user/history?${params.toString()}`);
+  },
+
+  // Get orders eligible for rating
+  getEligibleOrders: async (): Promise<ApiResponse<any>> => {
+    return fetchApi('/ratings/eligible-orders');
   },
 };

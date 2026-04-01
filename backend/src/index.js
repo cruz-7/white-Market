@@ -23,6 +23,7 @@ import notificationsRouter from "./routes/notifications.js";
 import servicesRouter from "./routes/services.js";
 import booksRouter from "./routes/books.js";
 import fashionRouter from "./routes/fashion.js";
+import ratingsRouter from "./routes/ratings.js";
 
 function parseOrigins(originsInput) {
   if (Array.isArray(originsInput)) {
@@ -204,6 +205,7 @@ export function createApp(options = {}) {
   app.use("/services", servicesRouter);
   app.use("/books", booksRouter);
   app.use("/fashion", fashionRouter);
+  app.use("/ratings", ratingsRouter);
 
   if (enableTestRoutes) {
     app.use(testRouter);

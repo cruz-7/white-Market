@@ -9,7 +9,7 @@ type Product = {
   id: string;
   title: string;
   price: number;
-  images?: string[];
+  image_url?: string;
   is_active: boolean;
   stock_status?: "in_stock" | "low_stock" | "out_of_stock";
 };
@@ -62,8 +62,8 @@ const ProductGrid = ({ products, onProductUpdate }: ProductGridProps) => {
             <Card key={p.id} className={`group relative overflow-hidden transition-all hover:shadow-md ${!p.is_active ? "opacity-60" : ""}`}>
               <CardContent className="p-0">
                 <div className="aspect-square bg-muted/80 rounded-t-lg flex items-center justify-center overflow-hidden relative">
-                  {p.images?.[0] ? (
-                    <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover" />
+                  {p.image_url ? (
+                    <img src={p.image_url} alt={p.title} className="w-full h-full object-cover" />
                   ) : (
                     <Package className="h-8 w-8 text-muted-foreground/30" />
                   )}

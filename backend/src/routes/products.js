@@ -187,7 +187,7 @@ productsRouter.delete("/:id", requireAuth, async (req, res) => {
 // PUT /products/:id - Update a product
 productsRouter.put("/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
-  const { title, description, price, image_url, category_id, is_active } = req.body || {};
+  const { title, description, price, image_url, category_id, is_active, stock_quantity } = req.body || {};
   const requesterId = req.user.id;
 
   const { data: product, error: fetchError } = await supabase
@@ -211,6 +211,7 @@ productsRouter.put("/:id", requireAuth, async (req, res) => {
   if (image_url !== undefined) updateData.image_url = image_url;
   if (category_id !== undefined) updateData.category_id = category_id;
   if (is_active !== undefined) updateData.is_active = is_active;
+  if (stock_quantity !== undefined) updateData.stock_quantity = stock_quantity;
 
   if (Object.keys(updateData).length === 0) {
     return res.status(400).json({ error: "No valid fields to update" });

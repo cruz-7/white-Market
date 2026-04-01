@@ -22,6 +22,8 @@ import { Input } from "./input";
 import { Badge } from "./badge";
 import { Avatar, AvatarFallback } from "./avatar";
 import { getOrders, LocalUser, Order, timeAgo } from "./data";
+import { SellerRating } from "./SellerRating";
+import { ratingsApi } from "./api";
 type Props = {
   user: LocalUser | null;
 };
@@ -297,6 +299,23 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
   
   const statusConfig = STATUS_CONFIG[normalizeOrderStatus(order.status)] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
+  const [showRatingForm, setShowRatingForm] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  
+  const handleRatingSubmit = async (ratingData: any) => {
+    try {
+      await ratingsApi.submitRating({
+        order_id: order.id,
+        seller_id: order.sellerId,
+        ...ratingData,
+      });
+      setRatingSubmitted(true);
+      setShowRatingForm(false);
+    } catch (error) {
+      console.error("Error submitting rating:", error);
+      alert("Failed to submit rating. Please try again.");
+    }
+  };
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -401,7 +420,39 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
                 Confirm Received
               </Button>
             )}
+            {(normalizeOrderStatus(order.status) === "handed_over" || normalizeOrderStatus(order.status) === "completed") && !ratingSubmitted && (
+              <Button 
+                variant="outline" 
+                className="flex-1"
+                onClick={() => setShowRatingForm(true)}
+              >
+                <Star className="w-4 h-4 mr-2" />
+                Rate Seller
+              </Button>
+            )}
+            {ratingSubmitted && (
+              <div className="flex-1 flex items-center justify-center gap-2 text-green-600 bg-green-50 rounded-md px-4 py-2">
+                <CheckCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">Rating Submitted!</span>
+              </div>
+            )}
           </div>
+          
+          {/* Rating Form Modal */}
+          {showRatingForm && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+              <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                <SellerRating
+                  orderId={order.id}
+                  sellerId={order.sellerId}
+                  sellerName={order.sellerName || "Seller"}
+                  sellerAvatar={undefined}
+                  onSubmit={handleRatingSubmit}
+                  onCancel={() => setShowRatingForm(false)}
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

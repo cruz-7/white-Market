@@ -1,6 +1,6 @@
 // cspell:ignore Jollof
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Upload, X, ImagePlus, Loader2 } from "lucide-react";
 
@@ -14,6 +14,9 @@ import { categoriesApi, productsApi, type Category } from "./api";
 
 function AddProduct() {
   const navigate = useNavigate();
+  const { id: productId } = useParams();
+  const isEditMode = Boolean(productId);
+  
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -48,6 +51,34 @@ function AddProduct() {
       cancelled = true;
     };
   }, []);
+
+  // Load product data for editing
+  useEffect(() => {
+    if (!productId) return;
+    
+    const loadProduct = async () => {
+      setLoading(true);
+      const { data, error } = await productsApi.get(productId);
+      if (!error && data) {
+        setForm({
+          title: data.title || "",
+          description: data.description || "",
+          price: data.price?.toString() || "",
+          category_id: data.category_id || "",
+          image_url: data.image_url || "",
+        });
+        if (data.image_url) {
+          setImagePreview(data.image_url);
+        }
+      } else {
+        toast.error("Failed to load product");
+        navigate("/dashboard/products");
+      }
+      setLoading(false);
+    };
+    
+    loadProduct();
+  }, [productId, navigate]);
 
   useEffect(() => {
     if (form.category_id || categories.length === 0) return;
@@ -119,13 +150,20 @@ function AddProduct() {
 
     setLoading(true);
 
-    const result = await productsApi.create({
+    const productData = {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       price,
       image_url: form.image_url || undefined,
       category_id: form.category_id,
-    });
+    };
+
+    let result;
+    if (isEditMode && productId) {
+      result = await productsApi.update(productId, productData);
+    } else {
+      result = await productsApi.create(productData);
+    }
 
     setLoading(false);
 
@@ -134,8 +172,8 @@ function AddProduct() {
       return;
     }
 
-    toast.success("Product listed successfully!");
-    navigate("/dashboard");
+    toast.success(isEditMode ? "Product updated successfully!" : "Product listed successfully!");
+    navigate("/dashboard/products");
   };
 
   return (
