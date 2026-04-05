@@ -15,6 +15,8 @@ import { Input } from "./input";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Textarea } from "./textarea";
 import { Badge } from "./badge";
+import { Recommendations } from "./Recommendations";
+import { useRecommendations } from "./useRecommendations";
 import {
   LocalUser,
   Message,
@@ -166,19 +168,24 @@ function normalizeCampusOrderStatus(status: string) {
 }
 
 function toLocalProduct(product: ApiProduct) {
+  const backendAvatar = product.users?.seller_profile_image_url || product.users?.avatar_url;
+  console.log("[toLocalProduct] sellerAvatar from backend:", backendAvatar);
   return {
     id: product.id,
     title: product.title,
     price: Number(product.price || 0),
     sellerId: product.seller_id,
-    sellerName: product.users?.full_name || "Seller",
+    sellerName: product.users?.seller_display_name || product.users?.full_name || "Seller",
+    sellerAvatar: backendAvatar || undefined,
     category: product.category || product.categories?.name || "General",
     image: product.image_url || "https://via.placeholder.com/640x360?text=White+Market",
     is_active: product.is_active ?? true,
     stock_status: "in_stock" as const,
     views: Number(product.view_count || 0),
-    rating: 4.5,
-    reviews: 0,
+    rating: Number(product.average_rating || product.seller_rating_stats?.avg_overall_rating || 0),
+    reviews: Number(product.rating_count || product.seller_rating_stats?.total_ratings || 0),
+    average_rating: Number(product.average_rating || 0),
+    rating_count: Number(product.rating_count || 0),
     eta: "Same day",
     delivery_type: "Campus Meetup" as const,
     condition: "New" as const,
@@ -369,6 +376,51 @@ function AppContent() {
     const { data: sub } = supabase.auth.onAuthStateChange(() => { syncFromSupabase(); });
     return () => { sub.subscription.unsubscribe(); };
   }, []);
+
+  // Fetch products for unauthenticated users too
+  useEffect(() => {
+    if (!isBackendReady) return;
+    let cancelled = false;
+
+    const fetchProductsOnly = async () => {
+      const productsRes = await productsApi.getAll();
+      console.log("[fetchProductsOnly] got products:", productsRes.data?.length, "items");
+        console.log("[fetchProductsOnly] sample full product:", JSON.stringify(productsRes.data?.[0], null, 2));
+        console.log("[fetchProductsOnly] sample product.users:", productsRes.data?.[0]?.users);
+        console.log("[fetchProductsOnly] users keys:", Object.keys(productsRes.data?.[0]?.users || {}));
+        // Log seller avatar for first few products
+        productsRes.data?.slice(0, 3).forEach((p, i) => {
+          console.log(`[fetchProductsOnly] product[${i}] sellerAvatar from API:`, p.users?.seller_profile_image_url);
+        });
+      if (cancelled) return;
+      if (productsRes.data) {
+        saveProducts(productsRes.data.map(toLocalProduct));
+      }
+    };
+
+    // Clear cache first to force fresh fetch
+    saveProducts([]);
+    fetchProductsOnly();
+
+    return () => { cancelled = true; };
+  }, [isBackendReady]);
+
+  // Re-fetch products when data changes (e.g., seller profile updated)
+  useEffect(() => {
+    let cancelled = false;
+    const handleDataChange = async () => {
+      if (!isBackendReady || cancelled) return;
+      const productsRes = await productsApi.getAll();
+      if (!cancelled && productsRes.data) {
+        saveProducts(productsRes.data.map(toLocalProduct));
+      }
+    };
+    window.addEventListener("wm-data-change", handleDataChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("wm-data-change", handleDataChange);
+    };
+  }, [isBackendReady]);
 
   useEffect(() => {
     if (!currentUser || !isBackendReady) return;
@@ -1023,10 +1075,10 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                       <p className="line-clamp-1 text-base font-bold text-slate-900 group-hover:text-primary transition-colors">{product.title}</p>
                       <div className="flex items-center gap-2">
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-700">{product.sellerName}</p>
+                          <Link to={`/seller/${product.sellerId}`} className="text-sm font-medium text-slate-700 hover:text-primary transition-colors">{product.sellerName}</Link>
                           <div className="flex items-center gap-1 mt-1">
                             <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-                            <span className="text-xs text-slate-600">{product.rating.toFixed(1)}</span>
+                            <span className="text-xs text-slate-600">{product.rating > 0 ? product.rating.toFixed(1) : "N/A"}</span>
                           </div>
                         </div>
                         <Button size="sm" variant="outline" className="border-2 hover:bg-slate-50" asChild>
@@ -1138,14 +1190,30 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                 
                 {/* Seller Info */}
                 <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900">{p.sellerName}</p>
+                  {/* Seller Avatar - robust fallback handling */}
+                <Avatar className="h-10 w-10 flex-shrink-0">
+                  <AvatarImage
+                    src={p.sellerAvatar || undefined}
+                    alt={p.sellerName}
+                    onError={() => console.warn("[Avatar] Image failed, showing fallback", p.sellerAvatar)}
+                  />
+                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                    {p.sellerName?.charAt(0)?.toUpperCase() || "S"}
+                  </AvatarFallback>
+                </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <Link 
+                      to={`/seller/${p.sellerId}`} 
+                      className="font-semibold text-slate-900 hover:text-primary transition-colors truncate block"
+                    >
+                      {p.sellerName}
+                    </Link>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="inline-flex items-center gap-1 text-xs text-amber-600">
-                        <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> {p.rating.toFixed(1)}
+                        <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> {p.rating > 0 ? p.rating.toFixed(1) : "N/A"}
                       </span>
                       <span className="text-xs text-slate-400">•</span>
-                      <span className="text-xs text-slate-500">{p.reviews} reviews</span>
+                      <span className="text-xs text-slate-500">{p.reviews > 0 ? p.reviews : "0"} reviews</span>
                       <span className="text-xs text-slate-400">•</span>
                       <span className="text-xs text-slate-500">{p.seller_sales} sales</span>
                     </div>
@@ -1271,7 +1339,15 @@ function ProductDetailPage() {
   const navigate = useNavigate();
   const user = useCurrentUser();
   const { id } = useParams();
+  const { trackProductView, trackPurchase } = useRecommendations();
   const product = getProducts().find((p) => p.id === id);
+  
+  useEffect(() => {
+    if (product) {
+      trackProductView(product.id, product.category);
+    }
+  }, [product?.id]);
+  
   if (!product) return <Navigate to="/marketplace" replace />;
 
   const createOrder = async () => {
@@ -1331,6 +1407,9 @@ function ProductDetailPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
+        <div className="mt-8">
+          <SimilarProducts currentProductId={product.id} category={product.category} />
         </div>
       </section>
       <div className="fixed bottom-16 left-0 right-0 z-40 px-4 md:hidden">
@@ -1527,8 +1606,8 @@ function ProductDiscoveryCard({ product, onQuickAdd }: { product: ReturnType<typ
         <p className="line-clamp-1 text-sm font-semibold">{product.title}</p>
         <p className="text-xs text-slate-500">by {product.sellerName}</p>
         <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5 text-amber-500" /> {product.rating.toFixed(1)}</span>
-          <span>({product.reviews} reviews)</span>
+          <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5 text-amber-500" /> {product.rating > 0 ? product.rating.toFixed(1) : "N/A"}</span>
+          <span>({product.reviews > 0 ? product.reviews : "0"} reviews)</span>
           <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" /> {product.eta}</span>
         </div>
         <div className="mt-1 flex items-center justify-between">
@@ -1549,6 +1628,7 @@ function StudentDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [wishlist] = useState<string[]>(["p2", "p5"]);
+  const { trackProductView, trackPurchase, getRecentlyViewed, getCategoryPreferences } = useRecommendations();
   if (!user) return <Navigate to="/auth" replace />;
 
   const allProducts = getProducts().filter((p) => p.is_active);
@@ -1557,6 +1637,9 @@ function StudentDashboard() {
   const history = orders.filter((o) => o.status === "completed");
   const categories = ["All", ...Array.from(new Set(allProducts.map((p) => p.category)))];
 
+  const categoryPreferences = getCategoryPreferences();
+  const trackedRecentlyViewed = getRecentlyViewed();
+  
   const searched = allProducts.filter((p) => {
     const q = searchQuery.toLowerCase();
     const matchesText = p.title.toLowerCase().includes(q) || p.sellerName.toLowerCase().includes(q);
@@ -1564,10 +1647,18 @@ function StudentDashboard() {
     return matchesText && matchesCategory;
   });
 
-  const recentlyViewed = searched.sort((a, b) => b.views - a.views).slice(0, 4);
+  const recentlyViewed = trackedRecentlyViewed.length > 0
+    ? allProducts.filter((p) => trackedRecentlyViewed.includes(p.id))
+    : searched.sort((a, b) => b.views - a.views).slice(0, 4);
   const savedItems = searched.filter((p) => wishlist.includes(p.id));
   const seenSellers = new Set([...recentlyViewed, ...savedItems].map((p) => p.sellerId));
-  const recommendations = searched.filter((p) => !wishlist.includes(p.id) && !recentlyViewed.some((rv) => rv.id === p.id) && !seenSellers.has(p.sellerId)).slice(0, 4);
+  const preferredCategories = categoryPreferences.length > 0 ? categoryPreferences : [activeCategory === "All" ? "Food" : activeCategory];
+  const recommendations = searched.filter((p) => {
+    if (wishlist.includes(p.id)) return false;
+    if (recentlyViewed.some((rv) => rv.id === p.id)) return false;
+    if (seenSellers.has(p.sellerId)) return false;
+    return preferredCategories.includes(p.category) || preferredCategories.length === 0;
+  }).slice(0, 4);
   const hasAnyData = orders.length > 0 || wishlist.length > 0;
 
   const onQuickAdd = async (productId: string) => {
@@ -1714,9 +1805,10 @@ function StudentDashboard() {
                 to="/marketplace"
               />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {recommendations.map((p) => <ProductDiscoveryCard key={p.id} product={p} onQuickAdd={onQuickAdd} />)}
-              </div>
+              <Recommendations 
+                excludeIds={[...wishlist, ...recentlyViewed.map((p) => p.id)]}
+                limit={8}
+              />
             )}
           </CardContent>
         </Card>

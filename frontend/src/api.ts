@@ -191,6 +191,8 @@ export interface Product {
     full_name: string;
     email: string;
     verified?: boolean;
+    seller_display_name?: string;
+    seller_profile_image_url?: string;
     avatar_url?: string;
   };
   categories?: {
@@ -465,22 +467,74 @@ export const userApi = {
     }),
 
   getWallet: () =>
-    fetchApi<{ balance: number; pending_earnings: number }>("/protected/profile/wallet"),
+    fetchApi<{ balance: number; pending_earnings: number }>("/protected/wallet"),
 
   topUp: (amount: number) =>
-    fetchApi<{ message: string }>("/protected/profile/wallet/topup", {
+    fetchApi<{ message: string }>("/protected/wallet/topup", {
       method: "POST",
       body: JSON.stringify({ amount }),
     }),
 
-  withdraw: (amount: number, momo_number?: string) =>
-    fetchApi<{ message: string }>("/protected/profile/wallet/withdraw", {
+withdraw: (amount: number, momo_number?: string) =>
+    fetchApi<{ message: string }>("/protected/wallet/withdraw", {
       method: "POST",
       body: JSON.stringify({ amount, momo_number }),
     }),
 
   getTransactions: () =>
-    fetchApi<any[]>("/protected/profile/wallet/transactions"),
+    fetchApi<any[]>("/protected/wallet/transactions"),
+};
+
+export const sellerApi = {
+  getProfile: () =>
+    fetchApi<{
+      id: string;
+      full_name: string;
+      seller_display_name?: string;
+      seller_profile_image_url?: string;
+      last_name_change?: string;
+      can_change_name: boolean;
+      days_remaining: number;
+    }>("/protected/seller"),
+
+  updateProfile: (data: { seller_display_name?: string; seller_profile_image_url?: string }) =>
+    fetchApi<{ message: string; user?: any; last_name_change?: string }>("/protected/seller", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  uploadProfileImage: async (file: File): Promise<ApiResponse<{ image_url: string }>> => {
+    const formData = new FormData();
+    formData.append("image", file);
+
+    let token: string | null = null;
+    const userJson = localStorage.getItem("wm_user");
+    if (userJson) {
+      try {
+        token = JSON.parse(userJson).access_token || null;
+      } catch { token = null; }
+    }
+    if (!token && supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token || null;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/upload-image`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return { error: data.error || "Upload failed" };
+      }
+      return { data };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Upload error" };
+    }
+  },
 };
 
 // ==================== VERIFICATION API ====================
@@ -1838,5 +1892,36 @@ export const ratingsApi = {
   // Get orders eligible for rating
   getEligibleOrders: async (): Promise<ApiResponse<any>> => {
     return fetchApi('/ratings/eligible-orders');
+  },
+
+  // Get product rating stats
+  getProductStats: async (productId: string): Promise<ApiResponse<any>> => {
+    return fetchApi(`/ratings/product/${productId}/stats`);
+  },
+
+  // Get ratings for a product
+  getProductRatings: async (
+    productId: string,
+    page = 1,
+    limit = 10,
+    sort = 'recent'
+  ): Promise<ApiResponse<any>> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    params.append('sort', sort);
+    return fetchApi(`/ratings/product/${productId}?${params.toString()}`);
+  },
+
+  // Submit a product rating
+  createProductRating: async (data: {
+    product_id: string;
+    rating: number;
+    comment?: string;
+  }): Promise<ApiResponse<any>> => {
+    return fetchApi('/ratings/product', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };

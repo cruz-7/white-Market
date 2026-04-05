@@ -17,6 +17,7 @@ export type Product = {
   price: number;
   sellerId: string;
   sellerName: string;
+  sellerAvatar?: string;
   category: string;
   image: string;
   is_active: boolean;
@@ -24,6 +25,8 @@ export type Product = {
   views: number;
   rating: number;
   reviews: number;
+  average_rating?: number;
+  rating_count?: number;
   eta: string;
   delivery_type: "Campus Meetup" | "Pickup Point" | "Hall Lobby Handover";
   condition: "New" | "Like New" | "Used";

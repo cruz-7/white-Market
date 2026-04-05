@@ -8,7 +8,7 @@ const sellersRouter = Router();
 sellersRouter.get("/", async (_req, res) => {
   const { data, error } = await supabase
     .from("users")
-    .select("id, full_name, momo_provider, created_at")
+    .select("id, full_name, seller_display_name, seller_profile_image_url, momo_provider, created_at")
     .eq("role", "seller")
     .order("created_at", { ascending: false });
 
@@ -125,7 +125,7 @@ sellersRouter.get("/:id", async (req, res) => {
     // Get user profile
     const { data: user, error: userError } = await supabase
       .from("users")
-      .select("id, full_name, avatar_url, verified, created_at")
+      .select("id, full_name, seller_display_name, seller_profile_image_url, avatar_url, verified, created_at")
       .eq("id", id)
       .single();
 

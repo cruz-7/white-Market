@@ -102,37 +102,36 @@ export default function CategoriesPage() {
 
   const loadCategoryProducts = async (categoryId: string) => {
     setProductsLoading(true);
-    const { data, error } = await productsApi.getAll();
+    const { data, error } = await productsApi.getAll({ category_id: categoryId, is_active: true });
     
     if (error) {
-      toast.error("Failed to load products");
-      setProducts([]);
-    } else {
-      // Filter by category - in real app, API would filter by category_id
-      const filtered = (data || []).filter((p: any) => p.category_id === categoryId);
+      // Fallback: fetch all and filter client-side
+      const { data: allProducts } = await productsApi.getAll();
+      const filtered = (allProducts || []).filter((p: any) => p.category_id === categoryId);
       setProducts(filtered);
+    } else {
+      setProducts(data || []);
     }
     setProductsLoading(false);
   };
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      if (selectedCategory) {
-        loadCategoryProducts(selectedCategory.id);
-      }
-      return;
+    setProductsLoading(true);
+    
+    const params: any = { is_active: true };
+    if (searchQuery.trim()) {
+      params.q = searchQuery.trim();
+    }
+    if (selectedCategory) {
+      params.category_id = selectedCategory.id;
     }
     
-    setProductsLoading(true);
-    const { data, error } = await productsApi.getAll(searchQuery);
+    const { data, error } = await productsApi.getAll(params);
+    
     if (error) {
-      toast.error(error);
+      toast.error("Failed to search products");
     } else {
-      let filtered = data || [];
-      if (selectedCategory) {
-        filtered = filtered.filter((p: any) => p.category_id === selectedCategory.id);
-      }
-      setProducts(filtered);
+      setProducts(data || []);
     }
     setProductsLoading(false);
   };

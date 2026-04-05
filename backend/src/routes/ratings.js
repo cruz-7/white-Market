@@ -540,19 +540,14 @@ router.get("/eligible-orders", requireAuth, async (req, res) => {
 
     const { data: orders, error } = await supabase
       .from("orders")
-      .select(
-        `
-        id,
-        status,
-        created_at,
-        seller:seller_id(id, full_name, avatar_url),
-        product:product_id(id, title, image_url)
-      `
-      )
+      .select(`
+        *,
+        product:product_id(id, title, image_url),
+        seller:seller_id(id, full_name, seller_display_name, avatar_url)
+      `)
       .eq("buyer_id", userId)
       .in("status", ["delivered", "completed"])
-      .eq("is_rated", false)
-      .order("created_at", { ascending: false });
+      .order("updated_at", { ascending: false });
 
     if (error) throw error;
 
@@ -560,6 +555,155 @@ router.get("/eligible-orders", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error fetching eligible orders:", error);
     res.status(500).json({ error: "Failed to fetch eligible orders" });
+  }
+});
+
+// Get product rating stats
+router.get("/product/:productId/stats", async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .select("average_rating, rating_count")
+      .eq("id", productId)
+      .single();
+
+    if (productError && productError.code !== "PGRST116") {
+      throw productError;
+    }
+
+    res.json({
+      average_rating: product?.average_rating || 0,
+      rating_count: product?.rating_count || 0,
+    });
+  } catch (error) {
+    console.error("Error fetching product rating stats:", error);
+    res.status(500).json({ error: "Failed to fetch product rating stats" });
+  }
+});
+
+// Get ratings for a product
+router.get("/product/:productId", async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { page = 1, limit = 10, sort = "recent" } = req.query;
+
+    const offset = (page - 1) * limit;
+
+    let query = supabase
+      .from("product_ratings")
+      .select(
+        `
+        *,
+        buyer:buyer_id(id, full_name, avatar_url)
+      `
+      )
+      .eq("product_id", productId);
+
+    if (sort === "recent") {
+      query = query.order("created_at", { ascending: false });
+    } else if (sort === "highest") {
+      query = query.order("rating", { ascending: false });
+    } else if (sort === "lowest") {
+      query = query.order("rating", { ascending: true });
+    }
+
+    query = query.range(offset, offset + limit - 1);
+
+    const { data: ratings, error } = await query;
+
+    if (error) throw error;
+
+    const { count: totalCount, error: countError } = await supabase
+      .from("product_ratings")
+      .select("*", { count: "exact", head: true })
+      .eq("product_id", productId);
+
+    if (countError) throw countError;
+
+    res.json({
+      ratings: ratings || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalCount || 0,
+        pages: Math.ceil((totalCount || 0) / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching product ratings:", error);
+    res.status(500).json({ error: "Failed to fetch product ratings" });
+  }
+});
+
+// Submit a product rating
+router.post("/product", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { product_id, rating, comment } = req.body;
+
+    if (!product_id || !rating) {
+      return res.status(400).json({
+        error: "Missing required fields: product_id, rating",
+      });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({
+        error: "Rating must be between 1 and 5",
+      });
+    }
+
+    // Check if user has a completed order for this product
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id, buyer_id, product_id, status")
+      .eq("product_id", product_id)
+      .eq("buyer_id", userId)
+      .in("status", ["delivered", "completed"])
+      .single();
+
+    if (orderError && orderError.code !== "PGRST116") {
+      throw orderError;
+    }
+
+    // Check if rating already exists
+    const { data: existingRating, error: existingError } = await supabase
+      .from("product_ratings")
+      .select("id")
+      .eq("product_id", product_id)
+      .eq("buyer_id", userId)
+      .single();
+
+    if (existingError && existingError.code !== "PGRST116") {
+      throw existingError;
+    }
+
+    if (existingRating) {
+      return res.status(400).json({
+        error: "You have already rated this product",
+      });
+    }
+
+    const { data: newRating, error: createError } = await supabase
+      .from("product_ratings")
+      .insert({
+        product_id,
+        buyer_id: userId,
+        rating,
+        comment,
+        is_verified_purchase: !!order,
+      })
+      .select()
+      .single();
+
+    if (createError) throw createError;
+
+    res.json({ rating: newRating });
+  } catch (error) {
+    console.error("Error creating product rating:", error);
+    res.status(500).json({ error: "Failed to create product rating" });
   }
 });
 

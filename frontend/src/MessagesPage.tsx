@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Badge } from "./badge";
 import { Skeleton } from "./skeleton";
 import { formatDistanceToNow } from "date-fns";
+import { QuickReplies } from "./ChatEnhancements";
 
 export default function MessagesPage() {
   const navigate = useNavigate();
@@ -431,6 +432,18 @@ export default function MessagesPage() {
                         </div>
                       )}
                     </ScrollArea>
+
+                    {/* Quick Replies */}
+                    {activeConversation && (
+                      <QuickReplies 
+                        onSelect={(message) => {
+                          setNewMessage(message);
+                          // Focus the input and let user send
+                          const input = document.querySelector('input[placeholder="Type a message..."]') as HTMLInputElement;
+                          input?.focus();
+                        }} 
+                      />
+                    )}
 
                     {/* Message Input */}
                     <form onSubmit={handleSendMessage} className="p-3 border-t flex items-center gap-2 flex-shrink-0">

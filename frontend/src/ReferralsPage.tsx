@@ -26,6 +26,8 @@ import { Badge } from "./badge";
 import { Progress } from "./progress";
 import { referralsApi } from "./api";
 import { CelebrationPopup, useCelebration } from "./CelebrationPopup";
+import { Confetti } from "./confetti";
+import { CircularProgress } from "./CircularProgress";
 
 interface ReferralStats {
   referral_code: string;
@@ -217,6 +219,8 @@ export default function ReferralsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-slate-100">
+      {stats?.is_campus_ambassador && <Confetti />}
+      
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 via-violet-600 to-purple-600 text-white">
         <div className="max-w-5xl mx-auto px-4 py-8">
@@ -253,23 +257,35 @@ export default function ReferralsPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white">
             <CardContent className="p-4 text-center">
-              <Users className="w-6 h-6 text-purple-600 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-gray-900">{stats?.total_referrals || 0}</div>
-              <div className="text-xs text-gray-500">Total Invites</div>
+              <div className="flex justify-center mb-2">
+                <CircularProgress 
+                  value={stats?.total_referrals || 0} 
+                  max={stats?.next_milestone || 10}
+                  size={70}
+                  strokeWidth={6}
+                />
+              </div>
+              <div className="text-xs text-gray-500">Invites</div>
             </CardContent>
           </Card>
           
           <Card className="bg-white">
             <CardContent className="p-4 text-center">
-              <CheckCircle className="w-6 h-6 text-green-600 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-gray-900">{stats?.total_qualified || 0}</div>
+              <div className="flex justify-center mb-2">
+                <CircularProgress 
+                  value={stats?.total_qualified || 0} 
+                  max={stats?.next_milestone || 10}
+                  size={70}
+                  strokeWidth={6}
+                  color="text-green-500"
+                />
+              </div>
               <div className="text-xs text-gray-500">Qualified</div>
             </CardContent>
           </Card>
           
           <Card className="bg-white">
             <CardContent className="p-4 text-center">
-              <Wallet className="w-6 h-6 text-amber-600 mx-auto mb-2" />
               <div className="text-2xl font-bold text-gray-900">GHS {stats?.platform_credit || 0}</div>
               <div className="text-xs text-gray-500">Platform Credit</div>
             </CardContent>
@@ -277,7 +293,6 @@ export default function ReferralsPage() {
           
           <Card className="bg-white">
             <CardContent className="p-4 text-center">
-              <Percent className="w-6 h-6 text-blue-600 mx-auto mb-2" />
               <div className="text-2xl font-bold text-gray-900">{stats?.commission_discount_remaining || 0}</div>
               <div className="text-xs text-gray-500">Free Sales</div>
             </CardContent>

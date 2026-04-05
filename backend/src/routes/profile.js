@@ -199,4 +199,108 @@ profileRouter.post("/wallet/withdraw", requireAuth, async (req, res) => {
   return res.json({ message: "Withdrawal request submitted", balance: newBalance });
 });
 
+// PATCH /profile/seller - Update seller profile (display name with cooldown, image)
+profileRouter.patch("/seller", requireAuth, async (req, res) => {
+  console.log("[PATCH /profile/seller] Hit!");
+  const { seller_display_name, seller_profile_image_url } = req.body || {};
+
+  // Get current user data to check cooldown
+  const { data: currentUser, error: fetchError } = await supabase
+    .from("users")
+    .select("last_name_change, seller_display_name, seller_profile_image_url")
+    .eq("id", req.user.id)
+    .single();
+
+  if (fetchError || !currentUser) {
+    return res.status(400).json({ error: "User not found" });
+  }
+
+  const updateData = {};
+  const COOLDOWN_DAYS = 30;
+  const now = new Date();
+  
+  // Check cooldown for name change
+  if (seller_display_name !== undefined) {
+    const lastChange = currentUser.last_name_change ? new Date(currentUser.last_name_change) : null;
+    const daysSinceChange = lastChange 
+      ? Math.floor((now.getTime() - lastChange.getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+    
+    console.log("[PATCH /seller] lastChange:", lastChange, "daysSinceChange:", daysSinceChange);
+    
+    if (daysSinceChange !== null && daysSinceChange < COOLDOWN_DAYS) {
+      const daysRemaining = COOLDOWN_DAYS - daysSinceChange;
+      console.log("[PATCH /seller] Cooldown active, days remaining:", daysRemaining);
+      return res.status(400).json({ 
+        error: `Name change not allowed yet`,
+        days_remaining: daysRemaining,
+        last_change: currentUser.last_name_change
+      });
+    }
+    
+    // Allow name change, update timestamp
+    updateData.seller_display_name = seller_display_name;
+    updateData.last_name_change = now.toISOString();
+  }
+
+  // Allow image update anytime
+  if (seller_profile_image_url !== undefined) {
+    updateData.seller_profile_image_url = seller_profile_image_url;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({ error: "No valid fields provided" });
+  }
+
+  const { data, error } = await supabase
+    .from("users")
+    .update(updateData)
+    .eq("id", req.user.id)
+    .select("id, full_name, seller_display_name, seller_profile_image_url, last_name_change")
+    .single();
+
+  console.log("[PATCH /seller] Update result:", data, "error:", error);
+
+  if (error) {
+    console.log("[PATCH /seller] DB Error:", error.message);
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.json({ 
+    message: "Seller profile updated",
+    user: data,
+    last_name_change: data.last_name_change
+  });
+});
+
+// GET /profile/seller - Get seller profile with cooldown info
+profileRouter.get("/seller", requireAuth, async (req, res) => {
+  console.log("[GET /profile/seller] Hit!");
+  const { data: user, error } = await supabase
+    .from("users")
+    .select("id, full_name, seller_display_name, seller_profile_image_url, last_name_change")
+    .eq("id", req.user.id)
+    .single();
+
+  if (error || !user) {
+    return res.status(400).json({ error: "User not found" });
+  }
+
+  const COOLDOWN_DAYS = 30;
+  const now = new Date();
+  const lastChange = user.last_name_change ? new Date(user.last_name_change) : null;
+  const daysSinceChange = lastChange 
+    ? Math.floor((now.getTime() - lastChange.getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  
+  const canChangeName = daysSinceChange === null || daysSinceChange >= COOLDOWN_DAYS;
+  const daysRemaining = canChangeName ? 0 : COOLDOWN_DAYS - daysSinceChange;
+
+  return res.json({
+    ...user,
+    can_change_name: canChangeName,
+    days_remaining: daysRemaining
+  });
+});
+
 export default profileRouter;

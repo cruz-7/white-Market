@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./button";
 import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck, Heart, Bell, Gift, Package, Settings, Moon, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -25,7 +25,19 @@ const Navbar = () => {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { isDarkMode, setTheme, translations } = useSettings();
+
+  const isActive = (path: string) => {
+    return location.pathname === path || location.pathname.startsWith(path + "/");
+  };
+
+  const linkClass = (path: string) =>
+    `text-sm font-medium transition-colors ${
+      isActive(path)
+        ? "text-primary dark:text-primary-foreground font-semibold"
+        : "text-muted-foreground hover:text-foreground dark:text-slate-300 dark:hover:text-white"
+    }`;
 
   useEffect(() => {
     const syncLocalUser = () => {
@@ -81,18 +93,18 @@ const Navbar = () => {
         </Link>
 
         <div className="hidden items-center gap-5 md:flex">
-          <Link to="/marketplace" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Marketplace</Link>
-          <Link to="/categories" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 dark:text-slate-300 dark:hover:text-white">
+          <Link to="/marketplace" className={linkClass("/marketplace")}>Marketplace</Link>
+          <Link to="/categories" className={linkClass("/categories") + " flex items-center gap-1"}>
             <Package className="h-4 w-4" /> Categories
           </Link>
 
           {user ? (
             <>
-              <Link to="/dashboard" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Dashboard</Link>
-              <Link to="/orders" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Orders</Link>
-              <Link to="/messages" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Messages</Link>
+              <Link to="/dashboard" className={linkClass("/dashboard")}>Dashboard</Link>
+              <Link to="/orders" className={linkClass("/orders")}>Orders</Link>
+              <Link to="/messages" className={linkClass("/messages")}>Messages</Link>
               {isAdmin && (
-                <Link to="/admin" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 dark:text-slate-300 dark:hover:text-white">
+                <Link to="/admin" className={linkClass("/admin") + " flex items-center gap-1"}>
                   <ShieldCheck className="h-3.5 w-3.5" /> Admin
                 </Link>
               )}
@@ -174,19 +186,19 @@ const Navbar = () => {
       {open && (
         <div className="border-t bg-white p-4 md:hidden dark:bg-slate-900 dark:border-slate-700">
           <div className="flex flex-col gap-3">
-            <Link to="/marketplace" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Marketplace</Link>
-            <Link to="/categories" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Categories</Link>
+            <Link to="/marketplace" className={linkClass("/marketplace")} onClick={() => setOpen(false)}>Marketplace</Link>
+            <Link to="/categories" className={linkClass("/categories")} onClick={() => setOpen(false)}>Categories</Link>
             {user ? (
               <>
-                <Link to="/dashboard" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Dashboard</Link>
-                <Link to="/orders" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Orders</Link>
-                <Link to="/messages" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Messages</Link>
-                <Link to="/favorites" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Favorites</Link>
-                <Link to="/notifications" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Notifications</Link>
-                <Link to="/referrals" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Referrals</Link>
-                <Link to="/settings" className="text-sm font-medium dark:text-white" onClick={() => setOpen(false)}>Settings</Link>
+                <Link to="/dashboard" className={linkClass("/dashboard")} onClick={() => setOpen(false)}>Dashboard</Link>
+                <Link to="/orders" className={linkClass("/orders")} onClick={() => setOpen(false)}>Orders</Link>
+                <Link to="/messages" className={linkClass("/messages")} onClick={() => setOpen(false)}>Messages</Link>
+                <Link to="/favorites" className={linkClass("/favorites")} onClick={() => setOpen(false)}>Favorites</Link>
+                <Link to="/notifications" className={linkClass("/notifications")} onClick={() => setOpen(false)}>Notifications</Link>
+                <Link to="/referrals" className={linkClass("/referrals")} onClick={() => setOpen(false)}>Referrals</Link>
+                <Link to="/settings" className={linkClass("/settings")} onClick={() => setOpen(false)}>Settings</Link>
                 {isAdmin && (
-                  <Link to="/admin" className="text-sm font-medium flex items-center gap-1 dark:text-white" onClick={() => setOpen(false)}>
+                  <Link to="/admin" className={linkClass("/admin") + " flex items-center gap-1"} onClick={() => setOpen(false)}>
                     <ShieldCheck className="h-3.5 w-3.5" /> Admin Panel
                   </Link>
                 )}

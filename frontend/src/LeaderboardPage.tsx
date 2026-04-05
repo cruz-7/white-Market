@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useToast } from "./hooks/use-toast";
 import { referralsApi } from "./api";
+import { Confetti } from "./confetti";
 
 interface LeaderboardEntry {
   rank: number;
@@ -31,6 +32,7 @@ export default function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
     fetchLeaderboard();
@@ -53,6 +55,14 @@ export default function LeaderboardPage() {
       });
     } else {
       setLeaderboard(data || []);
+      // Show confetti for returning user in top 3
+      if (!isRefresh && data && data.length > 0) {
+        const currentUserId = localStorage.getItem('wm_user_id');
+        if (currentUserId && data.slice(0, 3).some(e => e.user_id === currentUserId)) {
+          setShowConfetti(true);
+          setTimeout(() => setShowConfetti(false), 5000);
+        }
+      }
     }
     
     setLoading(false);
@@ -87,6 +97,8 @@ export default function LeaderboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-slate-100">
+      {showConfetti && <Confetti />}
+      
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-700 via-violet-600 to-purple-700 text-white">
         <div className="max-w-4xl mx-auto px-4 py-8">

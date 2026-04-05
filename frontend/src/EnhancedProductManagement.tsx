@@ -654,7 +654,7 @@ export function EnhancedProductManagement({
                       {product.rating !== undefined && (
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           <Star className="w-3 h-3 text-yellow-400 fill-current" />
-                          {product.rating.toFixed(1)}
+                          {product.rating > 0 ? product.rating.toFixed(1) : "N/A"}
                         </p>
                       )}
                     </div>
@@ -756,7 +756,7 @@ export function EnhancedProductManagement({
                       {product.rating !== undefined && (
                         <div className="flex items-center gap-1">
                           <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                          <span className="text-sm font-medium">{product.rating.toFixed(1)}</span>
+                          <span className="text-sm font-medium">{product.rating > 0 ? product.rating.toFixed(1) : "N/A"}</span>
                         </div>
                       )}
                     </div>

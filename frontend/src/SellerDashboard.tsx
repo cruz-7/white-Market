@@ -65,7 +65,7 @@ import {
   SelectValue,
 } from "./select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
-import { productsApi, ordersApi, userApi, type Product, type Order } from "./api";
+import { productsApi, ordersApi, userApi, reviewsApi, type Product, type Order } from "./api";
 import { useCurrentUser } from "./App";
 import { EnhancedProductManagement } from "./EnhancedProductManagement";
 
@@ -219,6 +219,11 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
       // Get unique customers
       const uniqueCustomers = new Set(ordersRes.data?.map((o) => o.buyer_id) || []);
 
+      // Fetch actual review data
+      const reviewsRes = await reviewsApi.getForSeller(user.id);
+      const averageRating = reviewsRes.data?.rating || 0;
+      const totalReviews = reviewsRes.data?.review_count || 0;
+
       setStats({
         totalProducts: productsRes.data?.length || 0,
         activeProducts,
@@ -227,8 +232,8 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
         completedOrders,
         totalRevenue,
         monthlyRevenue,
-        averageRating: 4.5, // Placeholder
-        totalReviews: 0,
+        averageRating,
+        totalReviews,
         totalCustomers: uniqueCustomers.size,
         conversionRate: uniqueCustomers.size > 0 ? (completedOrders / uniqueCustomers.size) * 100 : 0,
       });

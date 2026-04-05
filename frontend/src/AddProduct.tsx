@@ -1,6 +1,6 @@
 // cspell:ignore Jollof
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Upload, X, ImagePlus, Loader2 } from "lucide-react";
 
@@ -14,8 +14,18 @@ import { categoriesApi, productsApi, type Category } from "./api";
 
 function AddProduct() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id: productId } = useParams();
   const isEditMode = Boolean(productId);
+  
+  // Get previous path or default to dashboard
+  const getBackPath = () => {
+    const referrer = document.referrer;
+    if (referrer && referrer.includes(window.location.host)) {
+      return -1; // Go back in history
+    }
+    return "/dashboard"; // Default fallback
+  };
   
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -183,9 +193,9 @@ function AddProduct() {
         <div className="container py-3">
           <button 
             className="inline-flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
-            onClick={() => navigate("/dashboard")}
+            onClick={() => navigate(getBackPath())}
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+            <ArrowLeft className="h-4 w-4" /> Back
           </button>
         </div>
       </div>

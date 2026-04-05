@@ -8,14 +8,32 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp
 
 productsRouter.post("/upload-image", requireAuth, upload.single("image"), async (req, res) => {
   const file = req.file;
+  console.log("[upload-image] file:", file);
 
   if (!file) {
     return res.status(400).json({ error: "No image uploaded" });
   }
 
-  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
-    return res.status(400).json({ error: "Only JPEG, PNG, WEBP, and GIF images are allowed" });
+  let mimeType = file.mimetype || file.type;
+  console.log("[upload-image] mimeType from file:", mimeType);
+  
+  let finalMime = mimeType;
+
+  if (!finalMime || !ALLOWED_IMAGE_MIME_TYPES.has(finalMime)) {
+    const ext = (file.originalname || "").split(".").pop()?.toLowerCase();
+    console.log("[upload-image] ext:", ext);
+    const extToMime = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+    finalMime = extToMime[ext || ""] || mimeType;
   }
+
+  console.log("[upload-image] finalMime before default:", finalMime);
+
+  if (!finalMime || !ALLOWED_IMAGE_MIME_TYPES.has(finalMime)) {
+    finalMime = "image/jpeg";
+  }
+
+  console.log("[upload-image] finalMime:", finalMime);
+  file.mimetype = finalMime;
 
   const extensionByType = {
     "image/jpeg": "jpg",
@@ -82,7 +100,7 @@ productsRouter.get("/", async (req, res) => {
 
   let query = supabase
     .from("products")
-    .select("*, users(full_name, email), categories!products_category_id_fkey(name, slug)");
+    .select("*, users(full_name, email, seller_display_name, seller_profile_image_url, avatar_url), categories!products_category_id_fkey(name, slug), seller_rating_stats!products_seller_id_fkey(avg_overall_rating, total_ratings)");
 
   if (q) query = query.ilike("title", `%${q}%`);
   if (category_id) query = query.eq("category_id", category_id);
@@ -104,6 +122,7 @@ productsRouter.get("/", async (req, res) => {
   }
 
   const primary = await query;
+  console.log("[products.js] primary query result:", primary.data?.[0]?.users);
   if (!primary.error) {
     return res.json(primary.data || []);
   }
@@ -111,7 +130,7 @@ productsRouter.get("/", async (req, res) => {
   // Fallback syntax with explicit FK name for environments where relation aliasing differs.
   let fallbackQuery = supabase
     .from("products")
-    .select("*, users!products_seller_id_fkey(full_name, email), categories!products_category_id_fkey(name, slug)");
+    .select("*, users!products_seller_id_fkey(full_name, email, seller_display_name, seller_profile_image_url, avatar_url), categories!products_category_id_fkey(name, slug)");
 
   if (q) fallbackQuery = fallbackQuery.ilike("title", `%${q}%`);
   if (category_id) fallbackQuery = fallbackQuery.eq("category_id", category_id);
@@ -298,7 +317,7 @@ productsRouter.get("/:id", async (req, res) => {
     const { data: fallbackProduct, fallbackError } = await supabase
       .from("products")
       .select(
-        "*, users!products_seller_id_fkey(full_name, email, verified), categories!products_category_id_fkey(name, slug)",
+        "*, users!products_seller_id_fkey(full_name, email, verified, seller_display_name, seller_profile_image_url), categories!products_category_id_fkey(name, slug)",
       )
       .eq("id", id)
       .single();

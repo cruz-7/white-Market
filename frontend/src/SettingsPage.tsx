@@ -104,6 +104,11 @@ function ProfileSettings({ user }: { user: UserData }) {
           <div className="flex-1"><p className="font-semibold text-slate-900 dark:text-white">{user?.full_name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{user?.email}</p></div>
         </div>
         <Button onClick={() => navigate('/profile-setup')} className="w-full">{translations.editProfile}</Button>
+        {user?.role === "seller" && (
+          <Button variant="outline" onClick={() => navigate(`/seller/${user.id}`)} className="w-full">
+            View My Seller Profile
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
