@@ -18,13 +18,14 @@ function AddProduct() {
   const { id: productId } = useParams();
   const isEditMode = Boolean(productId);
   
-  // Get previous path or default to dashboard
-  const getBackPath = () => {
-    const referrer = document.referrer;
-    if (referrer && referrer.includes(window.location.host)) {
-      return -1; // Go back in history
+  const handleBack = () => {
+    // Try to go back in history first
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      // Fallback to dashboard if no history
+      navigate("/dashboard");
     }
-    return "/dashboard"; // Default fallback
   };
   
   const [loading, setLoading] = useState(false);
@@ -68,7 +69,7 @@ function AddProduct() {
     
     const loadProduct = async () => {
       setLoading(true);
-      const { data, error } = await productsApi.get(productId);
+      const { data, error } = await productsApi.getById(productId);
       if (!error && data) {
         setForm({
           title: data.title || "",
@@ -193,7 +194,7 @@ function AddProduct() {
         <div className="container py-3">
           <button 
             className="inline-flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
-            onClick={() => navigate(getBackPath())}
+            onClick={handleBack}
           >
             <ArrowLeft className="h-4 w-4" /> Back
           </button>

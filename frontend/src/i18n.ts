@@ -1,7 +1,7 @@
 // Internationalization (i18n) support for White Market
 // Provides translations for multiple languages and language switching functionality
 
-export type Language = 'en' | 'fr' | 'es';
+export type Language = 'en' | 'fr' | 'es' | 'tw' | 'ga';
 
 export interface TranslationKeys {
   // General
@@ -499,7 +499,69 @@ const translations: Record<Language, TranslationKeys> = {
     somethingWentWrong: 'Something went wrong',
     tryAgain: 'Try Again',
   },
-  
+
+  ga: {
+    // General
+    appName: 'White Market',
+    loading: 'Loading...',
+    save: 'Save',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    delete: 'Delete',
+    edit: 'Edit',
+    search: 'Search',
+    close: 'Close',
+    back: 'Back',
+    next: 'Next',
+    done: 'Done',
+    error: 'Error',
+    success: 'Success',
+    warning: 'Warning',
+
+    // Navigation
+    home: 'Home',
+    categories: 'Categories',
+    orders: 'Orders',
+    messages: 'Messages',
+    profile: 'Profile',
+    settings: 'Settings',
+
+    // Auth
+    login: 'Login',
+    logout: 'Logout',
+    signup: 'Sign Up',
+    email: 'Email',
+    password: 'Password',
+    forgotPassword: 'Forgot Password?',
+
+    // Products
+    products: 'Products',
+    addProduct: 'Add Product',
+    productName: 'Product Name',
+    productPrice: 'Price',
+    productDescription: 'Description',
+    productCategory: 'Category',
+    productImage: 'Image',
+
+    // Orders
+    myOrders: 'My Orders',
+    orderStatus: 'Order Status',
+    orderPending: 'Pending',
+    orderProcessing: 'Processing',
+    orderShipped: 'Shipped',
+    orderDelivered: 'Delivered',
+    orderCancelled: 'Cancelled',
+
+    // Other
+    learnMore: 'Learn More',
+    readMore: 'Read More',
+    viewAll: 'View All',
+    seeAll: 'See All',
+    noResults: 'No results found',
+    somethingWentWrong: 'Something went wrong',
+    tryAgain: 'Try Again',
+  },
+
   fr: {
     // General
     appName: 'White Market',
@@ -757,12 +819,16 @@ export const languageNames: Record<Language, string> = {
   en: 'English',
   fr: 'Français',
   es: 'Español',
+  tw: 'Twi',
+  ga: 'Ga',
 };
 
 export const languageFlags: Record<Language, string> = {
   en: '🇬🇭',
   fr: '🇫🇷',
   es: '🇪🇸',
+  tw: '🇬🇭',
+  ga: '🇬🇭',
 };
 
 export default translations;

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabaseClient.js";
+import { clearCache } from "../services/cacheService.js";
 
 const categoriesRouter = Router();
 
@@ -133,6 +134,9 @@ categoriesRouter.post("/", async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
+    // Invalidate categories cache
+    clearCache("categories:");
+
     return res.status(201).json({ category: data });
   } catch (error) {
     console.error("Create category error:", error);
@@ -178,6 +182,9 @@ categoriesRouter.delete("/:id", async (req, res) => {
     if (error) {
       return res.status(400).json({ error: error.message });
     }
+
+    // Invalidate categories cache
+    clearCache("categories:");
 
     return res.json({ message: "Category deleted" });
   } catch (error) {

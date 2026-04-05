@@ -3,18 +3,19 @@ import { Home, Search, PlusCircle, Package, MessageSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "./lib/utils";
 import { getUnreadCount, subscribeDataChange } from "./data";
+import { useCart } from "./CartContext";
 
 const NAV_ITEMS = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/marketplace", icon: Search, label: "Browse" },
-  { to: "/dashboard?sell=1", icon: PlusCircle, label: "Sell" },
-  { to: "/orders", icon: Package, label: "Orders" },
+  { to: "/orders", icon: Package, label: "Orders", showBadge: true },
   { to: "/messages", icon: MessageSquare, label: "Messages" },
 ];
 
 const MobileBottomNav = () => {
   const { pathname } = useLocation();
   const [unread, setUnread] = useState(0);
+  const { itemCount } = useCart();
 
   useEffect(() => {
     const update = () => {
@@ -48,6 +49,11 @@ const MobileBottomNav = () => {
             >
               <span className="relative">
                 <item.icon className={cn("h-5 w-5", item.label === "Sell" && "h-6 w-6 text-accent")} />
+                {(item.showBadge && itemCount > 0) && (
+                  <span className="absolute -right-2 -top-2 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] text-white">
+                    {itemCount > 9 ? "9+" : itemCount}
+                  </span>
+                )}
                 {item.label === "Messages" && unread > 0 && (
                   <span className="absolute -right-2 -top-2 min-w-4 rounded-full bg-red-500 px-1 text-[9px] text-white">
                     {unread}

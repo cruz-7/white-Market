@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Loader2, Sparkles, TrendingUp, Star, Heart, ShoppingBag, Filter, X } from "lucide-react";
 import { toast } from "sonner";
-import { productsApi } from "./api";
+import { productsApi, favoritesApi, likesApi } from "./api";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
 import { Input } from "./input";
 import { Badge } from "./badge";
+import { useCart } from "./CartContext";
 
 interface FashionProduct {
   id: string;
@@ -39,11 +40,14 @@ const TRENDING_STYLES = [
 
 export default function FashionPage() {
   const navigate = useNavigate();
+  const { addItem } = useCart();
   const [items, setItems] = useState<FashionProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [likedProducts, setLikedProducts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const fetchFashionItems = async () => {
@@ -52,6 +56,12 @@ export default function FashionPage() {
         const result = await productsApi.getAll({ limit: 50 });
         if (result.data) {
           setItems(result.data as FashionProduct[]);
+          // Get real like counts from products
+          const likes: Record<string, number> = {};
+          (result.data as FashionProduct[]).forEach((item: any) => {
+            likes[item.id] = item.like_count || 0;
+          });
+          setLikedProducts(likes);
         }
       } catch (error) {
         console.error("Error fetching fashion items:", error);
@@ -60,8 +70,91 @@ export default function FashionPage() {
         setLoading(false);
       }
     };
+    
+    const fetchFavorites = async () => {
+      try {
+        const { data, error } = await favoritesApi.getAll();
+        if (error) {
+          console.log("Favorites error:", error);
+          return;
+        }
+        if (data?.favorites) {
+          setFavoriteIds(new Set(data.favorites.map(f => f.product_id)));
+        }
+      } catch (error) {
+        console.log("Error fetching favorites:", error);
+      }
+    };
+    
     fetchFashionItems();
+    fetchFavorites();
   }, []);
+
+  const handleToggleFavorite = async (e: React.MouseEvent, productId: string) => {
+    e.stopPropagation();
+    const isFavorited = favoriteIds.has(productId);
+    const isLiked = likedProducts[productId] > 0;
+    
+    try {
+      if (isFavorited) {
+        const result = await favoritesApi.remove(productId);
+        if (result.error) {
+          toast.error(`Error: ${result.error}`);
+          console.error("Remove favorite error:", result.error);
+          return;
+        }
+        setFavoriteIds(prev => {
+          const next = new Set(prev);
+          next.delete(productId);
+          return next;
+        });
+        toast.success("Removed from favorites");
+      } else {
+        const result = await favoritesApi.add(productId);
+        if (result.error) {
+          toast.error(`Error: ${result.error}`);
+          console.error("Add favorite error:", result.error);
+          return;
+        }
+        setFavoriteIds(prev => new Set(prev).add(productId));
+        toast.success("Added to favorites!");
+      }
+
+      // Also handle the like count via API
+      if (isLiked) {
+        const unlikeResult = await likesApi.unlike(productId);
+        if (!unlikeResult.error) {
+          setLikedProducts(prev => ({
+            ...prev,
+            [productId]: Math.max(0, unlikeResult.data?.like_count || 0)
+          }));
+        }
+      } else {
+        const likeResult = await likesApi.like(productId);
+        if (!likeResult.error) {
+          setLikedProducts(prev => ({
+            ...prev,
+            [productId]: likeResult.data?.like_count || 1
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("Error toggling favorite/like:", error);
+      toast.error("Failed to update");
+    }
+  };
+
+  const handleAddToCart = (e: React.MouseEvent, product: FashionProduct) => {
+    e.stopPropagation();
+    addItem({
+      id: product.id,
+      title: product.title,
+      price: product.price,
+      image: product.image_url || "",
+      sellerId: product.seller_id || "",
+      sellerName: "Seller",
+    });
+  };
 
   const filteredItems = items.filter((item) => {
     const matchesSearch =
@@ -124,7 +217,7 @@ export default function FashionPage() {
             </Button>
             <Button 
               variant="outline" 
-              className="border-white text-white hover:bg-white/20 px-6 md:px-8 py-2.5 md:py-3 rounded-full text-sm md:text-base w-full md:w-auto"
+              className="border-2 border-white/30 bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 hover:border-white/50 px-6 md:px-8 py-2.5 md:py-3 rounded-full text-sm md:text-base w-full md:w-auto font-semibold"
             >
               <TrendingUp className="w-4 h-4 mr-2" />
               Trending
@@ -267,24 +360,30 @@ export default function FashionPage() {
                   {/* Quick Actions Overlay */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
                     <button 
-                      className="p-3 bg-white rounded-full shadow-lg hover:bg-rose-50 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toast.success("Added to favorites!");
-                      }}
+                      className={`p-3 rounded-full shadow-lg transition-colors ${
+                        favoriteIds.has(item.id) 
+                          ? "bg-rose-500 text-white" 
+                          : "bg-white text-rose-500 hover:bg-rose-50"
+                      }`}
+                      onClick={(e) => handleToggleFavorite(e, item.id)}
                     >
-                      <Heart className="w-5 h-5 text-rose-500" />
+                      <Heart className={`w-5 h-5 ${favoriteIds.has(item.id) ? "fill-current" : ""}`} />
                     </button>
                     <button 
                       className="p-3 bg-white rounded-full shadow-lg hover:bg-rose-50 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/product/${item.id}`);
-                      }}
+                      onClick={(e) => handleAddToCart(e, item)}
                     >
                       <ShoppingBag className="w-5 h-5 text-rose-500" />
                     </button>
                   </div>
+
+                  {/* Like Count */}
+                  {likedProducts[item.id] > 0 && (
+                    <div className="absolute bottom-3 left-3 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-full">
+                      <Heart className="w-3 h-3 text-rose-500 fill-current" />
+                      <span className="text-xs font-medium text-gray-700">{likedProducts[item.id]}</span>
+                    </div>
+                  )}
 
                   {/* Category Badge */}
                   <Badge className="absolute top-3 left-3 bg-white/90 text-gray-700 hover:bg-white">

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { upload } from "../middleware/upload.js";
+import { clearCache } from "../services/cacheService.js";
 
 const productsRouter = Router();
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -87,11 +88,14 @@ productsRouter.post("/", requireAuth, async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 
+  // Invalidate product cache
+  clearCache("products:");
+  
   return res.json({ message: "Product created" });
 });
 
 productsRouter.get("/", async (req, res) => {
-  const { q, category_id, min_price, max_price, sort, page, limit, seller_id, is_active } = req.query;
+  const { q, category_id, min_price, max_price, sort, page, limit, seller_id, is_active, trending } = req.query;
 
   const usePagination = page !== undefined || limit !== undefined;
   const pageNumber = Math.max(1, Number(page || 1));
@@ -111,6 +115,31 @@ productsRouter.get("/", async (req, res) => {
   // Active status filter (default to only active products)
   if (is_active !== undefined) query = query.eq("is_active", is_active === "true");
   else query = query.or("is_active.is.null,is_active.eq.true");
+
+  // Handle trending parameter
+  if (trending === "true") {
+    // Fetch all active products and calculate trending scores in memory
+    const { data: trendingProducts } = await supabase
+      .from("products")
+      .select("*")
+      .eq("is_active", true);
+    
+    if (trendingProducts && trendingProducts.length > 0) {
+      const now = new Date();
+      const scored = trendingProducts.map(p => {
+        let score = (p.view_count || 0) * 1 + (p.click_count || 0) * 2 + (p.purchase_count || 0) * 5;
+        if (p.created_at) {
+          const days = (now - new Date(p.created_at)) / (1000 * 60 * 60 * 24);
+          if (days <= 7) score += (7 - days) * 2;
+        }
+        return { ...p, trending_score: score };
+      }).sort((a, b) => b.trending_score - a.trending_score);
+      
+      const limitNum = parseInt(limit || 10);
+      return res.json(scored.slice(0, limitNum));
+    }
+    return res.json([]);
+  }
 
   if (sort === "price_asc") query = query.order("price", { ascending: true });
   else if (sort === "price_desc") query = query.order("price", { ascending: false });
@@ -158,6 +187,71 @@ productsRouter.get("/", async (req, res) => {
   return res.json(fallback.data || []);
 });
 
+// GET /products/test-special - Test route
+productsRouter.get("/test-special", async (req, res) => {
+  console.log(">>> TEST SPECIAL ROUTE HIT <<<");
+  return res.json({ message: "Test route works!" });
+});
+
+// GET /products/trending-products - Get trending products based on views, clicks, and purchases
+productsRouter.get("/trending-products", async (req, res) => {
+  console.log(">>> TRENDING-PRODUCTS ROUTE HIT <<<");
+  const { limit = 10 } = req.query;
+  
+  try {
+    const { data: products, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        users!products_seller_id_fkey(full_name),
+        categories!products_category_id_fkey(name, slug)
+      `)
+      .eq("is_active", true)
+      .order("view_count", { ascending: false })
+      .limit(parseInt(limit));
+
+    if (error) {
+      console.error("[TRENDING-PRODUCTS] Supabase error:", error);
+      throw error;
+    }
+
+    console.log("[TRENDING-PRODUCTS] Found products:", products?.length);
+    
+    if (!products || products.length === 0) {
+      return res.json({ products: [], count: 0 });
+    }
+
+    const now = new Date();
+    const scoredProducts = products.map(product => {
+      let score = 0;
+      score += (product.view_count || 0) * 1;
+      score += (product.click_count || 0) * 2;
+      score += (product.purchase_count || 0) * 5;
+      
+      if (product.created_at) {
+        const createdAt = new Date(product.created_at);
+        const daysSinceCreation = (now - createdAt) / (1000 * 60 * 60 * 24);
+        if (daysSinceCreation <= 7) {
+          score += (7 - daysSinceCreation) * 2;
+        }
+      }
+      
+      return { ...product, trending_score: score };
+    });
+
+    scoredProducts.sort((a, b) => b.trending_score - a.trending_score);
+
+    console.log("[TRENDING-PRODUCTS] Sending response with", scoredProducts.length, "products");
+    return res.json({
+      products: scoredProducts.slice(0, parseInt(limit)),
+      count: scoredProducts.length
+    });
+  } catch (err) {
+    console.error("Trending products error:", err);
+    return res.status(500).json({ error: "Failed to fetch trending products" });
+  }
+});
+
 productsRouter.get("/seller/:sellerId", async (req, res) => {
   const { sellerId } = req.params;
 
@@ -199,6 +293,9 @@ productsRouter.delete("/:id", requireAuth, async (req, res) => {
   if (error) {
     return res.status(400).json({ error: error.message });
   }
+
+  // Invalidate product cache
+  clearCache("products:");
 
   return res.json({ message: "Product deleted" });
 });
@@ -247,6 +344,9 @@ productsRouter.put("/:id", requireAuth, async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 
+  // Invalidate product cache
+  clearCache("products:");
+  
   return res.json({ message: "Product updated", product: updated });
 });
 
@@ -302,13 +402,142 @@ productsRouter.post("/:id/click", async (req, res) => {
   return res.json({ success: true });
 });
 
+// GET /products/test-special - Test route
+productsRouter.get("/test-special", async (req, res) => {
+  console.log(">>> TEST SPECIAL ROUTE HIT <<<");
+  return res.json({ message: "Test route works!" });
+});
+
+// GET /products/trending-products - Get trending products based on views, clicks, and purchases
+productsRouter.get("/trending-products", async (req, res) => {
+  console.log(">>> TRENDING-PRODUCTS ROUTE HIT <<<");
+  const { limit = 10 } = req.query;
+  
+  try {
+    const { data: products, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        users!products_seller_id_fkey(full_name),
+        categories!products_category_id_fkey(name, slug)
+      `)
+      .eq("is_active", true)
+      .order("view_count", { ascending: false })
+      .limit(parseInt(limit));
+
+    if (error) {
+      console.error("[TRENDING] Supabase error:", error);
+      throw error;
+    }
+
+    console.log("[TRENDING] Found products:", products?.length);
+    
+    if (!products || products.length === 0) {
+      return res.json({ products: [], count: 0 });
+    }
+
+    const now = new Date();
+    const scoredProducts = products.map(product => {
+      let score = 0;
+      score += (product.view_count || 0) * 1;
+      score += (product.click_count || 0) * 2;
+      score += (product.purchase_count || 0) * 5;
+      
+      if (product.created_at) {
+        const createdAt = new Date(product.created_at);
+        const daysSinceCreation = (now - createdAt) / (1000 * 60 * 60 * 24);
+        if (daysSinceCreation <= 7) {
+          score += (7 - daysSinceCreation) * 2;
+        }
+      }
+      
+      return { ...product, trending_score: score };
+    });
+
+    scoredProducts.sort((a, b) => b.trending_score - a.trending_score);
+
+    console.log("[TRENDING] Sending response with", scoredProducts.length, "products");
+    return res.json({
+      products: scoredProducts.slice(0, parseInt(limit)),
+      count: scoredProducts.length
+    });
+  } catch (err) {
+    console.error("Trending products error:", err);
+    return res.status(500).json({ error: "Failed to fetch trending products" });
+  }
+});
+
+// GET /products/trending-products - Get trending products based on views, clicks, and purchases
+productsRouter.get("/trending-products", async (req, res) => {
+  console.log(">>> TRENDING-PRODUCTS ROUTE HIT <<<");
+  const { limit = 10 } = req.query;
+  
+  try {
+    const { data: products, error } = await supabase
+      .from("products")
+      .select(`
+        *,
+        users!products_seller_id_fkey(full_name),
+        categories!products_category_id_fkey(name, slug)
+      `)
+      .eq("is_active", true)
+      .order("view_count", { ascending: false })
+      .limit(parseInt(limit));
+
+    if (error) {
+      console.error("[TRENDING] Supabase error:", error);
+      throw error;
+    }
+
+    console.log("[TRENDING] Found products:", products?.length);
+    
+    if (!products || products.length === 0) {
+      return res.json({ products: [], count: 0 });
+    }
+
+    const now = new Date();
+    const scoredProducts = products.map(product => {
+      let score = 0;
+      score += (product.view_count || 0) * 1;
+      score += (product.click_count || 0) * 2;
+      score += (product.purchase_count || 0) * 5;
+      
+      if (product.created_at) {
+        const createdAt = new Date(product.created_at);
+        const daysSinceCreation = (now - createdAt) / (1000 * 60 * 60 * 24);
+        if (daysSinceCreation <= 7) {
+          score += (7 - daysSinceCreation) * 2;
+        }
+      }
+      
+      return { ...product, trending_score: score };
+    });
+
+    scoredProducts.sort((a, b) => b.trending_score - a.trending_score);
+
+    console.log("[TRENDING] Sending response with", scoredProducts.length, "products");
+    return res.json({
+      products: scoredProducts.slice(0, parseInt(limit)),
+      count: scoredProducts.length
+    });
+  } catch (err) {
+    console.error("Trending products error:", err);
+    return res.status(500).json({ error: "Failed to fetch trending products" });
+  }
+});
+
 // GET /products/:id - Get single product with view count
 productsRouter.get("/:id", async (req, res) => {
   const { id } = req.params;
+  
+  // Prevent :id from matching our other routes
+  if (id === "trending-products" || id === "test-special" || id === "seller" || id === "upload-image") {
+    return res.status(404).json({ error: "Product not found" });
+  }
 
   const { data: product, error } = await supabase
     .from("products")
-    .select("*, users(full_name, email, verified), categories!products_category_id_fkey(name, slug)")
+    .select("*, users(full_name, email), categories!products_category_id_fkey(name, slug)")
     .eq("id", id)
     .single();
 
@@ -317,7 +546,7 @@ productsRouter.get("/:id", async (req, res) => {
     const { data: fallbackProduct, fallbackError } = await supabase
       .from("products")
       .select(
-        "*, users!products_seller_id_fkey(full_name, email, verified, seller_display_name, seller_profile_image_url), categories!products_category_id_fkey(name, slug)",
+        "*, users!products_seller_id_fkey(full_name, email, seller_display_name, seller_profile_image_url), categories!products_category_id_fkey(name, slug)",
       )
       .eq("id", id)
       .single();
@@ -330,65 +559,6 @@ productsRouter.get("/:id", async (req, res) => {
   }
 
   return res.json(product);
-});
-
-// GET /products/trending - Get trending products based on views, clicks, and purchases
-productsRouter.get("/trending", async (req, res) => {
-  const { limit = 10 } = req.query;
-  
-  try {
-    // Get products with their stats
-    const { data: products, error } = await supabase
-      .from("products")
-      .select(`
-        *,
-        users!products_seller_id_fkey(full_name, verified),
-        categories!products_category_id_fkey(name, slug)
-      `)
-      .eq("is_active", true)
-      .order("view_count", { ascending: false })
-      .limit(parseInt(limit));
-
-    if (error) throw error;
-
-    // Calculate trending score for each product
-    // Score = views * 1 + clicks * 2 + purchases * 5 + recency boost
-    const now = new Date();
-    const scoredProducts = products?.map(product => {
-      let score = 0;
-      
-      // Base score from views
-      score += (product.view_count || 0) * 1;
-      
-      // Clicks worth more
-      score += (product.click_count || 0) * 2;
-      
-      // Purchases worth most
-      score += (product.purchase_count || 0) * 5;
-      
-      // Recency boost (products created in last 7 days get extra points)
-      if (product.created_at) {
-        const createdAt = new Date(product.created_at);
-        const daysSinceCreation = (now - createdAt) / (1000 * 60 * 60 * 24);
-        if (daysSinceCreation <= 7) {
-          score += (7 - daysSinceCreation) * 2; // Up to 14 points boost
-        }
-      }
-      
-      return { ...product, trending_score: score };
-    }) || [];
-
-    // Sort by trending score
-    scoredProducts.sort((a, b) => b.trending_score - a.trending_score);
-
-    return res.json({
-      products: scoredProducts.slice(0, parseInt(limit)),
-      count: scoredProducts.length
-    });
-  } catch (err) {
-    console.error("Trending products error:", err);
-    return res.status(500).json({ error: "Failed to fetch trending products" });
-  }
 });
 
 export default productsRouter;

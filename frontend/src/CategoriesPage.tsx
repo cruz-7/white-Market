@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import { ArrowLeft, Loader2, Package, Search, ShoppingBag, BookOpen, Shirt, Smartphone, Wrench, Sparkles, Home, Dumbbell, Ticket, Star, Clock, User, GraduationCap, Printer, Scissors, Truck, Phone, Hammer, Users, Calendar, Award, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,6 +58,7 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export default function CategoriesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { slug } = useParams<{ slug?: string }>();
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -353,7 +354,7 @@ export default function CategoriesPage() {
               <p className="text-gray-500 mb-6">
                 Be the first to list in this category!
               </p>
-              <Link to="/add-product">
+              <Link to={`/add-product?from=${encodeURIComponent(location.pathname)}`}>
                 <Button className="bg-primary hover:bg-primary/90">
                   <ShoppingBag className="h-4 w-4 mr-2" />
                   Add Product

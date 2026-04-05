@@ -2,6 +2,12 @@ import cors from "cors";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import compression from "compression";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import swaggerJsdoc from "swagger-jsdoc";
+import swaggerUi from "swagger-ui-express";
+import NodeCache from "node-cache";
 import authRouter from "./routes/auth.js";
 import ordersRouter from "./routes/orders.js";
 import paymentsRouter from "./routes/payments.js";
@@ -24,6 +30,8 @@ import servicesRouter from "./routes/services.js";
 import booksRouter from "./routes/books.js";
 import fashionRouter from "./routes/fashion.js";
 import ratingsRouter from "./routes/ratings.js";
+import feedbackRouter from "./routes/feedback.js";
+import { supabase } from "./lib/supabaseClient.js";
 
 function parseOrigins(originsInput) {
   if (Array.isArray(originsInput)) {
@@ -112,6 +120,27 @@ function createIpRateLimiter({ windowMs, maxRequests, message }) {
   };
 }
 
+function createCacheMiddleware(cache, ttl = 300) {
+  return (req, res, next) => {
+    const key = `${req.method}:${req.originalUrl}`;
+    const cachedResponse = cache.get(key);
+
+    if (cachedResponse) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cachedResponse);
+    }
+
+    const originalJson = res.json;
+    res.json = function (data) {
+      cache.set(key, data, ttl);
+      res.setHeader("X-Cache", "MISS");
+      return originalJson.call(this, data);
+    };
+
+    next();
+  };
+}
+
 export function createApp(options = {}) {
   const app = express();
   const isProduction = options.isProduction ?? process.env.NODE_ENV === "production";
@@ -123,6 +152,47 @@ export function createApp(options = {}) {
   if (validateEnv) {
     validateRequiredEnv(isProduction);
   }
+
+  // Initialize cache (TTL: 5 minutes, check period: 10 minutes)
+  const cache = new NodeCache({ stdTTL: 300, checkperiod: 600 });
+
+  // Compression middleware
+  app.use(compression());
+
+  // Security middleware
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'", "https://*.supabase.co", "https://api.paystack.co"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }));
+
+  // Rate limiting
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isProduction ? 300 : 1000, // limit each IP to 300/1000 requests per windowMs
+    message: "Too many requests from this IP, please try again later.",
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  app.use(limiter);
+
+  // Request logging middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`${req.method} ${req.path} ${res.statusCode} - ${duration}ms`);
+    });
+    next();
+  });
 
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
@@ -181,9 +251,76 @@ export function createApp(options = {}) {
     res.send("White Market backend is running");
   });
 
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok" });
+  app.get("/health", async (_req, res) => {
+    try {
+      // Check database connection
+      const { data, error } = await supabase.from("users").select("count").limit(1);
+      
+      res.json({ 
+        status: "ok", 
+        timestamp: new Date().toISOString(),
+        database: error ? "error" : "ok",
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        version: process.env.npm_package_version || "1.0.0"
+      });
+    } catch (error) {
+      res.status(503).json({ 
+        status: "error", 
+        timestamp: new Date().toISOString(),
+        error: error.message 
+      });
+    }
   });
+
+  // Swagger API documentation
+  const swaggerOptions = {
+    definition: {
+      openapi: "3.0.0",
+      info: {
+        title: "White Market API",
+        version: "1.0.0",
+        description: "API for White Market - Campus Marketplace",
+      },
+      servers: [
+        {
+          url: `http://localhost:${process.env.PORT || 5000}`,
+          description: "Development server",
+        },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+          },
+        },
+      },
+      security: [
+        {
+          bearerAuth: [],
+        },
+      ],
+    },
+    apis: ["./src/routes/*.js"],
+  };
+
+  const swaggerSpec = swaggerJsdoc(swaggerOptions);
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+  // Debug - log ALL requests
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/products")) {
+      console.log(`[GLOBAL] Method: ${req.method}, Path: ${req.path}, Query: ${JSON.stringify(req.query)}`);
+    }
+    next();
+  });
+
+  // Apply caching to products routes
+  // app.use("/products", createCacheMiddleware(cache, 300)); // 5 minutes TTL
+  app.use("/categories", createCacheMiddleware(cache, 600)); // 10 minutes TTL
+  app.use("/search/suggestions", createCacheMiddleware(cache, 120)); // 2 minutes TTL
 
   app.use("/auth", authRouter);
   app.use("/protected", protectedRouter);
@@ -206,6 +343,7 @@ export function createApp(options = {}) {
   app.use("/books", booksRouter);
   app.use("/fashion", fashionRouter);
   app.use("/ratings", ratingsRouter);
+  app.use("/feedback", feedbackRouter);
 
   if (enableTestRoutes) {
     app.use(testRouter);

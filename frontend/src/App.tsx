@@ -1,5 +1,5 @@
 ﻿
-import { ChangeEvent, FormEvent, useEffect, useState, useRef } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState, useRef, lazy, Suspense } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Award, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, Flame, GraduationCap, ImagePlus, Info, Lock, MapPin, Megaphone, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -9,13 +9,15 @@ import Navbar from "./Navbar";
 import Footer from "./Footer";
 import MobileBottomNav from "./MobileBottomNav";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { CartProvider } from "./CartContext";
+import CartPage from "./CartPage";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
 import { Input } from "./input";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Textarea } from "./textarea";
 import { Badge } from "./badge";
-import { Recommendations } from "./Recommendations";
+import { Recommendations, SimilarProducts } from "./Recommendations";
 import { useRecommendations } from "./useRecommendations";
 import {
   LocalUser,
@@ -53,6 +55,7 @@ import {
   messagesApi,
   paymentsApi,
   healthApi,
+  sellerApi,
   getApiBaseUrl,
   type AdminUser,
   type AdminProduct,
@@ -70,6 +73,36 @@ import ReportIssue from "./ReportIssue";
 import BuyerProtection from "./BuyerProtection";
 import AddProduct from "./AddProduct";
 import SellerProfile from "./SellerProfile";
+import { LoadingPage } from "./LoadingSpinner";
+
+// Lazy load heavy components
+const LazyIndex = lazy(() => import("./Index"));
+const LazyForgotPasswordPage = lazy(() => import("./ForgotPasswordPage"));
+const LazyResetPasswordPage = lazy(() => import("./ResetPasswordPage"));
+const LazyChangePasswordPage = lazy(() => import("./ChangePasswordPage"));
+const LazySettingsPage = lazy(() => import("./SettingsPage"));
+const LazyPrivacyPolicy = lazy(() => import("./PrivacyPolicy"));
+const LazyTermsOfService = lazy(() => import("./TermsOfService"));
+const LazyFAQ = lazy(() => import("./FAQ"));
+const LazyReportIssue = lazy(() => import("./ReportIssue"));
+const LazyBuyerProtection = lazy(() => import("./BuyerProtection"));
+const LazyAddProduct = lazy(() => import("./AddProduct"));
+const LazySellerProfile = lazy(() => import("./SellerProfile"));
+const LazyProfessionalOrdersPage = lazy(() => import("./ProfessionalOrdersPage"));
+const LazyCategoriesPage = lazy(() => import("./CategoriesPage"));
+const LazyBooksAndNotesPage = lazy(() => import("./BooksAndNotesPage"));
+const LazyFashionPage = lazy(() => import("./FashionPage"));
+const LazyFavoritesPage = lazy(() => import("./FavoritesPage"));
+const LazyNotificationsPage = lazy(() => import("./NotificationsPage"));
+const LazyReferralsPage = lazy(() => import("./ReferralsPage"));
+const LazyLeaderboardPage = lazy(() => import("./LeaderboardPage"));
+
+// Helper for lazy routes
+const LazyRoute = ({ children }: { children: React.ReactNode }) => (
+  <Suspense fallback={<LoadingPage />}>
+    {children}
+  </Suspense>
+);
 import ProfessionalOrdersPage from "./ProfessionalOrdersPage";
 import CategoriesPage from "./CategoriesPage";
 import BooksAndNotesPage from "./BooksAndNotesPage";
@@ -79,6 +112,7 @@ import NotificationsPage from "./NotificationsPage";
 import ReferralsPage from "./ReferralsPage";
 import LeaderboardPage from "./LeaderboardPage";
 import SellerDashboard from "./SellerDashboard";
+import AdminDashboardView from "./AdminDashboardView";
 
 declare global {
   interface Window {
@@ -517,10 +551,11 @@ function AppContent() {
 
   return (
     <Routes>
-      <Route path="/" element={<Index />} />
+      <Route path="/" element={<LazyRoute><LazyIndex /></LazyRoute>} />
       <Route path="/marketplace" element={backendElement(<MarketplacePage />)} />
       <Route path="/product/:id" element={backendElement(<ProductDetailPage />)} />
       <Route path="/checkout/:orderId" element={backendElement(<CheckoutPage />)} />
+      <Route path="/cart" element={<CartPage />} />
       <Route path="/messages" element={backendElement(<MessagesPage />)} />
       <Route path="/orders" element={backendElement(<ProfessionalOrdersPage user={currentUser} />)} />
       <Route path="/auth" element={backendElement(<AuthPage />)} />
@@ -537,7 +572,7 @@ function AppContent() {
       <Route path="/dashboard/transactions" element={backendElement(<SellerDashboard initialTab="transactions" />)} />
       <Route path="/dashboard/coupons" element={backendElement(<SellerDashboard initialTab="coupons" />)} />
       <Route path="/dashboard/notifications" element={backendElement(<SellerDashboard initialTab="notifications" />)} />
-      <Route path="/admin" element={backendElement(<AdminDashboard />)} />
+      <Route path="/admin" element={backendElement(currentUser ? <AdminDashboardView user={currentUser} /> : <Navigate to="/auth" replace />)} />
       <Route path="/profile-setup" element={backendElement(<ProfileSetupPage />)} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
@@ -557,7 +592,7 @@ function AppContent() {
       <Route path="/notifications" element={backendElement(<NotificationsPage />)} />
       <Route path="/referrals" element={backendElement(<ReferralsPage />)} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
@@ -845,6 +880,7 @@ function MarketplacePage() {
   const [category, setCategory] = useState(() => params.get("category") || "All");
   const [sort, setSort] = useState("popular");
   const [showVerification, setShowVerification] = useState(false);
+  const [showImageSearch, setShowImageSearch] = useState(false);
 
   const paramsSearch = params.get("search") || "";
   const paramsCategory = params.get("category") || "All";
@@ -1101,8 +1137,17 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                 value={searchQuery} 
                 onChange={(e) => setSearchQuery(e.target.value)} 
                 placeholder="Search products or sellers" 
-                className="pl-11 h-12 border-2 focus:border-primary" 
+                className="pr-14 pl-11 h-12 border-2 focus:border-primary" 
               />
+              <Button
+                size="icon"
+                variant="outline"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-lg border-slate-300 text-slate-600 hover:border-primary hover:text-primary"
+                title="Search by image"
+                onClick={() => setShowImageSearch(true)}
+              >
+                <ImagePlus className="h-4 w-4" />
+              </Button>
             </div>
             <select 
               aria-label="Category" 
@@ -1130,6 +1175,8 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
             </div>
           </CardContent>
         </Card>
+
+        <ImageSearchModal isOpen={showImageSearch} onClose={() => setShowImageSearch(false)} />
 
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
@@ -1629,6 +1676,35 @@ function StudentDashboard() {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [wishlist] = useState<string[]>(["p2", "p5"]);
   const { trackProductView, trackPurchase, getRecentlyViewed, getCategoryPreferences } = useRecommendations();
+  const [trendingProducts, setTrendingProducts] = useState<any[]>([]);
+  const [topSellers, setTopSellers] = useState<any[]>([]);
+  const [loadingSections, setLoadingSections] = useState(true);
+
+  useEffect(() => {
+    const fetchSections = async () => {
+      setLoadingSections(true);
+      try {
+        // Fetch trending products
+        const trendingRes = await productsApi.getTrending(6);
+        if (trendingRes.data?.products) {
+          setTrendingProducts(trendingRes.data.products);
+        }
+        
+        // Fetch top sellers
+        const sellersRes = await sellerApi.getTopSellers(6);
+        if (sellersRes.data?.sellers) {
+          setTopSellers(sellersRes.data.sellers);
+        }
+      } catch (error) {
+        console.error("Error fetching sections:", error);
+      } finally {
+        setLoadingSections(false);
+      }
+    };
+    
+    fetchSections();
+  }, []);
+
   if (!user) return <Navigate to="/auth" replace />;
 
   const allProducts = getProducts().filter((p) => p.is_active);
@@ -1817,241 +1893,7 @@ function StudentDashboard() {
   );
 }
 
-function AdminDashboard() {
-  useDataRefresh();
-  const navigate = useNavigate();
-  const user = useCurrentUser();
-  const [tab, setTab] = useState<"users" | "products" | "orders" | "disputes">("users");
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
-  const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([]);
-  const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
-  const [stats, setStats] = useState<{ totalUsers?: number; totalProducts?: number; totalOrders?: number; totalRevenue?: number; commission?: number } | null>(null);
-  if (!user) return <Navigate to="/auth" replace />;
-  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
-  const activities = getActivities();
-
-  const loadAdminData = async () => {
-    setLoading(true);
-    const [statsRes, usersRes, productsRes, ordersRes] = await Promise.all([
-      adminApi.getStats(),
-      adminApi.getAllUsers(),
-      adminApi.getAllProducts(),
-      adminApi.getAllOrders(),
-    ]);
-    setLoading(false);
-
-    if (statsRes.error) toast.error(statsRes.error);
-    if (usersRes.error) toast.error(usersRes.error);
-    if (productsRes.error) toast.error(productsRes.error);
-    if (ordersRes.error) toast.error(ordersRes.error);
-
-    if (statsRes.data) {
-      setStats({
-        totalUsers: Number(statsRes.data.totalUsers || 0),
-        totalProducts: Number((statsRes.data as any).totalProducts || 0),
-        totalOrders: Number(statsRes.data.totalOrders || 0),
-        totalRevenue: Number(statsRes.data.totalRevenue || 0),
-        commission: Number((statsRes.data as any).commission || 0),
-      });
-    }
-    if (usersRes.data) setAdminUsers(usersRes.data);
-    if (productsRes.data) setAdminProducts(productsRes.data);
-    if (ordersRes.data) setAdminOrders(ordersRes.data);
-  };
-
-  useEffect(() => {
-    loadAdminData();
-  }, []);
-
-  const runAdminAction = async (key: string, action: () => Promise<{ error?: string } | void>, successMessage: string) => {
-    setActionLoading(key);
-    const result = await action();
-    setActionLoading(null);
-
-    if (result && "error" in result && result.error) {
-      toast.error(result.error);
-      return;
-    }
-
-    toast.success(successMessage);
-    await loadAdminData();
-  };
-
-  const updateRole = async (userId: string, role: AdminUserRole) => {
-    await runAdminAction(`role:${userId}:${role}`, () => adminApi.updateUserRole(userId, role), "User role updated");
-  };
-
-  const banUser = async (userId: string) => {
-    await runAdminAction(`ban:${userId}`, () => adminApi.banUser(userId), "User banned");
-  };
-
-  const unbanUser = async (userId: string) => {
-    await runAdminAction(`unban:${userId}`, () => adminApi.unbanUser(userId), "User unbanned");
-  };
-
-  const removeProduct = async (productId: string) => {
-    await runAdminAction(`product:${productId}`, () => adminApi.removeProduct(productId), "Product removed");
-  };
-
-  const moderateOrder = async (orderId: string, status: "pending" | "paid" | "cancelled", successMessage: string) => {
-    await runAdminAction(`order:${orderId}:${status}`, () => adminApi.updateOrderStatus(orderId, status), successMessage);
-  };
-
-  const resolveDispute = async (orderId: string) => {
-    await moderateOrder(orderId, "cancelled", `Dispute on order #${orderId} resolved`);
-  };
-
-  const totalUsers = Number(stats?.totalUsers ?? adminUsers.length);
-  const totalProducts = Number(stats?.totalProducts ?? adminProducts.length);
-  const totalOrders = Number(stats?.totalOrders ?? adminOrders.length);
-  const totalRevenue = Number(
-    stats?.totalRevenue ?? adminOrders.filter((o) => o.status === "paid").reduce((sum, order) => sum + Number(order.amount || 0), 0),
-  );
-  const gmv = adminOrders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
-  const disputes = adminOrders.filter((o) => o.status === "disputed");
-
-  const dailyOrders = Array.from({ length: 30 }, (_, i) => {
-    const date = new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10);
-    return {
-      day: date.slice(5),
-      orders: adminOrders.filter((order) => String(order.created_at || "").startsWith(date)).length,
-    };
-  });
-
-  const categorySales = Object.entries(
-    adminProducts.reduce<Record<string, number>>((acc, product) => {
-      const sold = adminOrders
-        .filter((order) => order.product_id === product.id && order.status === "paid")
-        .reduce((sum, order) => sum + Number(order.amount || 0), 0);
-      const category = product.category || "General";
-      acc[category] = (acc[category] || 0) + sold;
-      return acc;
-    }, {}),
-  )
-    .map(([category, sales]) => ({ category, sales }))
-    .sort((a, b) => b.sales - a.sales)
-    .slice(0, 5);
-
-  return (
-    <AppScaffold>
-      <section className="container space-y-6 py-8">
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="page-title">Admin Dashboard</h1>
-              <p className="body-text">Monitor marketplace health, compliance, and operations from one control center.</p>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => navigate("/dashboard")}
-              className="ml-4 border-primary text-primary hover:bg-primary/10"
-            >
-              🏪 My Store
-            </Button>
-          </div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[["Total Users", totalUsers, "+6%"], ["Products Listed", totalProducts, "+9%"], ["Total Orders", totalOrders, "+11%"], ["Platform Revenue / GMV", `GHS ${gmv.toFixed(2)}`, "+14%"]].map(([title, value, growth]) => (<Card key={String(title)} className="shadow-sm"><CardContent className="p-4"><p className="label-text">{String(title)}</p><p className="mt-1 text-2xl font-bold text-primary">{String(value)}</p><p className="text-xs text-green-600">{String(growth)} vs last week</p></CardContent></Card>))}</div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card><CardContent className="p-4"><h2 className="section-title mb-2">Recent Activity Feed</h2><div className="space-y-2">{activities.slice(0, 10).map((a: any) => (<div key={a.id} className="rounded-lg border p-2"><p className="text-sm">{a.text}</p><p className="text-xs text-gray-500">{timeAgo(a.time)}</p></div>))}</div></CardContent></Card>
-          <Card><CardContent className="space-y-4 p-4"><h2 className="section-title">Charts & Analytics</h2><div className="h-40"><ResponsiveContainer width="100%" height="100%"><LineChart data={dailyOrders}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" hide /><YAxis /><Tooltip /><Line dataKey="orders" stroke="#006633" strokeWidth={2} /></LineChart></ResponsiveContainer></div><div className="h-40"><ResponsiveContainer width="100%" height="100%"><BarChart data={categorySales}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="category" /><YAxis /><Tooltip /><Bar dataKey="sales" fill="#FF6B00" /></BarChart></ResponsiveContainer></div></CardContent></Card>
-          <Card><CardContent className="p-4"><h2 className="section-title mb-2">Pending Actions</h2><div className="space-y-2">{[["Sellers awaiting verification", adminUsers.filter((u) => u.role === "seller").length, "Review", "users"], ["Open disputes", disputes.length, "Resolve", "disputes"], ["Products requiring moderation", adminProducts.filter((p) => !p.is_active).length, "Review", "products"], ["Commission (Paid)", `GHS ${(stats?.commission || totalRevenue * 0.1).toFixed(2)}`, "View", "orders"]].map(([label, count, cta, toTab]) => (<div key={String(label)} className="flex items-center justify-between rounded-lg border p-2"><div><p className="text-sm">{String(label)}</p><p className="text-xs text-gray-500">{String(count)} pending</p></div><Button size="sm" variant="outline" onClick={() => setTab(String(toTab) as any)}>{String(cta)}</Button></div>))}</div></CardContent></Card>
-        </div>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="mb-3 flex gap-2">
-              <Button size="sm" variant={tab === "users" ? "default" : "outline"} onClick={() => setTab("users")}>Users</Button>
-              <Button size="sm" variant={tab === "products" ? "default" : "outline"} onClick={() => setTab("products")}>Products</Button>
-              <Button size="sm" variant={tab === "orders" ? "default" : "outline"} onClick={() => setTab("orders")}>Orders</Button>
-              <Button size="sm" variant={tab === "disputes" ? "default" : "outline"} onClick={() => setTab("disputes")}>Disputes</Button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  {tab === "users" && <tr className="text-left text-gray-500"><th className="py-2">Name</th><th>Email</th><th>Role</th><th>Verified</th><th>Joined</th><th>Actions</th></tr>}
-                  {tab === "products" && <tr className="text-left text-gray-500"><th className="py-2">Image</th><th>Title</th><th>Seller</th><th>Price</th><th>Status</th><th>Actions</th></tr>}
-                  {tab === "orders" && <tr className="text-left text-gray-500"><th className="py-2">Order ID</th><th>Buyer</th><th>Seller</th><th>Amount</th><th>Status</th><th>Actions</th></tr>}
-                  {tab === "disputes" && <tr className="text-left text-gray-500"><th className="py-2">Order ID</th><th>Raised By</th><th>Reason</th><th>Status</th><th>Resolve</th></tr>}
-                </thead>
-                <tbody>
-                  {loading && <tr><td colSpan={6} className="py-4 text-center text-slate-500">Loading admin data...</td></tr>}
-                  {!loading && tab === "users" && adminUsers.map((u) => (
-                    <tr key={u.id} className="border-t">
-                      <td className="py-2">{u.full_name || "User"}</td>
-                      <td>{u.email}</td>
-                      <td className="capitalize">{u.role}</td>
-                      <td>{u.role === "seller" || u.role === "admin" ? "Yes" : "-"}</td>
-                      <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}</td>
-                      <td>
-                        <div className="flex flex-wrap gap-1">
-                          {u.role === "banned" ? (
-                            <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => unbanUser(u.id)}>Unban</Button>
-                          ) : (
-                            <Button size="sm" variant="outline" disabled={!!actionLoading || u.id === user.id} onClick={() => banUser(u.id)}>Ban</Button>
-                          )}
-                          {u.role !== "user" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "user")}>Set User</Button>}
-                          {u.role !== "seller" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "seller")}>Set Seller</Button>}
-                          {u.role !== "admin" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => updateRole(u.id, "admin")}>Set Admin</Button>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!loading && tab === "products" && adminProducts.map((p) => (
-                    <tr key={p.id} className="border-t">
-                      <td className="py-2"><img src={p.image_url || "https://via.placeholder.com/80"} alt={p.title} className="h-8 w-8 rounded object-cover" /></td>
-                      <td>{p.title}</td>
-                      <td>{p.seller?.full_name || p.seller?.email || p.seller_id}</td>
-                      <td>GHS {Number(p.price || 0).toFixed(2)}</td>
-                      <td>{p.is_active ? "active" : "hidden"}</td>
-                      <td>
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>Review</Button>
-                          <Button size="sm" variant="destructive" disabled={!!actionLoading} onClick={() => removeProduct(p.id)}>Remove</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!loading && tab === "orders" && adminOrders.map((o) => (
-                    <tr key={o.id} className="border-t">
-                      <td className="py-2">#{o.id.slice(0, 8)}</td>
-                      <td>{o.buyer?.full_name || o.buyer?.email || o.buyer_id}</td>
-                      <td>{o.seller?.full_name || o.seller?.email || o.seller_id}</td>
-                      <td>GHS {Number(o.amount || 0).toFixed(2)}</td>
-                      <td className="capitalize">{o.status}</td>
-                      <td>
-                        <div className="flex flex-wrap gap-1">
-                          <Button size="sm" variant="outline" onClick={() => navigate(`/checkout/${o.id}`)}>Open</Button>
-                          {o.status !== "paid" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "paid", `Order #${o.id} marked paid`)}>Mark Paid</Button>}
-                          {o.status !== "pending" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "pending", `Order #${o.id} set to pending`)}>Set Pending</Button>}
-                          {o.status !== "cancelled" && <Button size="sm" variant="outline" disabled={!!actionLoading} onClick={() => moderateOrder(o.id, "cancelled", `Order #${o.id} cancelled`)}>Cancel</Button>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!loading && tab === "disputes" && disputes.map((o) => (
-                    <tr key={o.id} className="border-t">
-                      <td className="py-2">#{o.id.slice(0, 8)}</td>
-                      <td>{o.buyer?.full_name || o.buyer?.email || o.buyer_id}</td>
-                      <td>Escalated to admin support</td>
-                      <td className="capitalize">{o.status}</td>
-                      <td><Button size="sm" disabled={!!actionLoading} onClick={() => resolveDispute(o.id)}>Resolve</Button></td>
-                    </tr>
-                  ))}
-                  {!loading && tab === "disputes" && disputes.length === 0 && (
-                    <tr><td colSpan={5} className="py-4 text-center text-slate-500">No disputed orders right now.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </AppScaffold>
-  );
-}
+// AdminDashboard function removed - replaced with richer AdminDashboardView component
 
 function CheckoutPage() {
   useDataRefresh();
@@ -2696,7 +2538,9 @@ function SimplePage({ title, message }: { title: string; message: string }) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppContent />
+      <CartProvider>
+        <AppContent />
+      </CartProvider>
     </ErrorBoundary>
   );
 }

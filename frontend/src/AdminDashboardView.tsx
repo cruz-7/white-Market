@@ -6,7 +6,7 @@ import {
   AlertTriangle, CheckCircle, Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight,
   TrendingUp, TrendingDown, Users, CreditCard, Star, Bell, Layers, Briefcase, Gift, MoreVertical,
   Filter, RefreshCw, Trash2, Ban, Unlock, XCircle, Check, Edit, Plus, ChevronDown,
-  Wrench, UserCheck, Banknote, FolderTree, Trophy, Mail
+  Wrench, UserCheck, Banknote, FolderTree, Trophy, Mail, MessageSquare
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import {
   notificationsApi, 
   servicesApi,
   verificationApi,
+  feedbackApi,
   AdminUser,
   AdminProduct,
   AdminOrder,
@@ -39,7 +40,7 @@ type Props = Readonly<{
 }>;
 
 type AdminRole = "operations" | "finance" | "compliance" | "content" | "growth";
-type TabType = "dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "categories" | "services" | "referrals" | "notifications" | "settings";
+type TabType = "dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "categories" | "services" | "referrals" | "notifications" | "settings" | "feedback" | "payouts" | "leaderboard";
 type ActivityType = "all" | "orders" | "payments" | "disputes" | "verification" | "products";
 type ActivityRecordType = Exclude<ActivityType, "all">;
 type PriorityLevel = "critical" | "high" | "medium" | "low";
@@ -166,8 +167,10 @@ export default function AdminDashboardView({ user }: Props) {
   const [activityFilter, setActivityFilter] = useState<ActivityType>("all");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [rangePreset, setRangePreset] = useState<"7d" | "30d" | "90d">("30d");
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [bulkAction, setBulkAction] = useState("");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   
   // Real data from API
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -196,87 +199,339 @@ export default function AdminDashboardView({ user }: Props) {
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [referralStats, setReferralStats] = useState<any>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [feedbackStats, setFeedbackStats] = useState<any>(null);
+  const [feedbackList, setFeedbackList] = useState<any[]>([]);
   
-  // Bulk selection
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [bulkAction, setBulkAction] = useState<string>("");
-  
-  // Fetch data from API
-  const fetchDashboardData = useCallback(async () => {
-    setIsLoading(true);
+  // Loading states for progressive loading
+  const [loadingStates, setLoadingStates] = useState({
+    critical: true, // stats, users, products, orders
+    categories: false,
+    verifications: false,
+    referrals: false,
+    notifications: false,
+    systemHealth: false,
+    activity: false,
+    topSellers: false,
+    revenue: false,
+    services: false,
+    feedback: false
+  });
+
+  // Cached data with timestamps
+  const [dataCache, setDataCache] = useState<{
+    [key: string]: { data: any; timestamp: number; ttl: number };
+  }>({});
+
+  // Cache helper functions
+  const getCachedData = (key: string) => {
+    const cached = dataCache[key];
+    if (cached && Date.now() - cached.timestamp < cached.ttl) {
+      return cached.data;
+    }
+    return null;
+  };
+
+  const setCachedData = (key: string, data: any, ttl: number = 30000) => { // 30 seconds default
+    setDataCache(prev => ({
+      ...prev,
+      [key]: { data, timestamp: Date.now(), ttl }
+    }));
+  };
+
+  // Update isLoading to be based on critical data only
+  const isLoading = loadingStates.critical;
+
+  // Skeleton loading component
+  const SkeletonCard = ({ className = "" }: { className?: string }) => (
+    <Card className={className}>
+      <CardContent className="p-4">
+        <div className="animate-pulse">
+          <div className="h-4 bg-slate-200 rounded w-3/4 mb-2"></div>
+          <div className="h-8 bg-slate-200 rounded w-1/2"></div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const SkeletonTable = ({ rows = 5 }: { rows?: number }) => (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="animate-pulse flex space-x-4">
+          <div className="h-4 bg-slate-200 rounded flex-1"></div>
+          <div className="h-4 bg-slate-200 rounded w-24"></div>
+          <div className="h-4 bg-slate-200 rounded w-20"></div>
+          <div className="h-4 bg-slate-200 rounded w-16"></div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // Progressive data fetching
+  const fetchCriticalData = useCallback(async () => {
+    setLoadingStates(prev => ({ ...prev, critical: true }));
     try {
-      const [statsRes, usersRes, productsRes, ordersRes, categoriesRes, verificationsRes, referralsRes, notificationsRes, dashboardStatsRes, systemHealthRes, recentActivityRes, topSellersRes, revenueAnalyticsRes] = await Promise.all([
+      const [statsRes, usersRes, productsRes, ordersRes] = await Promise.all([
         adminApi.getStats(),
         adminApi.getAllUsers(),
         adminApi.getAllProducts(),
-        adminApi.getAllOrders(),
-        categoriesApi.getAll(),
-        verificationApi.getAllPending(),
-        referralsApi.getAdminStats(),
-        notificationsApi.getAll(1, 50),
-        adminApi.getDashboardStats(),
-        adminApi.getSystemHealth(),
+        adminApi.getAllOrders()
+      ]);
+
+      if (statsRes.data) {
+        const statsData = {
+          totalUsers: statsRes.data.totalUsers || 0,
+          totalOrders: statsRes.data.totalOrders || 0,
+          totalRevenue: statsRes.data.totalRevenue || 0,
+          totalProducts: statsRes.data.totalProducts || 0,
+          commission: statsRes.data.commission || 0
+        };
+        setStats(statsData);
+        setCachedData('stats', statsData);
+      }
+
+      if (usersRes.data) {
+        setUsers(usersRes.data);
+        setCachedData('users', usersRes.data);
+      }
+
+      if (productsRes.data) {
+        setProducts(productsRes.data);
+        setCachedData('products', productsRes.data);
+      }
+
+      if (ordersRes.data) {
+        setOrders(ordersRes.data);
+        setCachedData('orders', ordersRes.data);
+      }
+
+    } catch (error) {
+      console.error("Failed to fetch critical data:", error);
+      toast.error("Failed to load dashboard data");
+    } finally {
+      setLoadingStates(prev => ({ ...prev, critical: false }));
+    }
+  }, []);
+
+  const fetchSecondaryData = useCallback(async () => {
+    const promises = [];
+
+    // Categories
+    if (!getCachedData('categories')) {
+      setLoadingStates(prev => ({ ...prev, categories: true }));
+      promises.push(
+        categoriesApi.getAll().then(res => {
+          if (res.data) {
+            setCategories(res.data);
+            setCachedData('categories', res.data);
+          }
+        }).catch(err => console.error("Categories fetch failed:", err))
+          .finally(() => setLoadingStates(prev => ({ ...prev, categories: false })))
+      );
+    }
+
+    // Verifications
+    if (!getCachedData('verifications')) {
+      setLoadingStates(prev => ({ ...prev, verifications: true }));
+      promises.push(
+        verificationApi.getAllPending().then(res => {
+          if (res.data?.verifications) {
+            setVerifications(res.data.verifications);
+            setCachedData('verifications', res.data.verifications);
+          }
+        }).catch(err => console.error("Verifications fetch failed:", err))
+          .finally(() => setLoadingStates(prev => ({ ...prev, verifications: false })))
+      );
+    }
+
+    // Dashboard stats
+    if (!getCachedData('dashboardStats')) {
+      promises.push(
+        adminApi.getDashboardStats().then(res => {
+          if (res.data) {
+            setEnhancedStats(res.data);
+            setCachedData('dashboardStats', res.data);
+          }
+        }).catch(err => console.error("Dashboard stats fetch failed:", err))
+      );
+    }
+
+    // System health
+    if (!getCachedData('systemHealth')) {
+      setLoadingStates(prev => ({ ...prev, systemHealth: true }));
+      promises.push(
+        adminApi.getSystemHealth().then(res => {
+          if (res.data) {
+            setSystemHealth(res.data);
+            setCachedData('systemHealth', res.data, 60000); // 1 minute TTL
+          }
+        }).catch(err => console.error("System health fetch failed:", err))
+          .finally(() => setLoadingStates(prev => ({ ...prev, systemHealth: false })))
+      );
+    }
+
+    await Promise.allSettled(promises);
+  }, []);
+
+  const fetchActivityData = useCallback(async () => {
+    if (getCachedData('activity')) return;
+
+    setLoadingStates(prev => ({ ...prev, activity: true }));
+    try {
+      const [activityRes, topSellersRes, revenueRes] = await Promise.all([
         adminApi.getRecentActivity(20),
         adminApi.getTopSellers(10),
         adminApi.getRevenueAnalytics("month")
       ]);
-      
-      if (statsRes.data) setStats({
-        totalUsers: statsRes.data.totalUsers || 0,
-        totalOrders: statsRes.data.totalOrders || 0,
-        totalRevenue: statsRes.data.totalRevenue || 0,
-        totalProducts: statsRes.data.totalProducts || 0,
-        commission: statsRes.data.commission || 0
-      });
-      if (dashboardStatsRes.data) setEnhancedStats(dashboardStatsRes.data);
-      if (systemHealthRes.data) setSystemHealth(systemHealthRes.data);
-      if (recentActivityRes.data) setRecentActivity(recentActivityRes.data);
-      if (topSellersRes.data) setApiTopSellers(topSellersRes.data);
-      if (revenueAnalyticsRes.data) setRevenueAnalytics(revenueAnalyticsRes.data);
-      if (usersRes.data) setUsers(usersRes.data);
-      if (productsRes.data) setProducts(productsRes.data);
-      if (ordersRes.data) setOrders(ordersRes.data);
-      if (categoriesRes.data) setCategories(categoriesRes.data);
-      if (verificationsRes.data?.verifications) setVerifications(verificationsRes.data.verifications);
-      if (referralsRes.data) setReferralStats(referralsRes.data);
-      if (notificationsRes.data?.notifications) setNotifications(notificationsRes.data.notifications);
-      
+
+      if (activityRes.data) {
+        setRecentActivity(activityRes.data);
+        setCachedData('activity', activityRes.data, 60000);
+      }
+
+      if (topSellersRes.data) {
+        setApiTopSellers(topSellersRes.data);
+        setCachedData('topSellers', topSellersRes.data, 300000); // 5 minutes
+      }
+
+      if (revenueRes.data) {
+        setRevenueAnalytics(revenueRes.data);
+        setCachedData('revenue', revenueRes.data, 300000);
+      }
+
     } catch (error) {
-      console.error("Failed to fetch dashboard data:", error);
-      toast.error("Failed to load dashboard data");
+      console.error("Failed to fetch activity data:", error);
     } finally {
-      setIsLoading(false);
+      setLoadingStates(prev => ({ ...prev, activity: false, topSellers: false, revenue: false }));
     }
+  }, []);
+
+  const fetchNotificationsAndReferrals = useCallback(async () => {
+    if (getCachedData('notifications') && getCachedData('referrals')) return;
+
+    try {
+      const promises = [];
+
+      if (!getCachedData('notifications')) {
+        setLoadingStates(prev => ({ ...prev, notifications: true }));
+        promises.push(
+          notificationsApi.getAll(1, 50).then(res => {
+            if (res.data?.notifications) {
+              setNotifications(res.data.notifications);
+              setCachedData('notifications', res.data.notifications, 30000);
+            }
+          }).catch(err => console.error("Notifications fetch failed:", err))
+            .finally(() => setLoadingStates(prev => ({ ...prev, notifications: false })))
+        );
+      }
+
+      if (!getCachedData('referrals')) {
+        setLoadingStates(prev => ({ ...prev, referrals: true }));
+        promises.push(
+          referralsApi.getAdminStats().then(res => {
+            if (res.data) {
+              setReferralStats(res.data);
+              setCachedData('referrals', res.data, 120000); // 2 minutes
+            }
+          }).catch(err => console.error("Referrals fetch failed:", err))
+            .finally(() => setLoadingStates(prev => ({ ...prev, referrals: false })))
+        );
+      }
+
+      await Promise.allSettled(promises);
+    } catch (error) {
+      console.error("Failed to fetch notifications and referrals:", error);
+    }
+  }, []);
+
+  // Optimized refresh function
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+
+    // Clear cache for immediate refresh
+    setDataCache({});
+
+    try {
+      await Promise.all([
+        fetchCriticalData(),
+        fetchSecondaryData(),
+        fetchActivityData(),
+        fetchNotificationsAndReferrals()
+      ]);
+    } catch (error) {
+      console.error("Refresh failed:", error);
+      toast.error("Failed to refresh data");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [fetchCriticalData, fetchSecondaryData, fetchActivityData, fetchNotificationsAndReferrals]);
+
+  // Initial load - progressive loading
+  useEffect(() => {
+    // Load critical data first
+    fetchCriticalData();
+
+    // Load secondary data after a short delay
+    const secondaryTimer = setTimeout(() => {
+      fetchSecondaryData();
+    }, 100);
+
+    // Load activity data after another delay
+    const activityTimer = setTimeout(() => {
+      fetchActivityData();
+    }, 200);
+
+    // Load notifications and referrals last
+    const notificationsTimer = setTimeout(() => {
+      fetchNotificationsAndReferrals();
+    }, 300);
+
+    return () => {
+      clearTimeout(secondaryTimer);
+      clearTimeout(activityTimer);
+      clearTimeout(notificationsTimer);
+    };
   }, []);
   
   // Fetch services
   const fetchServices = useCallback(async () => {
+    setLoadingStates(prev => ({ ...prev, services: true }));
     try {
       const res = await servicesApi.getAll(undefined, 100, 0);
       if (res.data?.services) setServices(res.data.services);
     } catch (error) {
       console.error("Failed to fetch services:", error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, services: false }));
     }
   }, []);
-  
-  // Initial load and refresh
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
   
   useEffect(() => {
     if (tab === "services" && services.length === 0) {
       fetchServices();
     }
   }, [tab, services.length, fetchServices]);
-  
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await fetchDashboardData();
-    if (tab === "services") await fetchServices();
-    setIsRefreshing(false);
-    toast.success("Data refreshed");
-  };
+
+  const fetchFeedback = useCallback(async () => {
+    setLoadingStates(prev => ({ ...prev, feedback: true }));
+    try {
+      const [statsRes, listRes] = await Promise.all([
+        feedbackApi.getStats(),
+        feedbackApi.getAll(1, 50),
+      ]);
+      if (statsRes.data?.stats) setFeedbackStats(statsRes.data.stats);
+      if (listRes.data?.feedback) setFeedbackList(listRes.data.feedback);
+    } catch (error) {
+      console.error("Failed to fetch feedback:", error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, feedback: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "feedback" && feedbackStats === null) {
+      fetchFeedback();
+    }
+  }, [tab, feedbackStats, fetchFeedback]);
   
   const now = new Date();
   
@@ -500,7 +755,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await adminApi.updateOrderStatus(orderId, "paid");
       toast.success(`Dispute on order #${orderId.slice(-6)} resolved`);
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh orders data
     } catch (error) {
       toast.error("Failed to resolve dispute");
     }
@@ -510,7 +765,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await verificationApi.approve(verificationId);
       toast.success("Seller verified successfully");
-      fetchDashboardData();
+      await fetchSecondaryData(); // Refresh verifications data
     } catch (error) {
       toast.error("Failed to verify seller");
     }
@@ -520,7 +775,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await verificationApi.reject(verificationId, "Verification rejected by admin");
       toast.success("Verification rejected");
-      fetchDashboardData();
+      await fetchSecondaryData(); // Refresh verifications data
     } catch (error) {
       toast.error("Failed to reject verification");
     }
@@ -530,7 +785,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       // Note: Need to add this endpoint to admin API
       toast.success("Product restored successfully");
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh products data
     } catch (error) {
       toast.error("Failed to restore product");
     }
@@ -540,7 +795,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await adminApi.removeProduct(productId);
       toast.success("Product removed");
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh products data
     } catch (error) {
       toast.error("Failed to remove product");
     }
@@ -550,7 +805,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await adminApi.banUser(userId);
       toast.success("User banned");
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh users data
     } catch (error) {
       toast.error("Failed to ban user");
     }
@@ -560,7 +815,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await adminApi.unbanUser(userId);
       toast.success("User unbanned");
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh users data
     } catch (error) {
       toast.error("Failed to unban user");
     }
@@ -570,16 +825,47 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await adminApi.updateUserRole(userId, role as any);
       toast.success(`User role updated to ${role}`);
-      fetchDashboardData();
+      await fetchCriticalData(); // Refresh users data
     } catch (error) {
       toast.error("Failed to update user role");
     }
   };
   
+  const handleGenerateReport = async () => {
+    try {
+      const reportData = {
+        dateRange: rangePreset,
+        stats,
+        orders: orders.length,
+        products: products.length,
+        users: users.length
+      };
+      const csvContent = `Admin Report - ${new Date().toLocaleDateString()}\n\nPlatform Statistics:\nTotal Users: ${users.length}\nTotal Orders: ${orders.length}\nTotal Products: ${products.length}\nTotal Revenue: GHS ${stats?.totalRevenue || 0}\nCommission: GHS ${stats?.commission || 0}`;
+      const blob = new Blob([csvContent], { type: "text/csv" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `admin-report-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      toast.success("Report generated and downloaded");
+    } catch (error) {
+      toast.error("Failed to generate report");
+    }
+  };
+  
+  const handleShowBannedUsers = () => {
+    setSearchTerm("banned");
+    setTab("users");
+  };
+  
+  const handleCampaign = () => {
+    toast.info("Campaign feature coming soon. Stay tuned!");
+  };
+  
   const handleMarkNotificationRead = async (notificationId: string) => {
     try {
       await notificationsApi.markAsRead(notificationId);
-      fetchDashboardData();
+      await fetchNotificationsAndReferrals(); // Refresh notifications data
     } catch (error) {
       console.error("Failed to mark notification read:", error);
     }
@@ -589,7 +875,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       await notificationsApi.markAllAsRead();
       toast.success("All notifications marked as read");
-      fetchDashboardData();
+      await fetchNotificationsAndReferrals(); // Refresh notifications data
     } catch (error) {
       toast.error("Failed to mark all notifications as read");
     }
@@ -697,7 +983,10 @@ export default function AdminDashboardView({ user }: Props) {
     { id: "categories", label: "Categories", Icon: Layers },
     { id: "services", label: "Services", Icon: Briefcase },
     { id: "referrals", label: "Referrals", Icon: Gift },
+    { id: "payouts", label: "Payouts", Icon: Banknote },
+    { id: "leaderboard", label: "Leaderboard", Icon: Trophy },
     { id: "notifications", label: "Notifications", Icon: Bell },
+    { id: "feedback", label: "Feedback", Icon: MessageSquare },
     { id: "settings", label: "Settings", Icon: Info },
   ] as const;
 
@@ -759,10 +1048,10 @@ export default function AdminDashboardView({ user }: Props) {
         <div className="mt-3 flex flex-wrap gap-2">
           {adminRole === "operations" && (
             <>
-              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=orders')} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => setTab("orders")} className="text-xs">
                 <ShoppingCart className="mr-1 h-3 w-3" /> Manage Orders
               </Button>
-              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=services')} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => setTab("services")} className="text-xs">
                 <Wrench className="mr-1 h-3 w-3" /> Services
               </Button>
               <Button variant="outline" size="sm" onClick={() => setTab("verification")} className="text-xs">
@@ -773,13 +1062,13 @@ export default function AdminDashboardView({ user }: Props) {
           )}
           {adminRole === "finance" && (
             <>
-              <Button variant="outline" size="sm" onClick={() => navigate('/admin?tab=orders&status=paid')} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => { setSearchTerm("paid"); setTab("orders"); }} className="text-xs">
                 <CreditCard className="mr-1 h-3 w-3" /> Payment Records
               </Button>
-              <Button variant="outline" size="sm" onClick={() => navigate('/payouts')} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => setTab("payouts")} className="text-xs">
                 <Banknote className="mr-1 h-3 w-3" /> Payouts
               </Button>
-              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+              <Button variant="outline" size="sm" onClick={handleGenerateReport} className="text-xs">
                 <FileText className="mr-1 h-3 w-3" /> Generate Report
               </Button>
             </>
@@ -792,7 +1081,7 @@ export default function AdminDashboardView({ user }: Props) {
               <Button variant="outline" size="sm" onClick={() => setTab("verification")} className="text-xs">
                 <Shield className="mr-1 h-3 w-3" /> User Verifications
               </Button>
-              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+              <Button variant="outline" size="sm" onClick={handleShowBannedUsers} className="text-xs">
                 <Ban className="mr-1 h-3 w-3" /> Banned Users
               </Button>
             </>
@@ -815,10 +1104,10 @@ export default function AdminDashboardView({ user }: Props) {
               <Button variant="outline" size="sm" onClick={() => setTab("referrals")} className="text-xs">
                 <Users className="mr-1 h-3 w-3" /> Referrals
               </Button>
-              <Button variant="outline" size="sm" onClick={() => navigate('/leaderboard')} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => setTab("leaderboard")} className="text-xs">
                 <Trophy className="mr-1 h-3 w-3" /> Leaderboard
               </Button>
-              <Button variant="outline" size="sm" onClick={() => {}} className="text-xs">
+              <Button variant="outline" size="sm" onClick={handleCampaign} className="text-xs">
                 <Mail className="mr-1 h-3 w-3" /> Campaign
               </Button>
             </>
@@ -1054,77 +1343,99 @@ export default function AdminDashboardView({ user }: Props) {
                 {/* Operations Metrics */}
                 {adminRole === "operations" && (
                   <>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Orders</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeOrders.length}</p>
-                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                          {fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Products</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeProducts.length}</p>
-                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                          {fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Active Sellers</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{activeSellers.length}</p>
-                        <p className="text-xs text-slate-500">{pendingVerification.length} pending</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">GMV</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
-                        <p className={`text-xs font-semibold flex items-center gap-1 ${String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                          {String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                          {fmtDelta(percentDelta(gmv, prevGmv))}
-                        </p>
-                      </CardContent>
-                    </Card>
+                    {isLoading ? (
+                      <>
+                        <SkeletonCard />
+                        <SkeletonCard />
+                        <SkeletonCard />
+                        <SkeletonCard />
+                      </>
+                    ) : (
+                      <>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">Orders</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeOrders.length}</p>
+                            <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                              {fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))}
+                            </p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">Products</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{rangeProducts.length}</p>
+                            <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                              {fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))}
+                            </p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">Active Sellers</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{activeSellers.length}</p>
+                            <p className="text-xs text-slate-500">{pendingVerification.length} pending</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">GMV</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
+                            <p className={`text-xs font-semibold flex items-center gap-1 ${String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                              {String(fmtDelta(percentDelta(gmv, prevGmv))).startsWith("+") ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                              {fmtDelta(percentDelta(gmv, prevGmv))}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
                   </>
                 )}
                 
                 {/* Finance Metrics */}
                 {adminRole === "finance" && (
                   <>
-                    <Card className="bg-teal-50 border-teal-200">
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-teal-700">Revenue</p>
-                        <p className="text-xl lg:text-2xl font-bold text-teal-900">{fmtCurrency(revenue)}</p>
-                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(revenue, prevRevenue))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                          {fmtDelta(percentDelta(revenue, prevRevenue))}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">GMV</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
-                        <p className="text-xs text-slate-500">Total volume</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Commission</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{COMMISSION_RATE * 100}%</p>
-                        <p className="text-xs text-slate-500">Platform fee</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Pending</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{orders.filter((o) => o.status === "pending").length}</p>
-                        <p className="text-xs text-slate-500">Awaiting payment</p>
-                      </CardContent>
-                    </Card>
+                    {isLoading ? (
+                      <>
+                        <SkeletonCard />
+                        <SkeletonCard />
+                        <SkeletonCard />
+                        <SkeletonCard />
+                      </>
+                    ) : (
+                      <>
+                        <Card className="bg-teal-50 border-teal-200">
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-teal-700">Revenue</p>
+                            <p className="text-xl lg:text-2xl font-bold text-teal-900">{fmtCurrency(revenue)}</p>
+                            <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(revenue, prevRevenue))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                              {fmtDelta(percentDelta(revenue, prevRevenue))}
+                            </p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">GMV</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(gmv)}</p>
+                            <p className="text-xs text-slate-500">Total volume</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">Commission</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{COMMISSION_RATE * 100}%</p>
+                            <p className="text-xs text-slate-500">Platform fee</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-3 lg:p-4">
+                            <p className="text-xs lg:text-sm text-slate-500">Pending</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{orders.filter((o) => o.status === "pending").length}</p>
+                            <p className="text-xs text-slate-500">Awaiting payment</p>
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
                   </>
                 )}
                 
@@ -1245,76 +1556,82 @@ export default function AdminDashboardView({ user }: Props) {
               </div>
 
               {/* Recent Activity from API */}
-              {(recentActivity.length > 0 || apiTopSellers.length > 0) && (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {/* Recent Activity */}
-                  {recentActivity.length > 0 && (
-                    <Card>
-                      <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                        <CardTitle className="text-sm">Recent Activity</CardTitle>
-                        <Button variant="ghost" size="sm" className="h-8 text-xs">
-                          View All
-                        </Button>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-2 max-h-64 overflow-y-auto">
-                          {recentActivity.slice(0, 10).map((activity, idx) => (
-                            <div key={idx} className="flex items-start gap-2 text-xs">
-                              <div className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
-                                activity.type === 'order' ? 'bg-blue-500' :
-                                activity.type === 'user' ? 'bg-green-500' :
-                                activity.type === 'product' ? 'bg-purple-500' :
-                                activity.type === 'payment' ? 'bg-emerald-500' :
-                                'bg-slate-400'
-                              }`}></div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-slate-700 truncate">{activity.description || activity.message}</p>
-                                <p className="text-slate-400">{activity.timeAgo || activity.created_at}</p>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {/* Recent Activity */}
+                <Card>
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm">Recent Activity</CardTitle>
+                    <Button variant="ghost" size="sm" className="h-8 text-xs">
+                      View All
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingStates.activity ? (
+                      <SkeletonTable rows={5} />
+                    ) : recentActivity.length > 0 ? (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {recentActivity.slice(0, 10).map((activity, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs">
+                            <div className={`mt-0.5 h-2 w-2 rounded-full flex-shrink-0 ${
+                              activity.type === 'order' ? 'bg-blue-500' :
+                              activity.type === 'user' ? 'bg-green-500' :
+                              activity.type === 'product' ? 'bg-purple-500' :
+                              activity.type === 'payment' ? 'bg-emerald-500' :
+                              'bg-slate-400'
+                            }`}></div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-slate-700 truncate">{activity.description || activity.message}</p>
+                              <p className="text-slate-400">{activity.timeAgo || activity.created_at}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-slate-500 py-8">No recent activity</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Top Sellers from API */}
+                <Card>
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm">Top Performers</CardTitle>
+                    <Badge variant="outline" className="text-xs">This Month</Badge>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingStates.topSellers ? (
+                      <SkeletonTable rows={5} />
+                    ) : apiTopSellers.length > 0 ? (
+                      <div className="space-y-3">
+                        {apiTopSellers.slice(0, 5).map((seller, idx) => (
+                          <div key={seller.id || idx} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                idx === 0 ? 'bg-amber-100 text-amber-700' :
+                                idx === 1 ? 'bg-slate-100 text-slate-700' :
+                                idx === 2 ? 'bg-orange-100 text-orange-700' :
+                                'bg-slate-50 text-slate-500'
+                              }`}>
+                                {idx + 1}
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium truncate max-w-[120px]">{seller.name || seller.seller_name || seller.full_name}</p>
+                                <p className="text-xs text-slate-500">{seller.orders || 0} orders</p>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                  
-                  {/* Top Sellers from API */}
-                  {apiTopSellers.length > 0 && (
-                    <Card>
-                      <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                        <CardTitle className="text-sm">Top Performers</CardTitle>
-                        <Badge variant="outline" className="text-xs">This Month</Badge>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          {apiTopSellers.slice(0, 5).map((seller, idx) => (
-                            <div key={seller.id || idx} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                                  idx === 0 ? 'bg-amber-100 text-amber-700' :
-                                  idx === 1 ? 'bg-slate-100 text-slate-700' :
-                                  idx === 2 ? 'bg-orange-100 text-orange-700' :
-                                  'bg-slate-50 text-slate-500'
-                                }`}>
-                                  {idx + 1}
-                                </div>
-                                <div>
-                                  <p className="text-sm font-medium truncate max-w-[120px]">{seller.name || seller.seller_name || seller.full_name}</p>
-                                  <p className="text-xs text-slate-500">{seller.orders || 0} orders</p>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="text-sm font-semibold text-emerald-600">{fmtCurrency(seller.total || seller.revenue || 0)}</p>
-                                <p className="text-xs text-slate-500">{seller.rating ? `★ ${seller.rating}` : ''}</p>
-                              </div>
+                            <div className="text-right">
+                              <p className="text-sm font-semibold text-emerald-600">{fmtCurrency(seller.total || seller.revenue || 0)}</p>
+                              <p className="text-xs text-slate-500">{seller.rating ? `★ ${seller.rating}` : ''}</p>
                             </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-slate-500 py-8">No sellers found</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
               {/* Charts Row */}
               <div className="grid gap-3 lg:grid-cols-3">
@@ -1632,53 +1949,67 @@ export default function AdminDashboardView({ user }: Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredUsers.map((u) => (
-                        <tr key={u.id} className="border-b">
-                          <td className="py-2 pr-4">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedItems.has(u.id)}
-                              onChange={() => toggleSelection(u.id)}
-                              className="rounded"
-                            />
-                          </td>
-                          <td className="py-2 pr-4">{u.full_name}</td>
-                          <td className="py-2 pr-4">{u.email}</td>
-                          <td className="py-2 pr-4">
-                            <select
-                              value={u.role}
-                              onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                              className="text-sm border rounded px-2 py-1"
-                            >
-                              <option value="user">User</option>
-                              <option value="seller">Seller</option>
-                              <option value="admin">Admin</option>
-                              <option value="banned">Banned</option>
-                            </select>
-                          </td>
-                          <td className="py-2 pr-4">
-                            <Badge variant={u.role === "banned" ? "destructive" : u.role === "admin" ? "default" : "secondary"}>
-                              {u.role}
-                            </Badge>
-                          </td>
-                          <td className="py-2 pr-4 text-slate-500">
-                            {u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}
-                          </td>
-                          <td className="py-2 pr-4">
-                            <div className="flex gap-1">
-                              {u.role === "banned" ? (
-                                <Button size="sm" variant="outline" onClick={() => handleUnbanUser(u.id)}>
-                                  <Unlock className="h-3 w-3" />
-                                </Button>
-                              ) : (
-                                <Button size="sm" variant="outline" onClick={() => handleBanUser(u.id)}>
-                                  <Ban className="h-3 w-3" />
-                                </Button>
-                              )}
-                            </div>
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={7} className="py-8">
+                            <SkeletonTable rows={8} />
                           </td>
                         </tr>
-                      ))}
+                      ) : filteredUsers.length > 0 ? (
+                        filteredUsers.map((u) => (
+                          <tr key={u.id} className="border-b">
+                            <td className="py-2 pr-4">
+                              <input 
+                                type="checkbox" 
+                                checked={selectedItems.has(u.id)}
+                                onChange={() => toggleSelection(u.id)}
+                                className="rounded"
+                              />
+                            </td>
+                            <td className="py-2 pr-4">{u.full_name}</td>
+                            <td className="py-2 pr-4">{u.email}</td>
+                            <td className="py-2 pr-4">
+                              <select
+                                value={u.role}
+                                onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                className="text-sm border rounded px-2 py-1"
+                              >
+                                <option value="user">User</option>
+                                <option value="seller">Seller</option>
+                                <option value="admin">Admin</option>
+                                <option value="banned">Banned</option>
+                              </select>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <Badge variant={u.role === "banned" ? "destructive" : u.role === "admin" ? "default" : "secondary"}>
+                                {u.role}
+                              </Badge>
+                            </td>
+                            <td className="py-2 pr-4 text-slate-500">
+                              {u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-1">
+                                {u.role === "banned" ? (
+                                  <Button size="sm" variant="outline" onClick={() => handleUnbanUser(u.id)}>
+                                    <Unlock className="h-3 w-3" />
+                                  </Button>
+                                ) : (
+                                  <Button size="sm" variant="outline" onClick={() => handleBanUser(u.id)}>
+                                    <Ban className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-slate-500">
+                            No users found
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1737,37 +2068,51 @@ export default function AdminDashboardView({ user }: Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredProducts.map((p) => (
-                        <tr key={p.id} className="border-b">
-                          <td className="py-2 pr-4">
-                            <img src={p.image_url || "/placeholder.svg"} alt={p.title} className="h-8 w-8 rounded object-cover" />
-                          </td>
-                          <td className="py-2 pr-4 max-w-[200px] truncate">{p.title}</td>
-                          <td className="py-2 pr-4">{p.seller?.full_name || "Unknown"}</td>
-                          <td className="py-2 pr-4">{p.category || "-"}</td>
-                          <td className="py-2 pr-4">GHS {p.price}</td>
-                          <td className="py-2 pr-4">
-                            <Badge variant={p.is_active ? "default" : "destructive"}>
-                              {p.is_active ? "Active" : "Hidden"}
-                            </Badge>
-                          </td>
-                          <td className="py-2 pr-4">
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                              {!p.is_active && (
-                                <Button size="sm" variant="outline" onClick={() => handleRestoreProduct(p.id)}>
-                                  <CheckCircle className="h-3 w-3" />
-                                </Button>
-                              )}
-                              <Button size="sm" variant="outline" onClick={() => handleRemoveProduct(p.id)}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={7} className="py-8">
+                            <SkeletonTable rows={8} />
                           </td>
                         </tr>
-                      ))}
+                      ) : filteredProducts.length > 0 ? (
+                        filteredProducts.map((p) => (
+                          <tr key={p.id} className="border-b">
+                            <td className="py-2 pr-4">
+                              <img src={p.image_url || "/placeholder.svg"} alt={p.title} className="h-8 w-8 rounded object-cover" />
+                            </td>
+                            <td className="py-2 pr-4 max-w-[200px] truncate">{p.title}</td>
+                            <td className="py-2 pr-4">{p.seller?.full_name || "Unknown"}</td>
+                            <td className="py-2 pr-4">{p.category || "-"}</td>
+                            <td className="py-2 pr-4">GHS {p.price}</td>
+                            <td className="py-2 pr-4">
+                              <Badge variant={p.is_active ? "default" : "destructive"}>
+                                {p.is_active ? "Active" : "Hidden"}
+                              </Badge>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-1">
+                                <Button size="sm" variant="outline" onClick={() => navigate(`/product/${p.id}`)}>
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                                {!p.is_active && (
+                                  <Button size="sm" variant="outline" onClick={() => handleRestoreProduct(p.id)}>
+                                    <CheckCircle className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="outline" onClick={() => handleRemoveProduct(p.id)}>
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-slate-500">
+                            No products found
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1822,8 +2167,8 @@ export default function AdminDashboardView({ user }: Props) {
                             {new Date(o.created_at).toLocaleDateString()}
                           </td>
                           <td className="py-2 pr-4">
-                            <Button size="sm" variant="outline" onClick={() => navigate(`/orders/${o.id}/track`)}>
-                              Open
+                            <Button size="sm" variant="outline" onClick={() => setSelectedOrderId(o.id)}>
+                              View
                             </Button>
                           </td>
                         </tr>
@@ -2263,6 +2608,194 @@ export default function AdminDashboardView({ user }: Props) {
                       <Button size="sm" variant="outline" className="mt-2">
                         <Download className="mr-1 h-3 w-3" /> Export
                       </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Feedback Tab */}
+          {tab === "feedback" && (
+            <div className="space-y-6">
+              {/* Stats Cards */}
+              {feedbackStats && (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Total Feedback</p>
+                      <p className="text-2xl font-bold text-slate-900">{feedbackStats.total_feedback || 0}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Average Rating</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-2xl font-bold text-slate-900">{feedbackStats.avg_rating || 0}</p>
+                        <Star className="h-5 w-5 fill-accent text-accent" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Would Recommend</p>
+                      <p className="text-2xl font-bold text-emerald-600">{feedbackStats.recommend_percentage || 0}%</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-slate-500">Satisfaction Rate</p>
+                      <p className="text-2xl font-bold text-teal-600">{feedbackStats.satisfied_percentage || 0}%</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* Rating Distribution */}
+              {feedbackStats && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Rating Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-around text-center">
+                      <div>
+                        <div className="text-3xl font-bold text-emerald-600">{feedbackStats.five_star_count || 0}</div>
+                        <p className="text-sm text-slate-500">5 stars</p>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-teal-500">{feedbackStats.four_star_count || 0}</div>
+                        <p className="text-sm text-slate-500">4 stars</p>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-amber-500">{feedbackStats.three_star_count || 0}</div>
+                        <p className="text-sm text-slate-500">3 stars</p>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-orange-500">{feedbackStats.two_star_count || 0}</div>
+                        <p className="text-sm text-slate-500">2 stars</p>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-red-500">{feedbackStats.one_star_count || 0}</div>
+                        <p className="text-sm text-slate-500">1 star</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Feedback List */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>User Feedback</CardTitle>
+                  <CardDescription>Recent feedback from users about their experience</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {feedbackList.length === 0 ? (
+                    <p className="text-center text-slate-500 py-8">No feedback yet</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {feedbackList.map((f) => (
+                        <div key={f.id} className="rounded-lg border p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10 text-primary font-semibold">
+                                {f.user?.full_name?.[0] || "U"}
+                              </div>
+                              <div>
+                                <p className="font-medium text-sm">{f.user?.full_name || "Anonymous"}</p>
+                                <p className="text-xs text-slate-500">{f.user?.email || "User feedback"}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Star
+                                  key={star}
+                                  className={`h-4 w-4 ${star <= f.rating ? "fill-accent text-accent" : "text-muted"}`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                          {f.feedback_text && (
+                            <p className="mt-3 text-sm text-slate-600 bg-slate-50 rounded p-3">{f.feedback_text}</p>
+                          )}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {f.would_recommend !== null && (
+                              <Badge variant={f.would_recommend ? "default" : "destructive"} className="text-xs">
+                                {f.would_recommend ? "Would Recommend" : "Would Not Recommend"}
+                              </Badge>
+                            )}
+                            {f.is_satisfied !== null && (
+                              <Badge variant={f.is_satisfied ? "outline" : "secondary"} className="text-xs">
+                                {f.is_satisfied ? "Satisfied" : "Not Satisfied"}
+                              </Badge>
+                            )}
+                            <span className="text-xs text-slate-400">{timeAgo(f.created_at)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          
+          {/* Payouts Tab */}
+          {tab === "payouts" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Payout Management</CardTitle>
+                <CardDescription>Manage seller payouts and financial transactions</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-lg border p-4 text-center text-slate-500 py-8">
+                  <Banknote className="mx-auto h-12 w-12 mb-3 opacity-50" />
+                  <p className="font-medium">Payout System</p>
+                  <p className="text-sm">Payout processing and management will be displayed here.</p>
+                  <p className="text-xs mt-2">Connected sellers can request payouts through their dashboard.</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Leaderboard Tab */}
+          {tab === "leaderboard" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Leaderboard</CardTitle>
+                <CardDescription>Top performers and referral leaders</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold mb-3">Top Sellers by Revenue</h3>
+                    <div className="space-y-2">
+                      {apiTopSellers.slice(0, 10).map((seller, idx) => (
+                        <div key={seller.id || idx} className="flex items-center justify-between p-3 rounded-lg border">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                              idx === 0 ? 'bg-amber-100 text-amber-700' :
+                              idx === 1 ? 'bg-slate-100 text-slate-700' :
+                              idx === 2 ? 'bg-orange-100 text-orange-700' :
+                              'bg-slate-50 text-slate-500'
+                            }`}>
+                              {idx + 1}
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm">{seller.name || seller.seller_name || seller.full_name}</p>
+                              <p className="text-xs text-slate-500">{seller.orders || 0} orders</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-emerald-600">{fmtCurrency(seller.total || seller.revenue || 0)}</p>
+                            {seller.rating && <p className="text-xs text-slate-500">★ {seller.rating}</p>}
+                          </div>
+                        </div>
+                      ))}
+                      {apiTopSellers.length === 0 && (
+                        <p className="text-center py-4 text-slate-500">No sellers found</p>
+                      )}
                     </div>
                   </div>
                 </div>

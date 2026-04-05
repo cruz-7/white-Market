@@ -277,7 +277,6 @@ export default function ReferralsPage() {
                   max={stats?.next_milestone || 10}
                   size={70}
                   strokeWidth={6}
-                  color="text-green-500"
                 />
               </div>
               <div className="text-xs text-gray-500">Qualified</div>

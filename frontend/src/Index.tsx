@@ -1,4 +1,5 @@
 ﻿import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { Button } from "./button";
 import { Badge } from "./badge";
 import { CheckCircle, Star, Shield, ArrowRight, Search, ShoppingBag, MessageSquare, Wallet, Users, Zap, Award, Camera, TrendingUp, Store, Flame } from "lucide-react";
@@ -7,6 +8,9 @@ import { Avatar, AvatarFallback } from "./avatar";
 import { Input } from "./input";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
+import { feedbackApi, productsApi, sellerApi } from "./api";
+import FeedbackPopup from "./FeedbackPopup";
+import ImageSearchModal from "./ImageSearchModal";
 
 const CATEGORIES = [
   { name: "Food", icon: "🍲", count: 64 },
@@ -26,23 +30,23 @@ const STEPS = [
   { icon: Wallet, title: "Pay & Handover", desc: "Pay via Mobile Money, then meet on campus for a quick handover." },
 ];
 
-const TESTIMONIALS = [
-  { name: "Ama K.", dept: "Business Admin, L300", text: "I sell homemade snacks on White Market and made GHS 1,200 last month! Way better than posting on WhatsApp status.", avatar: "AK" },
-  { name: "Kwame M.", dept: "Engineering, L200", text: "Found exactly the laptop charger I needed from a verified student. Fast, safe, and cheaper than the shops outside campus!", avatar: "KM" },
-  { name: "Abena F.", dept: "Nursing, L400", text: "The verified badge gives me confidence. I know I'm dealing with real UG students, not random people.", avatar: "AF" },
-];
-
-const TOP_SELLERS = [
+const TOP_SELLERS_FALLBACK = [
   { name: "Nana's Kitchen", skill: "Food & Snacks", rating: 4.9, sales: 127, avatar: "NK" },
   { name: "Ama Collections", skill: "Clothing & Fashion", rating: 4.8, sales: 89, avatar: "AC" },
   { name: "TechBro UG", skill: "Electronics & Gadgets", rating: 4.9, sales: 64, avatar: "TB" },
 ];
 
-const TRENDING = [
+const TRENDING_FALLBACK = [
   { title: "Homemade Jollof Rice (per plate)", price: 25, seller: "Nana's Kitchen", image: null },
   { title: "Custom Beaded Bracelets", price: 15, seller: "Ama Beads", image: null },
   { title: "Laptop Stand (Adjustable)", price: 85, seller: "TechBro UG", image: null },
   { title: "Shea Butter Body Cream", price: 30, seller: "Glow By Efua", image: null },
+];
+
+const FALLBACK_TESTIMONIALS = [
+  { name: "Ama K.", dept: "Business Admin, L300", text: "I sell homemade snacks on White Market and made GHS 1,200 last month! Way better than posting on WhatsApp status.", avatar: "AK", rating: 5 },
+  { name: "Kwame M.", dept: "Engineering, L200", text: "Found exactly the laptop charger I needed from a verified student. Fast, safe, and cheaper than the shops outside campus!", avatar: "KM", rating: 5 },
+  { name: "Abena F.", dept: "Nursing, L400", text: "The verified badge gives me confidence. I know I'm dealing with real UG students, not random people.", avatar: "AF", rating: 5 },
 ];
 
 const CAMPUS_TRENDING_TOPICS = [
@@ -55,6 +59,61 @@ const CAMPUS_TRENDING_TOPICS = [
 
 const Index = () => {
   const navigate = useNavigate();
+  const [testimonials, setTestimonials] = useState<any[]>([]);
+  const [loadingTestimonials, setLoadingTestimonials] = useState(true);
+  const [trendingProducts, setTrendingProducts] = useState<any[]>([]);
+  const [featuredSellers, setFeaturedSellers] = useState<any[]>([]);
+  const [showImageSearch, setShowImageSearch] = useState(false);
+
+  useEffect(() => {
+    const fetchTestimonials = async () => {
+      try {
+        const res = await feedbackApi.getTestimonials(3);
+        if (res.data?.testimonials) {
+          setTestimonials(res.data.testimonials);
+        } else {
+          setTestimonials(FALLBACK_TESTIMONIALS);
+        }
+      } catch (error) {
+        console.error("Failed to fetch testimonials:", error);
+        setTestimonials(FALLBACK_TESTIMONIALS);
+      } finally {
+        setLoadingTestimonials(false);
+      }
+    };
+
+    const fetchTrendingProducts = async () => {
+      try {
+        const res = await productsApi.getTrending(4);
+        if (res.data?.products) {
+          setTrendingProducts(res.data.products);
+        } else {
+          setTrendingProducts(TRENDING_FALLBACK);
+        }
+      } catch (error) {
+        console.error("Failed to fetch trending products:", error);
+        setTrendingProducts(TRENDING_FALLBACK);
+      }
+    };
+
+    const fetchFeaturedSellers = async () => {
+      try {
+        const res = await sellerApi.getTopSellers(3);
+        if (res.data?.sellers) {
+          setFeaturedSellers(res.data.sellers);
+        } else {
+          setFeaturedSellers(TOP_SELLERS_FALLBACK);
+        }
+      } catch (error) {
+        console.error("Failed to fetch featured sellers:", error);
+        setFeaturedSellers(TOP_SELLERS_FALLBACK);
+      }
+    };
+
+    fetchTestimonials();
+    fetchTrendingProducts();
+    fetchFeaturedSellers();
+  }, []);
   return (
     <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,_#eef7f1,_#f5f5f5_45%)]">
       <Navbar />
@@ -95,12 +154,30 @@ const Index = () => {
                 <Button
                   size="icon"
                   variant="outline"
-                  className="h-12 w-12 border-accent text-accent hover:bg-accent hover:text-accent-foreground"
-                  title="Search by image"
-                  onClick={() => navigate("/marketplace?imageSearch=true")}
+                  className="h-12 w-12 border-accent text-accent hover:bg-accent hover:text-accent-foreground relative group"
+                  title="Search by image - Upload a photo to find similar products"
+                  onClick={() => setShowImageSearch(true)}
                 >
                   <Camera className="h-5 w-5" />
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    Visual Search
+                  </div>
                 </Button>
+              </div>
+              <p className="text-center text-xs text-muted-foreground mt-2">
+                💡 Try our <button onClick={() => setShowImageSearch(true)} className="text-accent hover:underline">visual search</button> - upload an image to find similar products!
+              </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <span className="text-xs text-muted-foreground">Popular:</span>
+                {CAMPUS_TRENDING_TOPICS.map((topic) => (
+                  <button
+                    key={topic.label}
+                    onClick={() => window.location.href = `/marketplace?search=${encodeURIComponent(topic.search)}`}
+                    className="text-xs bg-accent/10 text-accent hover:bg-accent/20 px-2 py-1 rounded-full transition-colors"
+                  >
+                    {topic.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -186,20 +263,39 @@ const Index = () => {
           </div>
           <p className="text-center text-muted-foreground mb-8">Popular picks from student sellers this week</p>
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-            {TRENDING.map((p, i) => (
-              <Card key={i} className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
+            {trendingProducts.length > 0 ? trendingProducts.slice(0, 4).map((p: any, i: number) => (
+              <Card key={p.id || i} className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
                 <CardContent className="p-0">
-                  <div className="aspect-square bg-muted/80 rounded-t-lg flex items-center justify-center">
-                    <ShoppingBag className="h-10 w-10 text-muted-foreground/30" />
-                  </div>
+                  {p.image_url ? (
+                    <img src={p.image_url} alt={p.title} className="aspect-square w-full object-cover rounded-t-lg" />
+                  ) : (
+                    <div className="aspect-square bg-muted/80 rounded-t-lg flex items-center justify-center">
+                      <ShoppingBag className="h-10 w-10 text-muted-foreground/30" />
+                    </div>
+                  )}
                   <div className="p-3">
                     <h3 className="font-semibold text-sm line-clamp-1 group-hover:text-primary transition-colors">{p.title}</h3>
-                    <p className="text-xs text-muted-foreground">{p.seller}</p>
+                    <p className="text-xs text-muted-foreground">{p.users?.full_name || p.seller_name || "Student Seller"}</p>
                     <p className="font-display font-bold text-primary mt-1">GHS {p.price}</p>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )) : (
+              TRENDING_FALLBACK.map((p, i) => (
+                <Card key={i} className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
+                  <CardContent className="p-0">
+                    <div className="aspect-square bg-muted/80 rounded-t-lg flex items-center justify-center">
+                      <ShoppingBag className="h-10 w-10 text-muted-foreground/30" />
+                    </div>
+                    <div className="p-3">
+                      <h3 className="font-semibold text-sm line-clamp-1 group-hover:text-primary transition-colors">{p.title}</h3>
+                      <p className="text-xs text-muted-foreground">{p.seller}</p>
+                      <p className="font-display font-bold text-primary mt-1">GHS {p.price}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -233,12 +329,14 @@ const Index = () => {
           </div>
           <p className="text-center text-muted-foreground mb-10">Top-rated student businesses on campus</p>
           <div className="grid gap-6 md:grid-cols-3 max-w-3xl mx-auto">
-            {TOP_SELLERS.map((h, i) => (
-              <Card key={h.name} className="text-center shadow-sm transition-shadow hover:shadow-md">
+            {featuredSellers.length > 0 ? featuredSellers.map((h: any, i: number) => (
+              <Card key={h.id} className="text-center shadow-sm transition-shadow hover:shadow-md">
                 <CardContent className="p-6">
                   <div className="relative inline-block mb-3">
                     <Avatar className="h-16 w-16">
-                      <AvatarFallback className="bg-primary/10 text-primary font-bold text-lg">{h.avatar}</AvatarFallback>
+                      <AvatarFallback className="bg-primary/10 text-primary font-bold text-lg">
+                        {h.seller_display_name?.split(" ").map((n: string) => n[0]).join("") || h.full_name?.split(" ").map((n: string) => n[0]).join("") || "SS"}
+                      </AvatarFallback>
                     </Avatar>
                     {i === 0 && (
                       <Award className="absolute -top-1 -right-1 h-6 w-6 text-accent fill-accent/20" />
@@ -247,17 +345,43 @@ const Index = () => {
                   <Badge variant="outline" className="mb-2 border-primary/30 text-primary">
                     <CheckCircle className="mr-1 h-3 w-3" /> Verified Seller
                   </Badge>
-                  <h3 className="font-display font-semibold">{h.name}</h3>
-                  <p className="text-sm text-muted-foreground">{h.skill}</p>
+                  <h3 className="font-display font-semibold">{h.seller_display_name || h.full_name}</h3>
+                  <p className="text-sm text-muted-foreground">{h.products_count || 0} products</p>
                   <div className="mt-2 flex items-center justify-center gap-2 text-sm">
                     <span className="flex items-center gap-1 text-accent">
-                      <Star className="h-3.5 w-3.5 fill-accent" /> {h.rating}
+                      <Star className="h-3.5 w-3.5 fill-accent" /> {h.avg_rating?.toFixed(1) || "New"}
                     </span>
-                    <span className="text-muted-foreground">• {h.sales} sales</span>
+                    <span className="text-muted-foreground">• {h.orders_count || 0} sales</span>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )) : (
+              TOP_SELLERS_FALLBACK.map((h, i) => (
+                <Card key={h.name} className="text-center shadow-sm transition-shadow hover:shadow-md">
+                  <CardContent className="p-6">
+                    <div className="relative inline-block mb-3">
+                      <Avatar className="h-16 w-16">
+                        <AvatarFallback className="bg-primary/10 text-primary font-bold text-lg">{h.avatar}</AvatarFallback>
+                      </Avatar>
+                      {i === 0 && (
+                        <Award className="absolute -top-1 -right-1 h-6 w-6 text-accent fill-accent/20" />
+                      )}
+                    </div>
+                    <Badge variant="outline" className="mb-2 border-primary/30 text-primary">
+                      <CheckCircle className="mr-1 h-3 w-3" /> Verified Seller
+                    </Badge>
+                    <h3 className="font-display font-semibold">{h.name}</h3>
+                    <p className="text-sm text-muted-foreground">{h.skill}</p>
+                    <div className="mt-2 flex items-center justify-center gap-2 text-sm">
+                      <span className="flex items-center gap-1 text-accent">
+                        <Star className="h-3.5 w-3.5 fill-accent" /> {h.rating}
+                      </span>
+                      <span className="text-muted-foreground">• {h.sales} sales</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -266,29 +390,58 @@ const Index = () => {
       <section className="container py-16">
         <h2 className="font-display text-2xl font-bold text-center mb-2">What Students Say</h2>
         <p className="text-center text-muted-foreground mb-10">Real feedback from the Legon community</p>
-        <div className="grid gap-6 md:grid-cols-3">
-          {TESTIMONIALS.map((t) => (
-            <Card key={t.name} className="shadow-sm transition-shadow hover:shadow-md">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Avatar>
-                    <AvatarFallback className="bg-primary/10 text-primary font-semibold">{t.avatar}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-semibold text-sm">{t.name}</p>
-                    <p className="text-xs text-muted-foreground">{t.dept}</p>
+        {loadingTestimonials ? (
+          <div className="grid gap-6 md:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="h-10 w-10 rounded-full bg-muted" />
+                    <div>
+                      <div className="h-4 w-24 bg-muted rounded mb-2" />
+                      <div className="h-3 w-16 bg-muted rounded" />
+                    </div>
                   </div>
-                </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">"{t.text}"</p>
-                <div className="flex gap-0.5 mt-3">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="h-4 w-4 fill-accent text-accent" />
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                  <div className="h-16 bg-muted rounded mb-3" />
+                  <div className="flex gap-0.5">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-4 w-4 bg-muted rounded" />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-3">
+            {testimonials.map((t) => (
+              <Card key={t.id || t.name} className="shadow-sm transition-shadow hover:shadow-md">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Avatar>
+                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                        {t.full_name?.split(" ").map((n: string) => n[0]).join("") || t.avatar || t.name?.[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-semibold text-sm">{t.full_name || t.name}</p>
+                      <p className="text-xs text-muted-foreground">{t.department || t.dept || "UG Student"}</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">"{t.feedback_text || t.text}"</p>
+                  <div className="flex gap-0.5 mt-3">
+                    {[...Array(5)].map((_, i) => (
+                      <Star
+                        key={i}
+                        className={`h-4 w-4 ${i < (t.rating || 5) ? "fill-accent text-accent" : "text-muted"}`}
+                      />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* CTA */}
@@ -311,7 +464,14 @@ const Index = () => {
         </Card>
       </section>
 
+      <FeedbackPopup />
       <Footer />
+
+      {/* Image Search Modal */}
+      <ImageSearchModal
+        isOpen={showImageSearch}
+        onClose={() => setShowImageSearch(false)}
+      />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { clearCache } from "../services/cacheService.js";
 
 const sellersRouter = Router();
 
@@ -17,6 +18,80 @@ sellersRouter.get("/", async (_req, res) => {
   }
 
   return res.json({ sellers: data || [] });
+});
+
+// GET /sellers/top - Get top sellers by sales/ratings
+sellersRouter.get("/top", async (req, res) => {
+  const { limit = 6 } = req.query;
+  
+  try {
+    // Get sellers with their product counts and order counts
+    const { data: sellers, error } = await supabase
+      .from("users")
+      .select(`
+        id, 
+        full_name, 
+        seller_display_name, 
+        seller_profile_image_url,
+        avatar_url,
+        created_at,
+        role
+      `)
+      .eq("role", "seller")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Calculate stats for each seller
+    const sellersWithStats = await Promise.all((sellers || []).map(async (seller) => {
+      // Get product count
+      const { count: productsCount } = await supabase
+        .from("products")
+        .select("*", { count: "exact", head: true })
+        .eq("seller_id", seller.id)
+        .eq("is_active", true);
+
+      // Get completed orders count
+      const { count: ordersCount } = await supabase
+        .from("orders")
+        .select("*", { count: "exact", head: true })
+        .eq("seller_id", seller.id)
+        .in("status", ["completed", "delivered", "handed_over"]);
+
+      // Get average rating
+      const { data: reviews } = await supabase
+        .from("reviews")
+        .select("rating")
+        .eq("reviewee_id", seller.id)
+        .eq("is_seller_review", true);
+
+      const avgRating = reviews?.length 
+        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
+        : 0;
+
+      return {
+        ...seller,
+        products_count: productsCount || 0,
+        orders_count: ordersCount || 0,
+        avg_rating: avgRating,
+        total_reviews: reviews?.length || 0
+      };
+    }));
+
+    // Sort by orders count (most sales first), then by rating
+    sellersWithStats.sort((a, b) => {
+      if (b.orders_count !== a.orders_count) return b.orders_count - a.orders_count;
+      return b.avg_rating - a.avg_rating;
+    });
+
+    return res.json({
+      sellers: sellersWithStats.slice(0, parseInt(limit)),
+      count: sellersWithStats.length
+    });
+  } catch (err) {
+    console.error("Top sellers error:", err);
+    return res.status(500).json({ error: "Failed to load top sellers" });
+  }
 });
 
 // GET /sellers/me - Get current seller's profile and stats

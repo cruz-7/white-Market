@@ -187,6 +187,12 @@ export interface Product {
   stock_quantity?: number;
   view_count?: number;
   created_at?: string;
+  average_rating?: number;
+  rating_count?: number;
+  seller_rating_stats?: {
+    avg_overall_rating: number;
+    total_ratings: number;
+  };
   users?: {
     full_name: string;
     email: string;
@@ -237,7 +243,7 @@ export const productsApi = {
 
   // Get trending products
   getTrending: (limit = 10) =>
-    fetchApi<{ products: Product[]; count: number }>(`/products/trending?limit=${limit}`),
+    fetchApi<Product[]>(`/products?trending=true&limit=${limit}`),
 
   // Track product view
   trackView: (productId: string) =>
@@ -486,6 +492,9 @@ withdraw: (amount: number, momo_number?: string) =>
 };
 
 export const sellerApi = {
+  getTopSellers: (limit = 3) =>
+    fetchApi<{ sellers: any[]; count: number }>(`/sellers/top?limit=${limit}`),
+
   getProfile: () =>
     fetchApi<{
       id: string;
@@ -498,7 +507,7 @@ export const sellerApi = {
     }>("/protected/seller"),
 
   updateProfile: (data: { seller_display_name?: string; seller_profile_image_url?: string }) =>
-    fetchApi<{ message: string; user?: any; last_name_change?: string }>("/protected/seller", {
+    fetchApi<{ message: string; user?: any; last_name_change?: string; days_remaining?: number }>("/protected/seller", {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
@@ -835,6 +844,9 @@ export const sellersApi = {
 
   getAll: () =>
     fetchApi<{ sellers: any[] }>("/sellers"),
+
+  getTop: (limit = 6) =>
+    fetchApi<{ sellers: any[]; count: number }>(`/sellers/top?limit=${limit}`),
 };
 
 // ==================== CATEGORIES API ====================
@@ -927,6 +939,24 @@ export const favoritesApi = {
     fetchApi<{ is_favorited: boolean }>(`/favorites/check/${productId}`),
 };
 
+export const likesApi = {
+  getLikeCount: (productId: string) =>
+    fetchApi<{ like_count: number }>(`/favorites/likes/product/${productId}`),
+  
+  like: (productId: string) =>
+    fetchApi<{ like: any; like_count: number }>(`/favorites/likes/product/${productId}`, {
+      method: "POST",
+    }),
+  
+  unlike: (productId: string) =>
+    fetchApi<{ message: string; like_count: number }>(`/favorites/likes/product/${productId}`, {
+      method: "DELETE",
+    }),
+  
+  checkLike: (productId: string) =>
+    fetchApi<{ is_liked: boolean }>(`/favorites/likes/check/${productId}`),
+};
+
 // ==================== SEARCH API ====================
 
 export const searchApi = {
@@ -948,6 +978,48 @@ export const searchApi = {
     fetchApi<{ suggestions: { id: string; title: string; image_url: string }[]; popular: string[] }>(
       `/search/suggestions?q=${encodeURIComponent(query)}&limit=${limit}`
     ),
+
+  searchByImage: async (imageFile: File) => {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+
+    const url = resolveApiUrl('/search/image');
+
+    // Get token for authentication
+    let token: string | null = null;
+    const userJson = localStorage.getItem("wm_user");
+    if (userJson) {
+      try {
+        token = JSON.parse(userJson).access_token || null;
+      } catch {
+        token = null;
+      }
+    }
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return { error: data.error || `HTTP ${response.status}: Request failed` };
+      }
+
+      return { data };
+    } catch (error) {
+      console.error('Image search API error:', error);
+      return { error: error instanceof Error ? error.message : "Network error" };
+    }
+  },
 };
 
 // ==================== REFERRALS API ====================
@@ -1923,5 +1995,48 @@ export const ratingsApi = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+};
+
+// Website Feedback API
+export const feedbackApi = {
+  // Submit website feedback
+  submitFeedback: async (data: {
+    rating: number;
+    feedback_type?: string;
+    feedback_text?: string;
+    would_recommend?: boolean;
+    improved_features?: string[];
+    is_satisfied?: boolean;
+    page_url?: string;
+    session_duration_seconds?: number;
+  }): Promise<ApiResponse<any>> => {
+    return fetchApi('/feedback', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Get top testimonials for home page
+  getTestimonials: async (limit = 3): Promise<ApiResponse<any>> => {
+    return fetchApi(`/feedback/testimonials?limit=${limit}`);
+  },
+
+  // Get feedback stats
+  getStats: async (): Promise<ApiResponse<any>> => {
+    return fetchApi('/feedback/stats');
+  },
+
+  // Get all feedback (admin only)
+  getAll: async (page = 1, limit = 20): Promise<ApiResponse<any>> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    return fetchApi(`/feedback?${params.toString()}`);
+  },
+
+  // Get single feedback (admin only)
+  getById: async (feedbackId: string): Promise<ApiResponse<any>> => {
+    return fetchApi(`/feedback/${feedbackId}`);
   },
 };

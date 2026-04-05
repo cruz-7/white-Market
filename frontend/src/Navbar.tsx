@@ -1,10 +1,11 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./button";
-import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck, Heart, Bell, Gift, Package, Settings, Moon, Sun } from "lucide-react";
+import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck, Heart, Bell, Gift, Package, Settings, Moon, Sun, ShoppingCart } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { supabase } from "./supabase-client";
 import { useSettings } from "./SettingsContext";
+import { useCart } from "./CartContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDarkMode, setTheme, translations } = useSettings();
+  const { itemCount } = useCart();
 
   const isActive = (path: string) => {
     return location.pathname === path || location.pathname.startsWith(path + "/");
@@ -131,6 +133,9 @@ const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/referrals")}>
                     <Gift className="h-4 w-4 mr-2" /> Referrals
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/cart")}>
+                    <ShoppingCart className="h-4 w-4 mr-2" /> Cart
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/settings")}>
                     <Settings className="h-4 w-4 mr-2" /> Settings
                   </DropdownMenuItem>
@@ -149,9 +154,9 @@ const Navbar = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
             </>
-          ) : (
+) : (
             <>
-            <Link to="/auth" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Login</Link>
+              <Link to="/auth" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors dark:text-slate-300 dark:hover:text-white">Login</Link>
               <Button asChild size="sm">
                 <Link to="/auth?tab=signup">Get Started</Link>
               </Button>
@@ -196,6 +201,7 @@ const Navbar = () => {
                 <Link to="/favorites" className={linkClass("/favorites")} onClick={() => setOpen(false)}>Favorites</Link>
                 <Link to="/notifications" className={linkClass("/notifications")} onClick={() => setOpen(false)}>Notifications</Link>
                 <Link to="/referrals" className={linkClass("/referrals")} onClick={() => setOpen(false)}>Referrals</Link>
+                <Link to="/cart" className={linkClass("/cart")} onClick={() => setOpen(false)}>Cart</Link>
                 <Link to="/settings" className={linkClass("/settings")} onClick={() => setOpen(false)}>Settings</Link>
                 {isAdmin && (
                   <Link to="/admin" className={linkClass("/admin") + " flex items-center gap-1"} onClick={() => setOpen(false)}>
