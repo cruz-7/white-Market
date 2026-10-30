@@ -33,13 +33,15 @@ import { Card, CardContent } from "./card";
 import { Badge } from "./badge";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { productsApi, sellerApi, ratingsApi, type Product } from "./api";
-import { supabase } from "./supabase-client";
+import { PRODUCTS_REFRESH_EVENT } from "./data";
+import { useConvexAuth } from "@convex-dev/auth/react";
 import { SellerRatingStats } from "./SellerRatingStats";
 
 function SellerProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [seller, setSeller] = useState<{ 
     full_name?: string; 
@@ -53,7 +55,6 @@ function SellerProfile() {
   } | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [activeTab, setActiveTab] = useState<"products" | "about" | "reviews">("products");
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [sellerProfile, setSellerProfile] = useState<{
@@ -84,10 +85,20 @@ function SellerProfile() {
       setLoading(true);
       
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        const uid = user?.id;
-        setCurrentUserId(uid || null);
-        setIsOwnProfile(uid === id);
+        try {
+          const raw = localStorage.getItem("wm_user");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const uid = parsed.id;
+            setCurrentUserId(uid || null);
+            setIsOwnProfile(uid === id);
+          }
+        } catch {
+          setCurrentUserId(null);
+          setIsOwnProfile(false);
+        }
+
+        const uid = currentUserId;
 
         const productsRes = await productsApi.getBySeller(id);
         if (productsRes.data) {
@@ -112,15 +123,16 @@ function SellerProfile() {
 
         if (uid === id) {
           const profileRes = await sellerApi.getProfile();
-          if (profileRes.data) {
-            setSellerProfile(profileRes.data);
-            setDisplayName(profileRes.data.seller_display_name || "");
-            setImagePreview(profileRes.data.seller_profile_image_url || null);
+          const profileData = profileRes.data;
+          if (profileData) {
+            setSellerProfile(profileData);
+            setDisplayName(profileData.seller_display_name || "");
+            setImagePreview(profileData.seller_profile_image_url || null);
             // Also update seller state with profile data so name displays correctly
             setSeller(prev => prev ? {
               ...prev,
-              seller_display_name: profileRes.data.seller_display_name,
-              seller_profile_image_url: profileRes.data.seller_profile_image_url
+              seller_display_name: profileData.seller_display_name,
+              seller_profile_image_url: profileData.seller_profile_image_url
             } : null);
           }
         }
@@ -132,7 +144,7 @@ function SellerProfile() {
     };
 
     fetchSellerData();
-  }, [id, navigate]);
+  }, [id, navigate, currentUserId]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,7 +192,7 @@ function SellerProfile() {
           ...prev,
           seller_profile_image_url: uploadRes.data?.image_url
         } : null);
-        window.dispatchEvent(new Event("wm-data-change"));
+        globalThis.dispatchEvent(new Event(PRODUCTS_REFRESH_EVENT));
       }
     } catch (error) {
       console.error("Error uploading avatar:", error);
@@ -228,7 +240,7 @@ function SellerProfile() {
       if (updatedProfile.data) {
         setSellerProfile(updatedProfile.data);
       }
-      window.dispatchEvent(new Event("wm-data-change"));
+      globalThis.dispatchEvent(new Event(PRODUCTS_REFRESH_EVENT));
     } catch (error) {
       console.error("Error saving profile:", error);
       toast.error("Failed to update profile");
@@ -363,7 +375,7 @@ function SellerProfile() {
                 <div className="space-y-4">
                   {/* Profile Image */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Profile Image</label>
+                    <label htmlFor="profile-image" className="block text-sm font-medium text-slate-700 mb-2">Profile Image</label>
                     <div className="flex items-center gap-4">
                       <div className="relative">
                         <Avatar className="h-20 w-20">
@@ -379,6 +391,7 @@ function SellerProfile() {
                           <Camera className="h-3 w-3" />
                         </button>
                         <input
+                          id="profile-image"
                           ref={fileInputRef}
                           type="file"
                           accept="image/*"
@@ -392,8 +405,9 @@ function SellerProfile() {
 
                   {/* Display Name */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Display Name</label>
+                    <label htmlFor="display-name" className="block text-sm font-medium text-slate-700 mb-2">Display Name</label>
                     <input
+                      id="display-name"
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
@@ -574,7 +588,7 @@ function SellerProfile() {
                 variant="outline"
                 className="border-white/30 text-primary hover:bg-white/10"
                 onClick={() => {
-                  navigator.clipboard.writeText(window.location.href);
+                  navigator.clipboard.writeText(globalThis.location.href);
                   toast.success("Link copied to clipboard!");
                 }}
               >

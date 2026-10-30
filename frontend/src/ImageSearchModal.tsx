@@ -5,7 +5,17 @@ import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle } from "./card";
 import { Badge } from "./badge";
 import { toast } from "sonner";
-import { searchApi } from "./api";
+import { productsApi } from "./api";
+import { compareImageSignatures, createImageSignature } from "./image-similarity";
+
+interface ImageSearchResult {
+  id: string;
+  title: string;
+  image_url: string;
+  price: number;
+  similarity: number;
+  category: string | undefined;
+}
 
 interface ImageSearchModalProps {
   isOpen: boolean;
@@ -17,7 +27,7 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<ImageSearchResult[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageSelect = useCallback((file: File) => {
@@ -59,31 +69,49 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
     setSearchResults([]);
 
     try {
-      const response = await searchApi.searchByImage(selectedImage);
+      const signature = await createImageSignature(selectedImage);
+      const response = await productsApi.getAll({ page: 1, limit: 50, is_active: true });
+      if (response.error) throw new Error(response.error);
 
-      if (response.error) {
-        toast.error(response.error || "Failed to search by image");
-        return;
+      const candidates = (response.data ?? []).filter((product) => product.image_url);
+      const scored: ImageSearchResult[] = [];
+      let unsupportedImages = 0;
+      for (let start = 0; start < candidates.length; start += 4) {
+        const batch = candidates.slice(start, start + 4);
+        const results = await Promise.all(batch.map(async (product) => {
+          try {
+            const imageResponse = await fetch(product.image_url!, { mode: "cors" });
+            if (!imageResponse.ok) throw new Error(`Image request failed (${imageResponse.status})`);
+            const itemSignature = await createImageSignature(await imageResponse.blob());
+            return {
+              id: product.id,
+              title: product.title,
+              image_url: product.image_url!,
+              price: product.price,
+              category: product.category,
+              similarity: compareImageSignatures(signature, itemSignature),
+            };
+          } catch (error) {
+            unsupportedImages += 1;
+            console.warn(`Skipped image-search candidate ${product.id}:`, error);
+            return null;
+          }
+        }));
+        scored.push(...results.filter((result): result is ImageSearchResult => result !== null));
       }
 
-      if (response.data?.results) {
-        // Transform API results to match component expectations
-        const transformedResults = response.data.results.map(result => ({
-          id: result.id,
-          title: result.title,
-          image_url: result.image_url || '/placeholder.svg',
-          price: result.price,
-          similarity: result.similarity,
-          category: result.category
-        }));
-        setSearchResults(transformedResults);
-        toast.success(`Found ${response.data.results.length} similar items!`);
+      const matches = scored.sort((a, b) => b.similarity - a.similarity).slice(0, 12);
+      setSearchResults(matches);
+      if (matches.length) {
+        toast.success(`Compared ${scored.length} listing images on your device.`);
+      } else if (unsupportedImages) {
+        toast.error("Could not access listing images for local comparison. Check image hosting CORS settings.");
       } else {
-        toast.info("No similar products found. Try a different image.");
+        toast.info("No listings with images are available to compare.");
       }
     } catch (error) {
       console.error('Image search failed:', error);
-      toast.error("Failed to search by image. Please try again.");
+      toast.error(error instanceof Error ? error.message : "Failed to search by image. Please try again.");
     } finally {
       setIsSearching(false);
     }
@@ -116,8 +144,8 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
                 <Camera className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-xl">Search by Image</CardTitle>
-                <p className="text-sm text-muted-foreground">Upload a photo to find similar products</p>
+                <CardTitle className="text-xl">Search with an Image</CardTitle>
+                <p className="text-sm text-muted-foreground">Upload an image and describe the item to find matching listings</p>
               </div>
             </div>
             <Button variant="ghost" size="icon" onClick={onClose}>
@@ -186,10 +214,10 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
                     <div className="p-4 bg-primary/5 rounded-lg">
                       <div className="flex items-center gap-2 mb-2">
                         <Sparkles className="h-4 w-4 text-primary" />
-                        <span className="font-medium">AI-Powered Search</span>
+                        <span className="font-medium">Private, on-device visual matching</span>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Our system will analyze your image and find visually similar products from our marketplace.
+                        Your image stays on this device. We compare visual color and shape patterns; no image is sent to an AI service.
                       </p>
                     </div>
 
@@ -202,12 +230,12 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
                       {isSearching ? (
                         <>
                           <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                          Analyzing Image...
+                          Comparing listing images...
                         </>
                       ) : (
                         <>
                           <Search className="h-5 w-5 mr-2" />
-                          Search Similar Items
+                          Find Similar Images
                         </>
                       )}
                     </Button>
@@ -221,7 +249,7 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <ImageIcon className="h-5 w-5 text-primary" />
-                  <h3 className="text-lg font-semibold">Similar Products Found</h3>
+                  <h3 className="text-lg font-semibold">Matching Products</h3>
                   <Badge variant="secondary">{searchResults.length} results</Badge>
                 </div>
 
@@ -252,7 +280,7 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-semibold text-sm">GHS {result.price}</span>
                           <Badge variant="outline" className="text-xs whitespace-nowrap">
-                            {Math.round(result.similarity * 100)}% match
+                            {Math.round(result.similarity * 100)}% visual match
                           </Badge>
                         </div>
                       </CardContent>
@@ -272,9 +300,9 @@ export default function ImageSearchModal({ isOpen, onClose }: ImageSearchModalPr
             {isSearching && searchResults.length === 0 && (
               <div className="text-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-                <h3 className="text-lg font-semibold mb-2">Analyzing Your Image</h3>
+                <h3 className="text-lg font-semibold mb-2">Comparing Listing Images</h3>
                 <p className="text-muted-foreground">
-                  Extracting visual features and searching our marketplace...
+                  Comparing image color and shape patterns locally in batches...
                 </p>
                 <div className="mt-4 flex justify-center gap-2">
                   <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>

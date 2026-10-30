@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -9,31 +9,18 @@ import {
   Users,
   Star,
   Bell,
-  Search,
   Plus,
-  Edit,
   Trash2,
-  Eye,
-  EyeOff,
   BarChart3,
-  PieChart,
-  Calendar,
   Download,
-  Filter,
-  MoreVertical,
   CheckCircle,
   XCircle,
   Clock,
   AlertCircle,
   Gift,
-  Percent,
   BookOpen,
-  ChevronDown,
-  ChevronUp,
-  RefreshCw,
   MessageSquare,
   Settings,
-  HelpCircle,
 } from "lucide-react";
 
 import { Button } from "./button";
@@ -41,7 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./car
 import { Badge } from "./badge";
 import { Input } from "./input";
 import { Textarea } from "./textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import { Avatar, AvatarFallback } from "./avatar";
 import {
   Dialog,
   DialogContent,
@@ -51,13 +38,6 @@ import {
   DialogTitle,
 } from "./dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./dropdown-menu";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -65,7 +45,7 @@ import {
   SelectValue,
 } from "./select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
-import { productsApi, ordersApi, userApi, reviewsApi, type Product, type Order } from "./api";
+import { productsApi, ordersApi, reviewsApi, type Product, type Order } from "./api";
 import { useCurrentUser } from "./App";
 import { EnhancedProductManagement } from "./EnhancedProductManagement";
 
@@ -134,13 +114,12 @@ interface Coupon {
   active: boolean;
 }
 
-export default function SellerDashboard({ initialTab = "overview" }: { initialTab?: string }) {
+interface SellerDashboardProps {
+  readonly initialTab?: string;
+}
+
+export default function SellerDashboard({ initialTab = "overview" }: SellerDashboardProps) {
   const user = useCurrentUser();
-  
-  // Redirect if not a seller or admin
-  if (!user || (user.role !== "seller" && user.role !== "admin")) {
-    return <Navigate to="/" replace />;
-  }
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -164,16 +143,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showCouponDialog, setShowCouponDialog] = useState(false);
-  const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
-  const [expandedSections, setExpandedSections] = useState({
-    analytics: true,
-    products: true,
-    orders: true,
-  });
 
   // Coupon form state
   const [couponForm, setCouponForm] = useState({
@@ -251,7 +223,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
             lastOrderDate: order.created_at,
           });
         }
-        const customer = customerMap.get(order.buyer_id!);
+        const customer = customerMap.get(order.buyer_id);
         if (customer) {
           customer.totalOrders++;
           customer.totalSpent += order.amount || 0;
@@ -279,11 +251,15 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchDashboardData();
   }, [fetchDashboardData]);
+
+  if (!user || (user.role !== "seller" && user.role !== "admin")) {
+    return <Navigate to="/" replace />;
+  }
 
   const handleToggleStock = async (productId: string, inStock: boolean) => {
     try {
@@ -406,13 +382,68 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
     setShowOnboarding(false);
   };
 
-  const filteredProducts = products.filter(
-    (p) =>
-      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.category?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const getOrderStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "default";
+      case "pending":
+        return "secondary";
+      default:
+        return "destructive";
+    }
+  };
 
-  const unreadNotifications = notifications.filter((n) => !n.read).length;
+  const getTransactionStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "default";
+      case "pending":
+        return "secondary";
+      default:
+        return "destructive";
+    }
+  };
+
+  const getTransactionTypeBgClass = (type: string) => {
+    switch (type) {
+      case "sale":
+        return "bg-green-100";
+      case "payout":
+        return "bg-blue-100";
+      case "refund":
+        return "bg-red-100";
+      default:
+        return "bg-gray-100";
+    }
+  };
+
+  const getTransactionTypeTextClass = (type: string) => {
+    switch (type) {
+      case "sale":
+        return "text-green-600";
+      case "payout":
+        return "text-blue-600";
+      case "refund":
+        return "text-red-600";
+      default:
+        return "text-gray-600";
+    }
+  };
+
+  const getNotificationTypeBgClass = (type: string) => {
+    switch (type) {
+      case "order":
+        return "bg-green-100";
+      case "review":
+        return "bg-yellow-100";
+      case "stock":
+        return "bg-red-100";
+      case "payment":
+        return "bg-blue-100";
+      default:
+        return "bg-gray-100";
+    }
+  };
 
   if (loading) {
     return (
@@ -421,6 +452,8 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
       </div>
     );
   }
+
+  const unreadNotifications = notifications.filter((notification) => !notification.read).length;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -644,13 +677,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                         <div className="text-right">
                           <p className="font-medium">GHS {order.amount?.toFixed(2)}</p>
                           <Badge
-                            variant={
-                              order.status === "completed"
-                                ? "default"
-                                : order.status === "pending"
-                                ? "secondary"
-                                : "destructive"
-                            }
+                            variant={getOrderStatusBadgeVariant(order.status)}
                           >
                             {order.status}
                           </Badge>
@@ -670,7 +697,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
               onToggleStock={handleToggleStock}
               onDeleteProduct={handleDeleteProduct}
               onBulkAction={handleBulkAction}
-              onRefresh={() => window.location.reload()}
+              onRefresh={() => globalThis.location.reload()}
             />
           </TabsContent>
 
@@ -699,15 +726,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                             </p>
                           </div>
                           <Badge
-                            variant={
-                              order.status === "completed"
-                                ? "default"
-                                : order.status === "pending"
-                                ? "secondary"
-                                : order.status === "cancelled"
-                                ? "destructive"
-                                : "outline"
-                            }
+                            variant={getOrderStatusBadgeVariant(order.status)}
                           >
                             {order.status}
                           </Badge>
@@ -724,7 +743,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                           <div className="text-right">
                             <p className="font-bold text-lg">GHS {order.amount?.toFixed(2)}</p>
                             <Button variant="outline" size="sm" asChild>
-                              <Link to={`/orders/${order.id}`}>View Details</Link>
+                              <Link to={`/orders?orderId=${encodeURIComponent(order.id)}`}>View Details</Link>
                             </Button>
                           </div>
                         </div>
@@ -815,9 +834,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                             <p className="text-sm text-gray-500">{review.productName}</p>
                           </div>
                           <div className="flex items-center gap-1">
-                            {[...Array(5)].map((_, i) => (
+                            {Array.from({ length: 5 }, (_, i) => (
                               <Star
-                                key={i}
+                                key={`star-${review.id}-${i}`}
                                 className={`h-4 w-4 ${
                                   i < review.rating
                                     ? "text-yellow-400 fill-yellow-400"
@@ -894,26 +913,10 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                       >
                         <div className="flex items-center gap-4">
                           <div
-                            className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                              transaction.type === "sale"
-                                ? "bg-green-100"
-                                : transaction.type === "payout"
-                                ? "bg-blue-100"
-                                : transaction.type === "refund"
-                                ? "bg-red-100"
-                                : "bg-gray-100"
-                            }`}
+                            className={`h-10 w-10 rounded-full flex items-center justify-center ${getTransactionTypeBgClass(transaction.type)}`}
                           >
                             <DollarSign
-                              className={`h-5 w-5 ${
-                                transaction.type === "sale"
-                                  ? "text-green-600"
-                                  : transaction.type === "payout"
-                                  ? "text-blue-600"
-                                  : transaction.type === "refund"
-                                  ? "text-red-600"
-                                  : "text-gray-600"
-                              }`}
+                              className={`h-5 w-5 ${getTransactionTypeTextClass(transaction.type)}`}
                             />
                           </div>
                           <div>
@@ -933,13 +936,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                             GHS {transaction.amount.toFixed(2)}
                           </p>
                           <Badge
-                            variant={
-                              transaction.status === "completed"
-                                ? "default"
-                                : transaction.status === "pending"
-                                ? "secondary"
-                                : "destructive"
-                            }
+                            variant={getTransactionStatusBadgeVariant(transaction.status)}
                           >
                             {transaction.status}
                           </Badge>
@@ -996,8 +993,8 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                             {coupon.discountType === "percentage"
                               ? `${coupon.discountValue}% off`
                               : `GHS ${coupon.discountValue} off`}
-                            {coupon.minPurchase > 0 && ` • Min. GHS ${coupon.minPurchase}`}
-                            • {coupon.currentUses}/{coupon.maxUses} uses
+                            {coupon.minPurchase > 0 && ` â€¢ Min. GHS ${coupon.minPurchase}`}
+                            â€¢ {coupon.currentUses}/{coupon.maxUses} uses
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
                             Expires: {new Date(coupon.expiresAt).toLocaleDateString()}
@@ -1063,26 +1060,17 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                 ) : (
                   <div className="space-y-4">
                     {notifications.map((notification) => (
-                      <div
+                      <button
                         key={notification.id}
-                        className={`p-4 border rounded-lg ${
+                        className={`w-full text-left p-4 border rounded-lg ${
                           !notification.read ? "bg-blue-50 border-blue-200" : ""
                         }`}
                         onClick={() => handleMarkNotificationRead(notification.id)}
+                        type="button"
                       >
                         <div className="flex items-start gap-4">
                           <div
-                            className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                              notification.type === "order"
-                                ? "bg-green-100"
-                                : notification.type === "review"
-                                ? "bg-yellow-100"
-                                : notification.type === "stock"
-                                ? "bg-red-100"
-                                : notification.type === "payment"
-                                ? "bg-blue-100"
-                                : "bg-gray-100"
-                            }`}
+                            className={`h-10 w-10 rounded-full flex items-center justify-center ${getNotificationTypeBgClass(notification.type)}`}
                           >
                             {notification.type === "order" && (
                               <ShoppingCart className="h-5 w-5 text-green-600" />
@@ -1113,7 +1101,7 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                             </p>
                           </div>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -1134,8 +1122,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium">Coupon Code</label>
+              <label htmlFor="coupon-code" className="text-sm font-medium">Coupon Code</label>
               <Input
+                id="coupon-code"
                 placeholder="e.g., SUMMER20"
                 value={couponForm.code}
                 onChange={(e) =>
@@ -1145,14 +1134,14 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Discount Type</label>
+                <label htmlFor="discount-type" className="text-sm font-medium">Discount Type</label>
                 <Select
                   value={couponForm.discountType}
                   onValueChange={(value: "percentage" | "fixed") =>
                     setCouponForm((prev) => ({ ...prev, discountType: value }))
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="discount-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1162,8 +1151,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium">Discount Value</label>
+                <label htmlFor="discount-value" className="text-sm font-medium">Discount Value</label>
                 <Input
+                  id="discount-value"
                   type="number"
                   min={0}
                   value={couponForm.discountValue}
@@ -1178,8 +1168,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Min. Purchase (GHS)</label>
+                <label htmlFor="min-purchase" className="text-sm font-medium">Min. Purchase (GHS)</label>
                 <Input
+                  id="min-purchase"
                   type="number"
                   min={0}
                   value={couponForm.minPurchase}
@@ -1192,8 +1183,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Max Uses</label>
+                <label htmlFor="max-uses" className="text-sm font-medium">Max Uses</label>
                 <Input
+                  id="max-uses"
                   type="number"
                   min={1}
                   value={couponForm.maxUses}
@@ -1207,8 +1199,9 @@ export default function SellerDashboard({ initialTab = "overview" }: { initialTa
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium">Expiry Date</label>
+              <label htmlFor="expiry-date" className="text-sm font-medium">Expiry Date</label>
               <Input
+                id="expiry-date"
                 type="date"
                 value={couponForm.expiresAt}
                 onChange={(e) =>

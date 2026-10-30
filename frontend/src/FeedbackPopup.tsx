@@ -6,7 +6,7 @@ import { Textarea } from "./textarea";
 import { feedbackApi } from "./api";
 import { toast } from "sonner";
 
-const FEEDBACK_DELAY_MS = 10000; // Show after 10 seconds for testing, change to 120000 for production 
+const FEEDBACK_DELAY_MS = 120000;
 const STORAGE_KEY = "wm_feedback_submitted";
 
 interface FeedbackPopupProps {
@@ -38,6 +38,20 @@ export default function FeedbackPopup({ onClose }: FeedbackPopupProps) {
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        onClose?.();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleClose = () => {
     setIsOpen(false);
     onClose?.();
@@ -53,7 +67,7 @@ export default function FeedbackPopup({ onClose }: FeedbackPopupProps) {
     const sessionDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
     try {
-      await feedbackApi.submitFeedback({
+      const { error } = await feedbackApi.submitFeedback({
         rating,
         feedback_text: feedbackText || undefined,
         would_recommend: wouldRecommend ?? undefined,
@@ -61,6 +75,9 @@ export default function FeedbackPopup({ onClose }: FeedbackPopupProps) {
         feedback_type: "general",
         session_duration_seconds: sessionDuration,
       });
+      if (error) {
+        throw new Error(error);
+      }
       
       localStorage.setItem(STORAGE_KEY, "true");
       toast.success("Thank you for your feedback!");
@@ -80,8 +97,8 @@ export default function FeedbackPopup({ onClose }: FeedbackPopupProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-md shadow-xl animate-in fade-in zoom-in-95 duration-300">
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <Card className="pointer-events-auto w-full max-w-md shadow-xl animate-in fade-in zoom-in-95 duration-300">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <h3 className="font-display text-lg font-semibold">How was your experience?</h3>
           <button

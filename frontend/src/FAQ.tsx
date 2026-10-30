@@ -162,7 +162,7 @@ export default function FAQ() {
                   <Link to="/report">Report an Issue</Link>
                 </Button>
                 <Button variant="outline" asChild>
-                  <Link to="/safety">Safety Tips</Link>
+                  <Link to="/buyer-protection">Safety Tips</Link>
                 </Button>
               </div>
             </CardContent>

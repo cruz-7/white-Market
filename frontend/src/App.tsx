@@ -1,5 +1,5 @@
 ﻿
-import { ChangeEvent, FormEvent, useEffect, useState, useRef, lazy, Suspense } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState, useRef } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Award, Check, CheckCheck, CheckCircle2, CircleHelp, Clock3, Eye, EyeOff, Flame, GraduationCap, ImagePlus, Info, Lock, MapPin, Megaphone, MessageCircle, Search, Send, ShoppingCart, ShieldCheck, Star, Store, UserRound, Wallet } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -40,8 +40,12 @@ import {
   timeAgo,
   saveMessages,
   upsertUser,
+  PRODUCTS_REFRESH_EVENT,
 } from "./data";
-import { supabase } from "./supabase-client";
+import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
+import { useQuery } from "convex/react";
+import { api as convexApi } from "../convex/_generated/api";
+import { convex, registerConvexAuthBridge } from "./convex-client";
 import Index from "./Index";
 import ForgotPasswordPage from "./ForgotPasswordPage";
 import ResetPasswordPage from "./ResetPasswordPage";
@@ -54,9 +58,9 @@ import {
   adminApi,
   messagesApi,
   paymentsApi,
-  healthApi,
   sellerApi,
-  getApiBaseUrl,
+  authApi,
+  referralsApi,
   type AdminUser,
   type AdminProduct,
   type AdminOrder,
@@ -73,36 +77,10 @@ import ReportIssue from "./ReportIssue";
 import BuyerProtection from "./BuyerProtection";
 import AddProduct from "./AddProduct";
 import SellerProfile from "./SellerProfile";
-import { LoadingPage } from "./LoadingSpinner";
+import ImageSearchModal from "./ImageSearchModal";
+import { NotFoundPage } from "./NotFoundPage";
+import { adminRouteRedirect, appRoutes, dashboardDestination } from "./route-access";
 
-// Lazy load heavy components
-const LazyIndex = lazy(() => import("./Index"));
-const LazyForgotPasswordPage = lazy(() => import("./ForgotPasswordPage"));
-const LazyResetPasswordPage = lazy(() => import("./ResetPasswordPage"));
-const LazyChangePasswordPage = lazy(() => import("./ChangePasswordPage"));
-const LazySettingsPage = lazy(() => import("./SettingsPage"));
-const LazyPrivacyPolicy = lazy(() => import("./PrivacyPolicy"));
-const LazyTermsOfService = lazy(() => import("./TermsOfService"));
-const LazyFAQ = lazy(() => import("./FAQ"));
-const LazyReportIssue = lazy(() => import("./ReportIssue"));
-const LazyBuyerProtection = lazy(() => import("./BuyerProtection"));
-const LazyAddProduct = lazy(() => import("./AddProduct"));
-const LazySellerProfile = lazy(() => import("./SellerProfile"));
-const LazyProfessionalOrdersPage = lazy(() => import("./ProfessionalOrdersPage"));
-const LazyCategoriesPage = lazy(() => import("./CategoriesPage"));
-const LazyBooksAndNotesPage = lazy(() => import("./BooksAndNotesPage"));
-const LazyFashionPage = lazy(() => import("./FashionPage"));
-const LazyFavoritesPage = lazy(() => import("./FavoritesPage"));
-const LazyNotificationsPage = lazy(() => import("./NotificationsPage"));
-const LazyReferralsPage = lazy(() => import("./ReferralsPage"));
-const LazyLeaderboardPage = lazy(() => import("./LeaderboardPage"));
-
-// Helper for lazy routes
-const LazyRoute = ({ children }: { children: React.ReactNode }) => (
-  <Suspense fallback={<LoadingPage />}>
-    {children}
-  </Suspense>
-);
 import ProfessionalOrdersPage from "./ProfessionalOrdersPage";
 import CategoriesPage from "./CategoriesPage";
 import BooksAndNotesPage from "./BooksAndNotesPage";
@@ -203,7 +181,8 @@ function normalizeCampusOrderStatus(status: string) {
 
 function toLocalProduct(product: ApiProduct) {
   const backendAvatar = product.users?.seller_profile_image_url || product.users?.avatar_url;
-  console.log("[toLocalProduct] sellerAvatar from backend:", backendAvatar);
+  const quantity = product.stock_quantity;
+  const condition = product.condition?.trim().toLowerCase();
   return {
     id: product.id,
     title: product.title,
@@ -213,19 +192,25 @@ function toLocalProduct(product: ApiProduct) {
     sellerAvatar: backendAvatar || undefined,
     category: product.category || product.categories?.name || "General",
     image: product.image_url || "https://via.placeholder.com/640x360?text=White+Market",
+    description: product.description,
     is_active: product.is_active ?? true,
-    stock_status: "in_stock" as const,
+    stock_status: quantity === undefined
+      ? "unknown" as const
+      : quantity <= 0
+        ? "out_of_stock" as const
+        : quantity <= 5
+          ? "limited" as const
+          : "in_stock" as const,
+    stock_quantity: quantity,
     views: Number(product.view_count || 0),
     rating: Number(product.average_rating || product.seller_rating_stats?.avg_overall_rating || 0),
     reviews: Number(product.rating_count || product.seller_rating_stats?.total_ratings || 0),
     average_rating: Number(product.average_rating || 0),
     rating_count: Number(product.rating_count || 0),
-    eta: "Same day",
-    delivery_type: "Campus Meetup" as const,
-    condition: "New" as const,
-    verified_seller: true,
-    seller_sales: 0,
-    response_time: "~15 min",
+    condition: condition
+      ? condition.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase())
+      : "Not specified",
+    verified_seller: product.users?.verified ?? false,
     listed_at: product.created_at || new Date().toISOString(),
   };
 }
@@ -243,7 +228,7 @@ function toLocalOrder(
 
   return {
     id: order.id,
-    productId: order.product_id,
+    productId: order.product_id || order.fashion_id || "",
     productTitle: order.products?.title || "Product",
     productImage: order.products?.image_url || "https://via.placeholder.com/320?text=Product",
     buyerId: order.buyer_id,
@@ -282,182 +267,108 @@ function toLocalMessage(message: ChatMessage) {
   };
 }
 
-function useBackendGuard() {
-  const [isBackendReady, setBackendReady] = useState(true);
-  const [checked, setChecked] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async () => {
-      const result = await healthApi.check();
-      if (cancelled) return;
-      setBackendReady(Boolean(result.data?.status === "ok"));
-      setChecked(true);
-    };
-
-    check();
-    const interval = window.setInterval(check, 30000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  return { isBackendReady, checked };
-}
-
-function BackendUnavailablePage() {
-  const apiBaseUrl = getApiBaseUrl();
-  const currentOrigin = typeof globalThis.window !== "undefined" && globalThis.window ? globalThis.window.location.origin : "";
-  const apiLabel = apiBaseUrl || "(same origin)";
-  const isProd = import.meta.env.PROD;
-  const showMissingApiUrlHint = isProd && !apiBaseUrl;
-  const showLocalhostHint = isProd && apiBaseUrl.includes("localhost");
-
-  return (
-    <AppScaffold>
-      <section className="container py-12">
-        <Card className="mx-auto max-w-xl">
-          <CardContent className="space-y-4 p-6">
-            <div className="space-y-1">
-              <h1 className="page-title">Backend Unavailable</h1>
-              <p className="body-text">The API is currently unreachable. Please try again shortly.</p>
-            </div>
-
-            <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">
-              <div>
-                <span className="font-medium">Frontend:</span> {currentOrigin || "unknown"}
-              </div>
-              <div>
-                <span className="font-medium">API base:</span> {apiLabel}
-              </div>
-            </div>
-
-            {showMissingApiUrlHint && (
-              <p className="text-sm text-slate-600">
-                This build has no <code className="font-mono">VITE_API_URL</code> set. If your backend is hosted on a
-                different domain, set <code className="font-mono">VITE_API_URL</code> to your backend URL and redeploy.
-              </p>
-            )}
-
-            {showLocalhostHint && (
-              <p className="text-sm text-slate-600">
-                Your API base points to <code className="font-mono">localhost</code>. That works only on your computer.
-                Set <code className="font-mono">VITE_API_URL</code> to your deployed backend URL for hosting.
-              </p>
-            )}
-
-            <p className="text-sm text-slate-600">
-              If this is a CORS issue, make sure the backend <code className="font-mono">FRONTEND_URL</code> includes
-              the frontend origin above (no trailing slash).
-            </p>
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => window.location.reload()}>
-                Retry
-              </Button>
-              <Button asChild>
-                <Link to="/">Return Home</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </AppScaffold>
-  );
-}
-
 function AppContent() {
   const currentUser = useCurrentUser();
-  const { isBackendReady, checked } = useBackendGuard();
+  const { isLoading: authLoading, isAuthenticated, fetchAccessToken } = useConvexAuth();
+  const { signIn, signOut } = useAuthActions();
+  const convexAccount = useQuery(
+    convexApi.functions.account.me,
+    isAuthenticated ? {} : "skip",
+  );
+
+  /**
+   * Convex Auth only persists the session token when sign-in runs through its
+   * React helpers, so the API layer talks to auth through this bridge.
+   */
+  useEffect(() => {
+    registerConvexAuthBridge({
+      signIn: (provider, params) => signIn(provider, params as any),
+      signOut: () => signOut(),
+      refreshClientAuth: () => {
+        convex.setAuth((args?: { forceRefreshToken?: boolean }) =>
+          fetchAccessToken({ forceRefreshToken: args?.forceRefreshToken ?? false })
+        );
+      },
+    });
+    return () => registerConvexAuthBridge(null);
+  }, [signIn, signOut, fetchAccessToken]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (authLoading) return;
 
-    const syncFromSupabase = async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const authUser = sessionData.session?.user;
-      if (!authUser) {
-        if (import.meta.env.PROD) {
-          localStorage.removeItem("wm_user");
-          window.dispatchEvent(new Event("wm-auth-change"));
-        }
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role, full_name")
-        .eq("id", authUser.id)
-        .maybeSingle();
-
-      const existing = readCurrentUser();
-      const syncedUser: LocalUser = {
-        id: authUser.id,
-        email: authUser.email || existing?.email || "",
-        full_name: (profile as any)?.full_name || existing?.full_name || authUser.user_metadata?.full_name || "User",
-        role: ((profile as any)?.role as LocalUser["role"]) || "user",
-        avatar_url: (authUser.user_metadata?.avatar_url as string | undefined) || existing?.avatar_url,
-      };
-
-      localStorage.setItem("wm_user", JSON.stringify(syncedUser));
-      upsertUser(syncedUser);
+    if (!isAuthenticated) {
+      localStorage.removeItem("wm_user");
       window.dispatchEvent(new Event("wm-auth-change"));
+      return;
+    }
+
+    const profile = convexAccount?.user;
+    if (!profile) return;
+
+    const existing = readCurrentUser();
+    const syncedUser: LocalUser = {
+      id: profile.id,
+      email: profile.email || existing?.email || "",
+      full_name: profile.full_name || existing?.full_name || "User",
+      role: (profile.role as LocalUser["role"]) || "user",
+      avatar_url: profile.avatar_url ?? existing?.avatar_url,
     };
 
-    syncFromSupabase();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => { syncFromSupabase(); });
-    return () => { sub.subscription.unsubscribe(); };
-  }, []);
+    if (
+      existing?.id === syncedUser.id &&
+      existing.email === syncedUser.email &&
+      existing.full_name === syncedUser.full_name &&
+      existing.role === syncedUser.role &&
+      existing.avatar_url === syncedUser.avatar_url
+    ) {
+      return;
+    }
+
+    localStorage.setItem("wm_user", JSON.stringify(syncedUser));
+    upsertUser(syncedUser);
+    window.dispatchEvent(new Event("wm-auth-change"));
+  }, [authLoading, isAuthenticated, convexAccount]);
 
   // Fetch products for unauthenticated users too
   useEffect(() => {
-    if (!isBackendReady) return;
     let cancelled = false;
 
     const fetchProductsOnly = async () => {
       const productsRes = await productsApi.getAll();
-      console.log("[fetchProductsOnly] got products:", productsRes.data?.length, "items");
-        console.log("[fetchProductsOnly] sample full product:", JSON.stringify(productsRes.data?.[0], null, 2));
-        console.log("[fetchProductsOnly] sample product.users:", productsRes.data?.[0]?.users);
-        console.log("[fetchProductsOnly] users keys:", Object.keys(productsRes.data?.[0]?.users || {}));
-        // Log seller avatar for first few products
-        productsRes.data?.slice(0, 3).forEach((p, i) => {
-          console.log(`[fetchProductsOnly] product[${i}] sellerAvatar from API:`, p.users?.seller_profile_image_url);
-        });
       if (cancelled) return;
       if (productsRes.data) {
         saveProducts(productsRes.data.map(toLocalProduct));
+      } else if (productsRes.error) {
+        console.error("[marketplace] Failed to load products:", productsRes.error);
       }
     };
 
-    // Clear cache first to force fresh fetch
-    saveProducts([]);
-    fetchProductsOnly();
+    void fetchProductsOnly();
 
     return () => { cancelled = true; };
-  }, [isBackendReady]);
+  }, []);
 
   // Re-fetch products when data changes (e.g., seller profile updated)
   useEffect(() => {
     let cancelled = false;
     const handleDataChange = async () => {
-      if (!isBackendReady || cancelled) return;
+      if (cancelled) return;
       const productsRes = await productsApi.getAll();
       if (!cancelled && productsRes.data) {
         saveProducts(productsRes.data.map(toLocalProduct));
+      } else if (!cancelled && productsRes.error) {
+        console.error("[marketplace] Failed to refresh products:", productsRes.error);
       }
     };
-    window.addEventListener("wm-data-change", handleDataChange);
+    window.addEventListener(PRODUCTS_REFRESH_EVENT, handleDataChange);
     return () => {
       cancelled = true;
-      window.removeEventListener("wm-data-change", handleDataChange);
+      window.removeEventListener(PRODUCTS_REFRESH_EVENT, handleDataChange);
     };
-  }, [isBackendReady]);
+  }, []);
 
   useEffect(() => {
-    if (!currentUser || !isBackendReady) return;
+    if (!currentUser) return;
     let cancelled = false;
 
     const syncBackendData = async () => {
@@ -537,77 +448,77 @@ function AppContent() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [currentUser?.id, isBackendReady]);
-
-  const backendElement = (element: React.ReactElement) => {
-    if (!checked) {
-      return <SimplePage title="Connecting" message="Checking backend availability..." />;
-    }
-    if (!isBackendReady) {
-      return <BackendUnavailablePage />;
-    }
-    return element;
-  };
+  }, [currentUser?.id]);
 
   return (
     <Routes>
-      <Route path="/" element={<LazyRoute><LazyIndex /></LazyRoute>} />
-      <Route path="/marketplace" element={backendElement(<MarketplacePage />)} />
-      <Route path="/product/:id" element={backendElement(<ProductDetailPage />)} />
-      <Route path="/checkout/:orderId" element={backendElement(<CheckoutPage />)} />
-      <Route path="/cart" element={<CartPage />} />
-      <Route path="/messages" element={backendElement(<MessagesPage />)} />
-      <Route path="/orders" element={backendElement(<ProfessionalOrdersPage user={currentUser} />)} />
-      <Route path="/auth" element={backendElement(<AuthPage />)} />
+      <Route path={appRoutes.home} element={<Index />} />
+      <Route path={appRoutes.marketplace} element={<MarketplacePage />} />
+      <Route path="/product/:id" element={<ProductDetailPage />} />
+      <Route path={appRoutes.checkout} element={<CheckoutPage />} />
+      <Route path={appRoutes.paymentCallback} element={<PaymentCallbackPage />} />
+      <Route path="/messages" element={<MessagesPage />} />
+      <Route path="/orders" element={<ProfessionalOrdersPage user={currentUser} />} />
+      <Route path="/auth" element={<AuthPage />} />
+      <Route path="/signup" element={<SignupRedirect />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/change-password" element={backendElement(<ChangePasswordPage />)} />
-      <Route path="/settings" element={backendElement(<SettingsPage />)} />
-      <Route path="/dashboard" element={backendElement(<DashboardRouter />)} />
-      <Route path="/dashboard/overview" element={backendElement(<SellerDashboard initialTab="overview" />)} />
-      <Route path="/dashboard/products" element={backendElement(<SellerDashboard initialTab="products" />)} />
-      <Route path="/dashboard/orders" element={backendElement(<SellerDashboard initialTab="orders" />)} />
-      <Route path="/dashboard/customers" element={backendElement(<SellerDashboard initialTab="customers" />)} />
-      <Route path="/dashboard/reviews" element={backendElement(<SellerDashboard initialTab="reviews" />)} />
-      <Route path="/dashboard/transactions" element={backendElement(<SellerDashboard initialTab="transactions" />)} />
-      <Route path="/dashboard/coupons" element={backendElement(<SellerDashboard initialTab="coupons" />)} />
-      <Route path="/dashboard/notifications" element={backendElement(<SellerDashboard initialTab="notifications" />)} />
-      <Route path="/admin" element={backendElement(currentUser ? <AdminDashboardView user={currentUser} /> : <Navigate to="/auth" replace />)} />
-      <Route path="/profile-setup" element={backendElement(<ProfileSetupPage />)} />
+      <Route path="/change-password" element={<ChangePasswordPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/dashboard" element={<DashboardRouter />} />
+      <Route path="/dashboard/overview" element={<SellerDashboard initialTab="overview" />} />
+      <Route path="/dashboard/products" element={<SellerDashboard initialTab="products" />} />
+      <Route path="/dashboard/orders" element={<SellerDashboard initialTab="orders" />} />
+      <Route path="/dashboard/customers" element={<SellerDashboard initialTab="customers" />} />
+      <Route path="/dashboard/reviews" element={<SellerDashboard initialTab="reviews" />} />
+      <Route path="/dashboard/transactions" element={<SellerDashboard initialTab="transactions" />} />
+      <Route path="/dashboard/coupons" element={<SellerDashboard initialTab="coupons" />} />
+      <Route path="/dashboard/notifications" element={<SellerDashboard initialTab="notifications" />} />
+      <Route path={appRoutes.admin} element={<AdminRoute />} />
+      <Route path="/profile-setup" element={<ProfileSetupPage />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/faq" element={<FAQ />} />
-<Route path="/report" element={backendElement(<ReportIssue />)} />
-      <Route path="/buyer-protection" element={backendElement(<BuyerProtection />)} />
-      <Route path="/add-product" element={backendElement(<AddProduct />)} />
-      <Route path="/edit-product/:id" element={backendElement(<AddProduct />)} />
-      <Route path="/seller/:id" element={backendElement(<SellerProfile />)} />
-      <Route path="/categories" element={backendElement(<CategoriesPage />)} />
-      <Route path="/categories/:slug" element={backendElement(<CategoriesPage />)} />
-      <Route path="/books-and-notes" element={<BooksAndNotesPage />} />
-      <Route path="/books-and-notes/:id" element={backendElement(<BooksAndNotesPage />)} />
-      <Route path="/fashion" element={<FashionPage />} />
-      <Route path="/fashion/:id" element={backendElement(<FashionPage />)} />
-      <Route path="/favorites" element={backendElement(<FavoritesPage />)} />
-      <Route path="/notifications" element={backendElement(<NotificationsPage />)} />
-      <Route path="/referrals" element={backendElement(<ReferralsPage />)} />
+      <Route path={appRoutes.report} element={<ReportIssue />} />
+      <Route path="/buyer-protection" element={<BuyerProtection />} />
+      <Route path="/add-product" element={<AddProduct />} />
+      <Route path="/edit-product/:id" element={<AddProduct />} />
+      <Route path="/seller/:id" element={<SellerProfile />} />
+      <Route path="/categories" element={<CategoriesPage />} />
+      <Route path="/categories/:slug" element={<CategoriesPage />} />
+      <Route path={appRoutes.books} element={<BooksAndNotesPage />} />
+      <Route path={appRoutes.bookListing} element={<BooksAndNotesPage />} />
+      <Route path={appRoutes.fashion} element={<FashionPage />} />
+      <Route path={appRoutes.fashionListing} element={<FashionPage />} />
+      <Route path="/favorites" element={<FavoritesPage />} />
+      <Route path="/notifications" element={<NotificationsPage />} />
+      <Route path="/referrals" element={<ReferralsPage />} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
 
+function SignupRedirect() {
+  const [params] = useSearchParams();
+  const referralCode = params.get("ref");
+  const signupUrl = `/auth?tab=signup&role=user${referralCode ? `&ref=${encodeURIComponent(referralCode)}` : ""}`;
+  return <Navigate to={signupUrl} replace />;
+}
+
 function getPasswordStrength(password: string) {
   const hasLength = password.length >= 8;
   const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
   const hasNumber = /\d/.test(password);
-  const requirementsCount = [hasLength, hasUpper, hasNumber].filter(Boolean).length;
+  const requirementsCount = [hasLength, hasUpper, hasLower, hasNumber].filter(Boolean).length;
   return {
     hasLength,
     hasUpper,
+    hasLower,
     hasNumber,
     requirementsCount,
-    strength: requirementsCount <= 1 ? "weak" : requirementsCount === 2 ? "medium" : "strong",
+    strength: requirementsCount <= 1 ? "weak" : requirementsCount <= 3 ? "medium" : "strong",
   };
 }
 
@@ -615,88 +526,73 @@ async function handleLogin(email: string, password: string, navigate: ReturnType
   if (!email.trim() || !password.trim()) return;
   const normalizedEmail = email.trim().toLowerCase();
 
-  if (!supabase) {
-    toast.error("Authentication service is not configured.");
-    return;
-  }
-
-  const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+  const { data, error } = await authApi.login({ email: normalizedEmail, password });
   if (error) {
-    toast.error(error?.message || "Login failed. Check your credentials.");
+    toast.error(error || "Login failed. Check your credentials.");
     return;
   }
 
-  if (!data.user) {
+  const signedInUser = data?.user;
+  if (!signedInUser) {
     toast.error("Login failed. Check your credentials.");
     return;
   }
 
-  const authUser = data.user;
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role, full_name")
-    .eq("id", authUser.id)
-    .maybeSingle();
-
   const sessionUser: LocalUser = {
-    id: authUser.id,
-    email: authUser.email || normalizedEmail,
-    full_name: (profile as any)?.full_name || authUser.user_metadata?.full_name || normalizedEmail.split("@")[0],
-    role: ((profile as any)?.role as LocalUser["role"]) || "user",
-    avatar_url: authUser.user_metadata?.avatar_url as string | undefined,
+    id: signedInUser.id,
+    email: signedInUser.email || normalizedEmail,
+    full_name: signedInUser.full_name || normalizedEmail.split("@")[0],
+    role: (signedInUser.role as LocalUser["role"]) || "user",
+    avatar_url: signedInUser.avatar_url ?? undefined,
   };
 
   upsertUser(sessionUser);
   localStorage.setItem("wm_user", JSON.stringify(sessionUser));
   window.dispatchEvent(new Event("wm-auth-change"));
   toast.success("Signed in successfully");
-  navigate("/dashboard");
+  navigate(sessionUser.role === "admin" ? "/admin" : "/dashboard");
 }
 
-async function handleSignup(fullName: string, email: string, password: string, role: "user" | "seller", navigate: ReturnType<typeof useNavigate>, setTab: (tab: "login" | "signup") => void) {
+async function handleSignup(fullName: string, email: string, password: string, role: "user" | "seller", navigate: ReturnType<typeof useNavigate>, setTab: (tab: "login" | "signup") => void, referralCode?: string) {
   if (!fullName.trim() || !email.trim()) return;
   const normalizedEmail = email.trim().toLowerCase();
 
-  if (!supabase) {
-    toast.error("Authentication service is not configured.");
-    return;
-  }
-
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await authApi.signup({
     email: normalizedEmail,
     password,
-    options: { data: { full_name: fullName.trim() } },
+    full_name: fullName.trim(),
+    role,
   });
 
   if (error) {
-    toast.error(error.message);
+    toast.error(error);
     return;
   }
 
-  if (!data.user) {
+  const createdUser = data?.user;
+  if (!createdUser) {
     toast.success("Check your email to confirm your account, then log in.");
     setTab("login");
     return;
   }
 
-  const { data: profile } = await supabase
-    .from("users")
-    .select("role, full_name")
-    .eq("id", data.user.id)
-    .maybeSingle();
-
   const sessionUser: LocalUser = {
-    id: data.user.id,
-    full_name: (profile as any)?.full_name || fullName.trim(),
-    email: data.user.email || normalizedEmail,
-    role: ((profile as any)?.role as LocalUser["role"]) || "user",
+    id: createdUser.id,
+    full_name: createdUser.full_name || fullName.trim(),
+    email: createdUser.email || normalizedEmail,
+    role: (createdUser.role as LocalUser["role"]) || "user",
   };
 
-  if (role === "seller" && sessionUser.role === "user") {
-    toast.info("Account created. Seller mode can be enabled from profile setup.");
-  } else {
-    toast.success("Account created successfully");
+  if (referralCode) {
+    const referralResult = await referralsApi.claimForNewUser(referralCode);
+    if (referralResult.error) {
+      toast.info(`Account created, but the referral code could not be applied: ${referralResult.error}`);
+    } else if (referralResult.data?.message === "Invalid referral code") {
+      toast.info("Account created, but the referral code was invalid.");
+    }
   }
+
+  toast.success("Account created successfully");
 
   upsertUser(sessionUser);
   localStorage.setItem("wm_user", JSON.stringify(sessionUser));
@@ -716,11 +612,18 @@ function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  useEffect(() => {
+    setTab(params.get("tab") === "signup" ? "signup" : "login");
+    if (params.get("role") === "seller") setRole("seller");
+    else if (params.get("role") === "user") setRole("user");
+  }, [params]);
+
   const pwdStrength = getPasswordStrength(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
-  const allowedDomain = email.endsWith("@st.ug.edu.gh") || email.endsWith("@ug.edu.gh");
+  const normalizedEmail = email.trim().toLowerCase();
+  const allowedDomain = normalizedEmail.endsWith("@st.ug.edu.gh") || normalizedEmail.endsWith("@ug.edu.gh");
   const canSubmitLogin = Boolean(email.trim() && password.trim());
-  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && pwdStrength.hasLength && pwdStrength.hasUpper && pwdStrength.hasNumber && passwordsMatch);
+  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && pwdStrength.hasLength && pwdStrength.hasUpper && pwdStrength.hasLower && pwdStrength.hasNumber && passwordsMatch);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -728,7 +631,7 @@ function AuthPage() {
       await handleLogin(email, password, navigate);
       return;
     }
-    await handleSignup(fullName, email, password, role, navigate, setTab);
+    await handleSignup(fullName, email, password, role, navigate, setTab, params.get("ref") || undefined);
   };
 
   return (
@@ -911,16 +814,6 @@ function MarketplacePage() {
     .sort((a, b) => (b.views + b.reviews + b.rating * 25) - (a.views + a.reviews + a.rating * 25))
     .slice(0, 3);
 
-  const describeProduct = (title: string, categoryName: string) => {
-    if (title.toLowerCase().includes("jollof")) return "Freshly prepared campus meal, ready for a quick meetup.";
-    if (title.toLowerCase().includes("calculator")) return "Exam-ready calculator with tested buttons and clean display.";
-    if (title.toLowerCase().includes("laptop stand")) return "Adjustable stand to improve posture during study sessions.";
-    if (title.toLowerCase().includes("bracelet")) return "Handmade accessories designed for everyday campus style.";
-    if (title.toLowerCase().includes("shea")) return "Moisturizing shea blend with a smooth, non-greasy finish.";
-    if (title.toLowerCase().includes("tote")) return "Durable tote bag for books, groceries, and daily essentials.";
-    return `Popular ${categoryName.toLowerCase()} listing from a campus seller.`;
-  };
-
   const createOrder = async (productId: string) => {
     if (!user) return navigate("/auth?role=user");
     const product = allProducts.find((p) => p.id === productId);
@@ -952,7 +845,7 @@ function MarketplacePage() {
       return;
     }
     navigate(
-      `/messages?c=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent(`/product/${product.id}`)}`,
+      `/messages?conversation=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent(`/product/${product.id}`)}`,
     );
   };
 
@@ -1205,6 +1098,11 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                         Sold Out
                       </span>
                     )}
+                    {p.stock_status === "unknown" && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-700/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
+                        Availability not specified
+                      </span>
+                    )}
                   </div>
                   <button
                     className="rounded-full bg-white/90 backdrop-blur-sm p-2 shadow-lg hover:bg-white transition-colors"
@@ -1233,7 +1131,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                 </div>
                 
                 {/* Description */}
-                <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{describeProduct(p.title, p.category)}</p>
+                <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{p.description || "No description provided by the seller."}</p>
                 
                 {/* Seller Info */}
                 <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
@@ -1260,46 +1158,21 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                         <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> {p.rating > 0 ? p.rating.toFixed(1) : "N/A"}
                       </span>
                       <span className="text-xs text-slate-400">•</span>
-                      <span className="text-xs text-slate-500">{p.reviews > 0 ? p.reviews : "0"} reviews</span>
-                      <span className="text-xs text-slate-400">•</span>
-                      <span className="text-xs text-slate-500">{p.seller_sales} sales</span>
+                      <span className="text-xs text-slate-500">{p.reviews > 0 ? p.reviews : "0"} reviews                      </span>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-500">Response time</p>
-                    <p className="text-sm font-medium text-slate-700">{p.response_time}</p>
                   </div>
                 </div>
                 
                 {/* Tags */}
                 <div className="flex flex-wrap gap-2">
-                  {(() => {
-                    let deliveryLabel = "";
-                    switch (p.delivery_type) {
-                      case "Campus Meetup":
-                        deliveryLabel = "Campus Meetup";
-                        break;
-                      case "Pickup Point":
-                        deliveryLabel = "Pickup Point";
-                        break;
-                      case "Hall Lobby Handover":
-                        deliveryLabel = "Hall Lobby Handover";
-                        break;
-                      default:
-                        deliveryLabel = String(p.delivery_type);
-                    }
-                    return (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
-                        <MapPin className="h-3 w-3" /> {deliveryLabel}
-                      </span>
-                    );
-                  })()}
-                  <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700">
-                    <Clock3 className="h-3 w-3" /> {p.eta}
-                  </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700">
-                    {p.condition === "Used" ? "Used - Good" : p.condition}
+                    {p.condition}
                   </span>
+                  {p.stock_quantity !== undefined && (
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700">
+                      {p.stock_quantity} available
+                    </span>
+                  )}
                 </div>
                 
                 {/* Action Buttons */}
@@ -1342,17 +1215,30 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
               <div className="mx-auto w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6">
                 <Search className="h-10 w-10 text-slate-400" />
               </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-2">No products found</h3>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">
+                {allProducts.length === 0 ? "No listings yet" : "No products found"}
+              </h3>
               <p className="text-slate-600 mb-6 max-w-md mx-auto">
-                We couldn't find any products matching your search. Try adjusting your filters or browse all categories.
+                {allProducts.length === 0
+                  ? "The marketplace is ready for its first student listings. Create an account to post a product."
+                  : "We couldn't find products matching your search. Try adjusting your filters or browse all categories."}
               </p>
-              <Button 
-                className="bg-gradient-to-r from-primary to-primary/90 shadow-md hover:shadow-lg" 
-                onClick={() => { setSearchQuery(""); setCategory("All"); setSort("popular"); }}
-              >
-                <Search className="h-4 w-4 mr-2" />
-                Reset Filters
-              </Button>
+              {allProducts.length === 0 ? (
+                <Button asChild className="bg-gradient-to-r from-primary to-primary/90 shadow-md hover:shadow-lg">
+                  <Link to="/auth?tab=signup&role=seller">
+                    <Store className="h-4 w-4 mr-2" />
+                    Start Selling
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  className="bg-gradient-to-r from-primary to-primary/90 shadow-md hover:shadow-lg"
+                  onClick={() => { setSearchQuery(""); setCategory("All"); setSort("popular"); }}
+                >
+                  <Search className="h-4 w-4 mr-2" />
+                  Reset Filters
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1387,7 +1273,44 @@ function ProductDetailPage() {
   const user = useCurrentUser();
   const { id } = useParams();
   const { trackProductView, trackPurchase } = useRecommendations();
-  const product = getProducts().find((p) => p.id === id);
+  const [product, setProduct] = useState(() => getProducts().find((item) => item.id === id) ?? null);
+  const [productLoading, setProductLoading] = useState(!product);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cachedProduct = getProducts().find((item) => item.id === id);
+    if (cachedProduct) {
+      setProduct(cachedProduct);
+      setProductLoading(false);
+      return;
+    }
+
+    setProductLoading(true);
+    if (!id) {
+      setProductLoading(false);
+      return;
+    }
+
+    void productsApi.getById(id).then(({ data, error }) => {
+      if (cancelled) return;
+      if (data) {
+        const loadedProduct = toLocalProduct(data);
+        setProduct(loadedProduct);
+        saveProducts([
+          ...getProducts().filter((item) => item.id !== loadedProduct.id),
+          loadedProduct,
+        ]);
+      } else if (error) {
+        console.error("[product] Failed to load product:", error);
+        toast.error(`Could not load product: ${error}`);
+      }
+      setProductLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
   
   useEffect(() => {
     if (product) {
@@ -1395,6 +1318,13 @@ function ProductDetailPage() {
     }
   }, [product?.id]);
   
+  if (productLoading) {
+    return (
+      <AppScaffold>
+        <section className="container py-16 text-center text-slate-600">Loading product...</section>
+      </AppScaffold>
+    );
+  }
   if (!product) return <Navigate to="/marketplace" replace />;
 
   const createOrder = async () => {
@@ -1423,7 +1353,7 @@ function ProductDetailPage() {
       return;
     }
     navigate(
-      `/messages?c=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent("/marketplace")}`,
+      `/messages?conversation=${response.data.conversation.id}&prefill=${encodeURIComponent(`Hi, I'm interested in ${product.title}`)}&back=${encodeURIComponent("/marketplace")}`,
     );
   };
 
@@ -1441,12 +1371,12 @@ function ProductDetailPage() {
               <h1 className="page-title">{product.title}</h1>
               <p className="mt-2 body-text">Sold by {product.sellerName}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full bg-slate-100 px-2 py-1">{product.delivery_type}</span>
-                <span className={`rounded-full px-2 py-1 ${product.stock_status === "in_stock" ? "bg-green-100 text-green-700" : product.stock_status === "limited" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                  {product.stock_status === "in_stock" ? "In Stock" : product.stock_status === "limited" ? "Limited Stock" : "Sold Out"}
+                <span className={`rounded-full px-2 py-1 ${product.stock_status === "in_stock" ? "bg-green-100 text-green-700" : product.stock_status === "limited" ? "bg-amber-100 text-amber-700" : product.stock_status === "out_of_stock" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"}`}>
+                  {product.stock_status === "in_stock" ? "In Stock" : product.stock_status === "limited" ? "Limited Stock" : product.stock_status === "out_of_stock" ? "Sold Out" : "Availability not specified"}
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-1">{product.condition}</span>
               </div>
+              {product.description && <p className="mt-4 whitespace-pre-wrap text-slate-600">{product.description}</p>}
               <p className="mt-3 text-3xl font-bold text-primary">GHS {product.price.toFixed(2)}</p>
               <div className="mt-6 flex gap-2">
                 <Button className="flex-1" onClick={createOrder}><ShoppingCart className="h-4 w-4" /> Buy Now</Button>
@@ -1628,11 +1558,42 @@ function WalletCard({ user, sellerMode }: { user: LocalUser; sellerMode?: boolea
 
 function DashboardRouter() {
   const user = useCurrentUser();
-  if (!user) return <Navigate to="/auth" replace />;
-  // Admins can also access seller dashboard (for admins who sell)
-  // They can access /admin separately for admin controls
-  if (user.role === "seller" || user.role === "admin") return <SellerDashboard initialTab="overview" />;
+  const destination = dashboardDestination(!!user, user?.role);
+  if (destination === "/auth" || destination === "/admin") {
+    return <Navigate to={destination} replace />;
+  }
+  if (destination === "seller") return <SellerDashboard initialTab="overview" />;
   return <StudentDashboard />;
+}
+
+function AdminRoute() {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const account = useQuery(
+    convexApi.functions.account.me,
+    isAuthenticated ? {} : "skip",
+  );
+
+  if (isLoading || (isAuthenticated && account === undefined)) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <p className="text-sm text-slate-500">Checking administrator access...</p>
+      </div>
+    );
+  }
+
+  const redirect = adminRouteRedirect(isAuthenticated, account?.user.role);
+  if (redirect) return <Navigate to={redirect} replace />;
+  if (!account?.user) return <Navigate to="/marketplace" replace />;
+
+  const user: LocalUser = {
+    id: account.user.id,
+    email: account.user.email,
+    full_name: account.user.full_name,
+    role: "admin",
+    avatar_url: account.user.avatar_url ?? undefined,
+  };
+
+  return <AdminDashboardView user={user} />;
 }
 
 function EmptyStateCard({ title, description, cta, to }: { title: string; description: string; cta: string; to: string }) {
@@ -1655,7 +1616,6 @@ function ProductDiscoveryCard({ product, onQuickAdd }: { product: ReturnType<typ
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1"><Star className="h-3.5 w-3.5 text-amber-500" /> {product.rating > 0 ? product.rating.toFixed(1) : "N/A"}</span>
           <span>({product.reviews > 0 ? product.reviews : "0"} reviews)</span>
-          <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" /> {product.eta}</span>
         </div>
         <div className="mt-1 flex items-center justify-between">
           <p className="font-bold text-primary">GHS {product.price.toFixed(2)}</p>
@@ -1686,8 +1646,8 @@ function StudentDashboard() {
       try {
         // Fetch trending products
         const trendingRes = await productsApi.getTrending(6);
-        if (trendingRes.data?.products) {
-          setTrendingProducts(trendingRes.data.products);
+        if (trendingRes.data) {
+          setTrendingProducts(trendingRes.data);
         }
         
         // Fetch top sellers
@@ -1972,6 +1932,23 @@ function CheckoutPage() {
     navigate("/orders");
   };
 
+  const payWithPaystack = async () => {
+    setLoading(true);
+    try {
+      const callbackUrl = `${window.location.origin}/payment/callback`;
+      const result = await paymentsApi.initialize({ order_id: order.id, callback_url: callbackUrl });
+      if (result.error) throw new Error(result.error);
+      if (!result.data?.authorization_url) {
+        throw new Error("Payment provider did not return a checkout link.");
+      }
+      window.location.assign(result.data.authorization_url);
+    } catch (error) {
+      console.error("Could not initialize Paystack checkout:", error);
+      toast.error(error instanceof Error ? error.message : "Could not start card/Mobile Money checkout.");
+      setLoading(false);
+    }
+  };
+
   return (
     <AppScaffold>
       <section className="container py-8">
@@ -1981,8 +1958,73 @@ function CheckoutPage() {
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Order Summary</p><p className="section-title">{order.productTitle}</p><p className="mt-3 text-2xl font-bold text-primary">GHS {order.amount.toFixed(2)}</p><p className="mt-2 text-sm text-slate-500">Seller: {order.sellerName}</p></CardContent></Card>
-          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}</CardContent></Card>
+          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}<Button variant="outline" className="mt-3 w-full" onClick={payWithPaystack} disabled={loading}>{loading ? "Opening secure checkout..." : "Pay by Card or Mobile Money"}</Button></CardContent></Card>
         </div>
+      </section>
+    </AppScaffold>
+  );
+}
+
+function PaymentCallbackPage() {
+  const user = useCurrentUser();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState<"verifying" | "success" | "error">("verifying");
+  const [message, setMessage] = useState("Verifying your payment...");
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const reference = searchParams.get("reference") || searchParams.get("trxref");
+
+  useEffect(() => {
+    if (!user || !reference) {
+      if (!reference) {
+        setStatus("error");
+        setMessage("The payment provider did not return a transaction reference.");
+      }
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const verification = await paymentsApi.verify(reference);
+        if (verification.error) throw new Error(verification.error);
+        if (verification.data?.message !== "Payment verified" || !verification.data?.order_id) {
+          throw new Error(verification.data?.message || "Payment has not been confirmed.");
+        }
+        const orderResult = await ordersApi.getById(verification.data.order_id);
+        if (orderResult.error || !orderResult.data) {
+          throw new Error(orderResult.error || "Payment was confirmed, but order details could not be loaded.");
+        }
+        const localOrder = toLocalOrder(orderResult.data as ApiOrder, user);
+        saveOrders([localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)]);
+        if (!cancelled) {
+          setOrderId(localOrder.id);
+          setStatus("success");
+          setMessage("Payment confirmed. Your order is now paid.");
+        }
+      } catch (error) {
+        console.error("Payment verification failed:", error);
+        if (!cancelled) {
+          setStatus("error");
+          setMessage(error instanceof Error ? error.message : "Payment could not be verified.");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reference, user]);
+
+  if (!user) return <Navigate to="/auth" replace />;
+  return (
+    <AppScaffold>
+      <section className="container py-12">
+        <Card className="mx-auto max-w-xl">
+          <CardContent className="space-y-4 p-8 text-center">
+            <h1 className="text-2xl font-bold">Payment status</h1>
+            <p role={status === "error" ? "alert" : "status"}>{message}</p>
+            {status === "verifying" && <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />}
+            {status === "success" && orderId && <Button onClick={() => navigate(`/orders?orderId=${encodeURIComponent(orderId)}`)}>View order</Button>}
+            {status === "error" && <Button variant="outline" onClick={() => navigate("/orders")}>Return to orders</Button>}
+          </CardContent>
+        </Card>
       </section>
     </AppScaffold>
   );
@@ -2013,32 +2055,32 @@ function MessagesPage() {
 
   useEffect(() => { if (prefill) setDraft(prefill); }, [prefill]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [selectedId, messages.length]);
+
+  /**
+   * Convex reactive queries keep the conversation list and the open thread in
+   * sync with the backend, replacing the old Supabase realtime channels.
+   */
+  const convexConversations = useQuery(convexApi.functions.messages.conversations);
+  const convexMessages = useQuery(
+    convexApi.functions.messages.messages as any,
+    selectedId ? { conversationId: selectedId } : "skip"
+  );
+
   useEffect(() => {
-    if (!selectedId || !user) return;
-    let cancelled = false;
+    const remote = (convexConversations as any)?.conversations;
+    if (!remote?.length) return;
+    saveConversations(remote.map(toLocalConversation));
+  }, [convexConversations]);
 
-    const refreshMessages = async () => {
-      const response = await messagesApi.getConversationMessages(selectedId);
-      if (cancelled || !response.data) return;
-
-      const localMessages = response.data.messages.map(toLocalMessage);
-      const merged = [...getMessages().filter((item) => item.conversationId !== selectedId), ...localMessages]
-        .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
-      saveMessages(merged);
-    };
-
-    refreshMessages();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId, user?.id]);
   useEffect(() => {
-    if (!supabase) return;
-    const channel = supabase.channel("wm-messages").on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
-      window.dispatchEvent(new Event("wm-data-change"));
-    }).subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    const remote = (convexMessages as any)?.messages;
+    if (!remote) return;
+
+    const localMessages = remote.map(toLocalMessage);
+    const merged = [...getMessages().filter((item) => item.conversationId !== selectedId), ...localMessages]
+      .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+    saveMessages(merged);
+  }, [convexMessages, selectedId]);
 
   if (!user) return <Navigate to="/auth" replace />;
 
@@ -2262,10 +2304,26 @@ function ProfileSetupPage() {
     navigate("/dashboard");
   };
 
-  const completeSetup = () => {
+  const completeSetup = async () => {
     setAttempted(true);
     if (hasStepError(3) || hasStepError(2) || hasStepError(1)) return;
-    const updatedUser = { ...user, full_name: form.fullName.trim(), avatar_url: form.avatarUrl || user.avatar_url };
+    const role: LocalUser["role"] | undefined = form.role === "seller" ? "seller" : undefined;
+    const fullName = form.fullName.trim();
+    const avatarUrl = form.avatarUrl || user.avatar_url;
+    const { error } = await userApi.updateProfile({
+      full_name: fullName,
+      avatar_url: avatarUrl,
+      campus: form.campus,
+      whatsapp: form.whatsapp.trim(),
+      momo_number: form.momoNumber.trim() || undefined,
+      role,
+    });
+    if (error) {
+      toast.error(`Could not save your profile: ${error}`);
+      return;
+    }
+
+    const updatedUser = { ...user, full_name: fullName, avatar_url: avatarUrl, role: role ?? user.role };
     upsertUser(updatedUser);
     localStorage.setItem("wm_user", JSON.stringify(updatedUser));
     window.dispatchEvent(new Event("wm-auth-change"));
@@ -2517,7 +2575,7 @@ function ProfileSetupPage() {
           )}
 
           <div className="text-center text-xs text-slate-500">
-            Need help? <button type="button" className="font-medium text-primary underline" onClick={() => toast.info("FAQ coming soon")}>Open setup FAQ</button>
+            Need help? <Link to="/faq" className="font-medium text-primary underline">Open setup FAQ</Link>
           </div>
         </div>
       </section>
@@ -2544,4 +2602,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-

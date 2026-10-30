@@ -25,23 +25,28 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
   const [tokenValid, setTokenValid] = useState<boolean | null>(null);
   const [accessToken, setAccessToken] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
 
-  // Extract token from URL hash (Supabase sends it there)
+  // Extract token/code from URL hash/query (Convex Auth uses code param)
   const extractTokenFromHash = useCallback(() => {
-    const hash = window.location.hash.substring(1); // Remove #
+    const hash = window.location.hash.startsWith("#") ? window.location.hash.substring(1) : window.location.hash;
     const params = new URLSearchParams(hash);
-    return params.get("access_token") || "";
+    return params.get("code") || params.get("access_token") || "";
   }, []);
 
   // Check token on mount
   useEffect(() => {
-    // First check URL params, then hash
-    const token = searchParams.get("access_token") || extractTokenFromHash();
-    
+    const token =
+      searchParams.get("code") ||
+      searchParams.get("access_token") ||
+      extractTokenFromHash();
+    try {
+      const stored = localStorage.getItem("wm_reset_email");
+      if (stored) setResetEmail(stored);
+    } catch {}
+
     if (token) {
       setAccessToken(token);
-      // For now, we'll assume the token is valid if present
-      // The backend will validate it when submitting
       setTokenValid(true);
     } else {
       setTokenValid(false);
@@ -81,9 +86,8 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     try {
-      // Import dynamically to avoid issues
       const { authApi } = await import("./api");
-      const { error } = await authApi.resetPassword(accessToken, password);
+      const { error } = await authApi.resetPassword(accessToken, password, resetEmail || undefined);
       
       if (error) {
         toast.error(error);

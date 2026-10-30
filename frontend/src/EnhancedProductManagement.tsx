@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -14,12 +14,10 @@ import {
   XCircle,
   TrendingUp,
   TrendingDown,
-  DollarSign,
   ShoppingCart,
   Star,
   BarChart3,
   Filter,
-  Download,
   RefreshCw,
   AlertCircle,
   Clock,

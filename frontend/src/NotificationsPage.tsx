@@ -88,10 +88,10 @@ export default function NotificationsPage() {
 
   const getNotificationLink = (notification: Notification): string | null => {
     if (notification.type === "message_received" && notification.data?.conversation_id) {
-      return `/messages/${notification.data.conversation_id}`;
+      return `/messages?conversation=${encodeURIComponent(notification.data.conversation_id)}`;
     }
     if (notification.type?.startsWith("order") && notification.data?.order_id) {
-      return `/orders/${notification.data.order_id}`;
+      return `/orders?orderId=${encodeURIComponent(notification.data.order_id)}`;
     }
     return null;
   };

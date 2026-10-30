@@ -1,12 +1,12 @@
 ﻿// cspell:ignore momo
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { type FormEvent, useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  CalendarDays, CircleHelp, Download, FileText, Info, Search, ShoppingCart, Store, UserRound, Wallet,
+  CalendarDays, CircleHelp, Download, FileText, Info, Search, ShoppingCart, Store, Wallet,
   AlertTriangle, CheckCircle, Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight,
-  TrendingUp, TrendingDown, Users, CreditCard, Star, Bell, Layers, Briefcase, Gift, MoreVertical,
-  Filter, RefreshCw, Trash2, Ban, Unlock, XCircle, Check, Edit, Plus, ChevronDown,
-  Wrench, UserCheck, Banknote, FolderTree, Trophy, Mail, MessageSquare
+  TrendingUp, Users, CreditCard, Star, Bell, Layers, Briefcase, Gift,
+  RefreshCw, Trash2, Ban, Unlock, XCircle, Check, Plus,
+  Wrench, UserCheck, Banknote, FolderTree, Trophy, MessageSquare
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { toast } from "sonner";
@@ -27,9 +27,14 @@ import {
   servicesApi,
   verificationApi,
   feedbackApi,
+  adminPayoutsApi,
   AdminUser,
+  AdminUserRole,
   AdminProduct,
   AdminOrder,
+  AdminDispute,
+  AdminPayout,
+  AdminSettings,
   Category,
   Service,
   Verification
@@ -69,7 +74,7 @@ type PendingAction = {
 };
 
 const DAY_MS = 86400000;
-const COMMISSION_RATE = 0.1;
+const SETTLED_STATUSES = new Set(["paid", "completed"]);
 const COLORS = ["#0d9488", "#6366f1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6"];
 
 function inRange(iso: string, from: Date, to: Date) {
@@ -171,11 +176,21 @@ export default function AdminDashboardView({ user }: Props) {
   const [bulkAction, setBulkAction] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [disputeResolutionDrafts, setDisputeResolutionDrafts] = useState<Record<string, string>>({});
+  const [payoutActionId, setPayoutActionId] = useState<string | null>(null);
+  const [adminSettings, setAdminSettings] = useState<AdminSettings | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
+  const [payoutsLoadError, setPayoutsLoadError] = useState<string | null>(null);
   
   // Real data from API
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [disputes, setDisputes] = useState<AdminDispute[]>([]);
+  const [payouts, setPayouts] = useState<AdminPayout[]>([]);
+  const [payoutsLoaded, setPayoutsLoaded] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [stats, setStats] = useState<{ totalUsers: number; totalOrders: number; totalRevenue: number; totalProducts: number; commission: number } | null>(null);
   const [enhancedStats, setEnhancedStats] = useState<{
     users: { total: number; active: number; newToday: number; newThisWeek: number };
@@ -188,14 +203,15 @@ export default function AdminDashboardView({ user }: Props) {
   const [systemHealth, setSystemHealth] = useState<{
     status: string;
     database: { connected: boolean; responseTime: number };
-    api: { responseTime: number; uptime: number };
-    storage: { used: number; total: number };
   } | null>(null);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [apiTopSellers, setApiTopSellers] = useState<any[]>([]);
   const [revenueAnalytics, setRevenueAnalytics] = useState<{ daily: any[]; weekly: any[]; monthly: any[] } | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryName, setCategoryName] = useState("");
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
+  const [servicesLoaded, setServicesLoaded] = useState(false);
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [referralStats, setReferralStats] = useState<any>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -205,6 +221,9 @@ export default function AdminDashboardView({ user }: Props) {
   // Loading states for progressive loading
   const [loadingStates, setLoadingStates] = useState({
     critical: true, // stats, users, products, orders
+    disputes: false,
+    payouts: false,
+    settings: false,
     categories: false,
     verifications: false,
     referrals: false,
@@ -221,6 +240,11 @@ export default function AdminDashboardView({ user }: Props) {
   const [dataCache, setDataCache] = useState<{
     [key: string]: { data: any; timestamp: number; ttl: number };
   }>({});
+
+  useEffect(() => {
+    setSelectedItems(new Set());
+    setBulkAction("");
+  }, [tab]);
 
   // Cache helper functions
   const getCachedData = (key: string) => {
@@ -276,6 +300,12 @@ export default function AdminDashboardView({ user }: Props) {
         adminApi.getAllProducts(),
         adminApi.getAllOrders()
       ]);
+      const requestError = [statsRes, usersRes, productsRes, ordersRes]
+        .find((response) => response.error)?.error;
+      if (requestError) throw new Error(requestError);
+      if (!statsRes.data || !usersRes.data || !productsRes.data || !ordersRes.data) {
+        throw new Error("Admin data response was incomplete");
+      }
 
       if (statsRes.data) {
         const statsData = {
@@ -306,65 +336,93 @@ export default function AdminDashboardView({ user }: Props) {
 
     } catch (error) {
       console.error("Failed to fetch critical data:", error);
-      toast.error("Failed to load dashboard data");
+      toast.error(error instanceof Error ? error.message : "Failed to load dashboard data");
     } finally {
       setLoadingStates(prev => ({ ...prev, critical: false }));
     }
   }, []);
 
-  const fetchSecondaryData = useCallback(async () => {
+  const fetchSecondaryData = useCallback(async (force = false) => {
     const promises = [];
 
     // Categories
-    if (!getCachedData('categories')) {
+    if (force || !getCachedData('categories')) {
       setLoadingStates(prev => ({ ...prev, categories: true }));
       promises.push(
-        categoriesApi.getAll().then(res => {
-          if (res.data) {
-            setCategories(res.data);
-            setCachedData('categories', res.data);
-          }
-        }).catch(err => console.error("Categories fetch failed:", err))
+        categoriesApi.getAllForAdmin().then(res => {
+          if (res.error) throw new Error(res.error);
+          if (!res.data) throw new Error("Categories response was empty");
+          setCategories(res.data);
+          setCachedData('categories', res.data);
+        }).catch(err => {
+          console.error("Categories fetch failed:", err);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch categories");
+        })
           .finally(() => setLoadingStates(prev => ({ ...prev, categories: false })))
       );
     }
 
+
     // Verifications
-    if (!getCachedData('verifications')) {
+    if (force || !getCachedData('verifications')) {
       setLoadingStates(prev => ({ ...prev, verifications: true }));
       promises.push(
         verificationApi.getAllPending().then(res => {
-          if (res.data?.verifications) {
-            setVerifications(res.data.verifications);
-            setCachedData('verifications', res.data.verifications);
-          }
-        }).catch(err => console.error("Verifications fetch failed:", err))
+          if (res.error) throw new Error(res.error);
+          if (!res.data?.verifications) throw new Error("Verifications response was empty");
+          setVerifications(res.data.verifications);
+          setCachedData('verifications', res.data.verifications);
+        }).catch(err => {
+          console.error("Verifications fetch failed:", err);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch verifications");
+        })
           .finally(() => setLoadingStates(prev => ({ ...prev, verifications: false })))
       );
     }
 
+    if (force || !getCachedData('disputes')) {
+      setLoadingStates(prev => ({ ...prev, disputes: true }));
+      promises.push(
+        adminApi.getDisputes().then(res => {
+          if (res.error) throw new Error(res.error);
+          if (!res.data) throw new Error("Disputes response was empty");
+          setDisputes(res.data);
+          setCachedData("disputes", res.data);
+        }).catch(err => {
+          console.error("Disputes fetch failed:", err);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch disputes");
+        }).finally(() => setLoadingStates(prev => ({ ...prev, disputes: false })))
+      );
+    }
+
     // Dashboard stats
-    if (!getCachedData('dashboardStats')) {
+    if (force || !getCachedData('dashboardStats')) {
       promises.push(
         adminApi.getDashboardStats().then(res => {
-          if (res.data) {
-            setEnhancedStats(res.data);
-            setCachedData('dashboardStats', res.data);
-          }
-        }).catch(err => console.error("Dashboard stats fetch failed:", err))
+          if (res.error) throw new Error(res.error);
+          if (!res.data) throw new Error("Dashboard stats response was empty");
+          setEnhancedStats(res.data);
+          setCachedData('dashboardStats', res.data);
+        }).catch(err => {
+          console.error("Dashboard stats fetch failed:", err);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch dashboard stats");
+        })
       );
     }
 
     // System health
-    if (!getCachedData('systemHealth')) {
+    if (force || !getCachedData('systemHealth')) {
       setLoadingStates(prev => ({ ...prev, systemHealth: true }));
       promises.push(
         adminApi.getSystemHealth().then(res => {
-          if (res.data) {
-            setSystemHealth(res.data);
-            setCachedData('systemHealth', res.data, 60000); // 1 minute TTL
-          }
-        }).catch(err => console.error("System health fetch failed:", err))
+          if (res.error) throw new Error(res.error);
+          if (!res.data) throw new Error("System health response was empty");
+          setSystemHealth(res.data);
+          setCachedData('systemHealth', res.data, 60000);
+        }).catch(err => {
+          console.error("System health fetch failed:", err);
+          toast.error(err instanceof Error ? err.message : "Failed to fetch system health");
+        })
           .finally(() => setLoadingStates(prev => ({ ...prev, systemHealth: false })))
       );
     }
@@ -372,8 +430,137 @@ export default function AdminDashboardView({ user }: Props) {
     await Promise.allSettled(promises);
   }, []);
 
-  const fetchActivityData = useCallback(async () => {
-    if (getCachedData('activity')) return;
+  const fetchPayouts = useCallback(async (force = false) => {
+    if (!force && payoutsLoaded) return;
+    setLoadingStates(prev => ({ ...prev, payouts: true }));
+    setPayoutsLoadError(null);
+    try {
+      const result = await adminPayoutsApi.getAll();
+      if (result.error) throw new Error(result.error);
+      if (!result.data) throw new Error("Payouts response was empty");
+      setPayouts(result.data);
+    } catch (error) {
+      console.error("Failed to fetch payouts:", error);
+      const message = error instanceof Error ? error.message : "Failed to fetch payouts";
+      setPayoutsLoadError(message);
+      toast.error(message);
+    } finally {
+      setPayoutsLoaded(true);
+      setLoadingStates(prev => ({ ...prev, payouts: false }));
+    }
+  }, [payoutsLoaded]);
+
+  const fetchAdminSettings = useCallback(async (force = false) => {
+    if (!force && settingsLoaded) return;
+    setLoadingStates(prev => ({ ...prev, settings: true }));
+    setSettingsLoadError(null);
+    try {
+      const result = await adminApi.getSettings();
+      if (result.error) throw new Error(result.error);
+      if (!result.data) throw new Error("Admin settings response was empty");
+      setAdminSettings(result.data);
+    } catch (error) {
+      console.error("Failed to fetch admin settings:", error);
+      const message = error instanceof Error ? error.message : "Failed to fetch admin settings";
+      setSettingsLoadError(message);
+      toast.error(message);
+    } finally {
+      setSettingsLoaded(true);
+      setLoadingStates(prev => ({ ...prev, settings: false }));
+    }
+  }, [settingsLoaded]);
+
+  const handleResolveDispute = async (dispute: AdminDispute) => {
+    const resolution = disputeResolutionDrafts[dispute.id]?.trim();
+    if (!resolution) {
+      toast.error("Add a resolution note before closing the dispute");
+      return;
+    }
+    if (!window.confirm("Record this resolution and close the dispute? No refund or payout will be issued.")) {
+      return;
+    }
+    try {
+      const result = await adminApi.resolveDispute(dispute.id, resolution);
+      if (result.error) throw new Error(result.error);
+      toast.success("Dispute recorded and closed. No money was moved.");
+      setDisputeResolutionDrafts((drafts) => {
+        const { [dispute.id]: _resolved, ...remaining } = drafts;
+        return remaining;
+      });
+      await Promise.all([fetchCriticalData(), fetchSecondaryData(true)]);
+    } catch (error) {
+      console.error("Failed to resolve dispute:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to resolve dispute");
+    }
+  };
+
+  const handleApprovePayout = async (payout: AdminPayout) => {
+    if (payout.status !== "pending" || !payout.funds_reserved) return;
+    const destination = [payout.momo_number, payout.network].filter(Boolean).join(" / ");
+    if (!window.confirm(
+      `Send GHS ${payout.amount.toFixed(2)} to ${payout.seller.full_name}${destination ? ` (${destination})` : ""} using Paystack?`
+    )) return;
+
+    setPayoutActionId(payout.id);
+    try {
+      const result = await adminPayoutsApi.approve(payout.id);
+      if (result.error) throw new Error(result.error);
+      toast.success("Payout transfer initiated");
+      await fetchPayouts(true);
+    } catch (error) {
+      console.error("Failed to initiate payout:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to initiate payout");
+      await fetchPayouts(true);
+    } finally {
+      setPayoutActionId(null);
+    }
+  };
+
+  const handleRejectPayout = async (payout: AdminPayout) => {
+    if (payout.status !== "pending") return;
+    const reason = window.prompt("Reason for rejection (will be sent to the seller):");
+    if (reason === null) return;
+    if (!window.confirm(
+      payout.funds_reserved
+        ? `Reject this GHS ${payout.amount.toFixed(2)} payout and return it to ${payout.seller.full_name}'s wallet?`
+        : "Reject this legacy payout? Its funds were not reserved, so no wallet credit will be made."
+    )) return;
+
+    setPayoutActionId(payout.id);
+    try {
+      const result = await adminPayoutsApi.reject(payout.id, reason.trim() || "Rejected by admin");
+      if (result.error) throw new Error(result.error);
+      toast.success(result.data?.message ?? "Payout rejected");
+      await fetchPayouts(true);
+    } catch (error) {
+      console.error("Failed to reject payout:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to reject payout");
+      await fetchPayouts(true);
+    } finally {
+      setPayoutActionId(null);
+    }
+  };
+
+  const handleSaveAdminSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!adminSettings) return;
+    setIsSavingSettings(true);
+    try {
+      const result = await adminApi.updateSettings(adminSettings);
+      if (result.error) throw new Error(result.error);
+      if (!result.data) throw new Error("Settings update returned no data");
+      setAdminSettings(result.data);
+      toast.success("Admin settings saved. Commission changes apply to future payments only.");
+    } catch (error) {
+      console.error("Failed to save admin settings:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save admin settings");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const fetchActivityData = useCallback(async (force = false) => {
+    if (!force && getCachedData('activity')) return;
 
     setLoadingStates(prev => ({ ...prev, activity: true }));
     try {
@@ -382,6 +569,9 @@ export default function AdminDashboardView({ user }: Props) {
         adminApi.getTopSellers(10),
         adminApi.getRevenueAnalytics("month")
       ]);
+      const requestError = [activityRes, topSellersRes, revenueRes]
+        .find((response) => response.error)?.error;
+      if (requestError) throw new Error(requestError);
 
       if (activityRes.data) {
         setRecentActivity(activityRes.data);
@@ -400,39 +590,46 @@ export default function AdminDashboardView({ user }: Props) {
 
     } catch (error) {
       console.error("Failed to fetch activity data:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to fetch activity data");
     } finally {
       setLoadingStates(prev => ({ ...prev, activity: false, topSellers: false, revenue: false }));
     }
   }, []);
 
-  const fetchNotificationsAndReferrals = useCallback(async () => {
-    if (getCachedData('notifications') && getCachedData('referrals')) return;
+  const fetchNotificationsAndReferrals = useCallback(async (force = false) => {
+    if (!force && getCachedData('notifications') && getCachedData('referrals')) return;
 
     try {
       const promises = [];
 
-      if (!getCachedData('notifications')) {
+      if (force || !getCachedData('notifications')) {
         setLoadingStates(prev => ({ ...prev, notifications: true }));
         promises.push(
           notificationsApi.getAll(1, 50).then(res => {
-            if (res.data?.notifications) {
-              setNotifications(res.data.notifications);
-              setCachedData('notifications', res.data.notifications, 30000);
-            }
-          }).catch(err => console.error("Notifications fetch failed:", err))
+            if (res.error) throw new Error(res.error);
+            if (!res.data?.notifications) throw new Error("Notifications response was empty");
+            setNotifications(res.data.notifications);
+            setCachedData('notifications', res.data.notifications, 30000);
+          }).catch(err => {
+            console.error("Notifications fetch failed:", err);
+            toast.error(err instanceof Error ? err.message : "Failed to fetch notifications");
+          })
             .finally(() => setLoadingStates(prev => ({ ...prev, notifications: false })))
         );
       }
 
-      if (!getCachedData('referrals')) {
+      if (force || !getCachedData('referrals')) {
         setLoadingStates(prev => ({ ...prev, referrals: true }));
         promises.push(
           referralsApi.getAdminStats().then(res => {
-            if (res.data) {
-              setReferralStats(res.data);
-              setCachedData('referrals', res.data, 120000); // 2 minutes
-            }
-          }).catch(err => console.error("Referrals fetch failed:", err))
+            if (res.error) throw new Error(res.error);
+            if (!res.data) throw new Error("Referral stats response was empty");
+            setReferralStats(res.data);
+            setCachedData('referrals', res.data, 120000);
+          }).catch(err => {
+            console.error("Referrals fetch failed:", err);
+            toast.error(err instanceof Error ? err.message : "Failed to fetch referrals");
+          })
             .finally(() => setLoadingStates(prev => ({ ...prev, referrals: false })))
         );
       }
@@ -442,28 +639,6 @@ export default function AdminDashboardView({ user }: Props) {
       console.error("Failed to fetch notifications and referrals:", error);
     }
   }, []);
-
-  // Optimized refresh function
-  const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-
-    // Clear cache for immediate refresh
-    setDataCache({});
-
-    try {
-      await Promise.all([
-        fetchCriticalData(),
-        fetchSecondaryData(),
-        fetchActivityData(),
-        fetchNotificationsAndReferrals()
-      ]);
-    } catch (error) {
-      console.error("Refresh failed:", error);
-      toast.error("Failed to refresh data");
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [fetchCriticalData, fetchSecondaryData, fetchActivityData, fetchNotificationsAndReferrals]);
 
   // Initial load - progressive loading
   useEffect(() => {
@@ -493,23 +668,34 @@ export default function AdminDashboardView({ user }: Props) {
   }, []);
   
   // Fetch services
-  const fetchServices = useCallback(async () => {
+  const fetchServices = useCallback(async (force = false) => {
+    if (!force && servicesLoaded) return;
     setLoadingStates(prev => ({ ...prev, services: true }));
     try {
       const res = await servicesApi.getAll(undefined, 100, 0);
-      if (res.data?.services) setServices(res.data.services);
+      if (res.error) throw new Error(res.error);
+      if (!res.data?.services) throw new Error("Services response was empty");
+      setServices(res.data.services);
+      setServicesLoaded(true);
     } catch (error) {
       console.error("Failed to fetch services:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to fetch services");
+      setServicesLoaded(true);
     } finally {
       setLoadingStates(prev => ({ ...prev, services: false }));
     }
-  }, []);
+  }, [servicesLoaded]);
   
   useEffect(() => {
-    if (tab === "services" && services.length === 0) {
+    if (tab === "services" && !servicesLoaded) {
       fetchServices();
     }
-  }, [tab, services.length, fetchServices]);
+  }, [tab, servicesLoaded, fetchServices]);
+
+  useEffect(() => {
+    if (tab === "payouts" && !payoutsLoaded) fetchPayouts();
+    if (tab === "settings" && !settingsLoaded) fetchAdminSettings();
+  }, [tab, payoutsLoaded, settingsLoaded, fetchPayouts, fetchAdminSettings]);
 
   const fetchFeedback = useCallback(async () => {
     setLoadingStates(prev => ({ ...prev, feedback: true }));
@@ -518,14 +704,65 @@ export default function AdminDashboardView({ user }: Props) {
         feedbackApi.getStats(),
         feedbackApi.getAll(1, 50),
       ]);
-      if (statsRes.data?.stats) setFeedbackStats(statsRes.data.stats);
-      if (listRes.data?.feedback) setFeedbackList(listRes.data.feedback);
+      if (statsRes.error) throw new Error(statsRes.error);
+      if (listRes.error) throw new Error(listRes.error);
+      const stats = statsRes.data?.stats;
+      if (!stats || !listRes.data?.feedback) throw new Error("Feedback response was incomplete");
+      setFeedbackStats({
+        total_feedback: stats.total,
+        avg_rating: stats.average_rating,
+        recommend_percentage: stats.recommend_responses
+          ? Math.round((stats.would_recommend / stats.recommend_responses) * 100)
+          : 0,
+        satisfied_percentage: stats.satisfaction_responses
+          ? Math.round((stats.satisfied / stats.satisfaction_responses) * 100)
+          : 0,
+        five_star_count: stats.rating_counts?.[5] ?? 0,
+        four_star_count: stats.rating_counts?.[4] ?? 0,
+        three_star_count: stats.rating_counts?.[3] ?? 0,
+        two_star_count: stats.rating_counts?.[2] ?? 0,
+        one_star_count: stats.rating_counts?.[1] ?? 0,
+      });
+      setFeedbackList(listRes.data.feedback);
     } catch (error) {
       console.error("Failed to fetch feedback:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to fetch feedback");
     } finally {
       setLoadingStates(prev => ({ ...prev, feedback: false }));
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    setDataCache({});
+
+    try {
+      await Promise.all([
+        fetchCriticalData(),
+        fetchSecondaryData(true),
+        fetchActivityData(true),
+        fetchNotificationsAndReferrals(true),
+        fetchServices(true),
+        fetchPayouts(true),
+        fetchAdminSettings(true),
+        fetchFeedback(),
+      ]);
+    } catch (error) {
+      console.error("Refresh failed:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to refresh data");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [
+    fetchCriticalData,
+    fetchSecondaryData,
+    fetchActivityData,
+    fetchNotificationsAndReferrals,
+    fetchServices,
+    fetchPayouts,
+    fetchAdminSettings,
+    fetchFeedback,
+  ]);
 
   useEffect(() => {
     if (tab === "feedback" && feedbackStats === null) {
@@ -545,31 +782,42 @@ export default function AdminDashboardView({ user }: Props) {
   const prevEnd = new Date(+startDate - 1);
   const prevStart = new Date(+prevEnd - rangeSpan + 1);
   
-  const settledStatuses = new Set<string>(["paid", "completed"]);
+  const settledStatuses = SETTLED_STATUSES;
   const search = searchTerm.toLowerCase().trim();
   
   // Filter data by range
   const rangeOrders = orders.filter((o) => inRange(o.created_at, startDate, endDate));
   const prevOrders = orders.filter((o) => inRange(o.created_at, prevStart, prevEnd));
+  const rangeUsers = users.filter((u) => inRange(u.created_at ?? "", startDate, endDate));
+  const prevUsers = users.filter((u) => inRange(u.created_at ?? "", prevStart, prevEnd));
   const rangeProducts = products.filter((p) => inRange(p.created_at || "", startDate, endDate));
   const prevProducts = products.filter((p) => inRange(p.created_at || "", prevStart, prevEnd));
   
   // Financial calculations
   const gmv = rangeOrders.reduce((sum, o) => sum + o.amount, 0);
   const prevGmv = prevOrders.reduce((sum, o) => sum + o.amount, 0);
-  const revenue = rangeOrders.filter((o) => settledStatuses.has(o.status)).reduce((sum, o) => sum + o.amount * COMMISSION_RATE, 0);
-  const prevRevenue = prevOrders.filter((o) => settledStatuses.has(o.status)).reduce((sum, o) => sum + o.amount * COMMISSION_RATE, 0);
+  const revenueOrders = orders.filter(
+    (o) => settledStatuses.has(o.status) && inRange(o.paid_at || o.created_at, startDate, endDate)
+  );
+  const previousRevenueOrders = orders.filter(
+    (o) => settledStatuses.has(o.status) && inRange(o.paid_at || o.created_at, prevStart, prevEnd)
+  );
+  const revenue = revenueOrders.reduce((sum, o) => sum + (o.commission ?? 0), 0);
+  const prevRevenue = previousRevenueOrders.reduce((sum, o) => sum + (o.commission ?? 0), 0);
+  const settledOrderVolume = revenueOrders.reduce((sum, order) => sum + order.amount, 0);
+  const recordedCommissionRate = settledOrderVolume > 0 ? (revenue / settledOrderVolume) * 100 : 0;
   
   // Seller metrics
   const sellers = users.filter((u) => u.role === "seller");
   const activeSellers = sellers.filter((s) => products.some((p) => p.seller_id === s.id && p.is_active));
-  const pendingVerification = sellers.filter((s) => !s.momo_number);
-  const verifiedSellers = sellers.filter((s) => s.momo_number);
+  const pendingVerification = sellers.filter((s) => !s.verified);
+  const verifiedSellers = sellers.filter((s) => s.verified);
   
   // Marketplace quality metrics
   const openDisputes = orders.filter((o) => o.status === "disputed");
-  const disputeRate = rangeOrders.length > 0 ? (openDisputes.length / rangeOrders.length) * 100 : 0;
-  const flaggedProducts = products.filter((p) => !p.is_active);
+  const rangeDisputes = rangeOrders.filter((order) => order.status === "disputed");
+  const disputeRate = rangeOrders.length > 0 ? (rangeDisputes.length / rangeOrders.length) * 100 : 0;
+  const inactiveProducts = products.filter((p) => !p.is_active);
   
   // Daily trend data
   const dayKeys: string[] = [];
@@ -580,7 +828,9 @@ export default function AdminDashboardView({ user }: Props) {
   const revenueTrend = dayKeys.map((day) => {
     const dayOrders = rangeOrders.filter((o) => o.created_at.startsWith(day));
     const dayGmv = dayOrders.reduce((sum, o) => sum + o.amount, 0);
-    const dayRevenue = dayOrders.filter((o) => settledStatuses.has(o.status)).reduce((sum, o) => sum + o.amount * COMMISSION_RATE, 0);
+    const dayRevenue = orders
+      .filter((o) => settledStatuses.has(o.status) && (o.paid_at || o.created_at).startsWith(day))
+      .reduce((sum, o) => sum + (o.commission ?? 0), 0);
     return { day: day.slice(5), gmv: +dayGmv.toFixed(2), revenue: +dayRevenue.toFixed(2) };
   });
   
@@ -621,7 +871,7 @@ export default function AdminDashboardView({ user }: Props) {
   const topSellers = useMemo(() => {
     const sellerOrders: Record<string, number> = {};
     orders.forEach((o) => {
-      if (o.seller_id) {
+      if (o.seller_id && settledStatuses.has(o.status)) {
         sellerOrders[o.seller_id] = (sellerOrders[o.seller_id] || 0) + o.amount;
       }
     });
@@ -632,7 +882,7 @@ export default function AdminDashboardView({ user }: Props) {
       })
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
-  }, [orders, users]);
+  }, [orders, users, settledStatuses]);
   
   // Activities feed
   const activities = useMemo(() => {
@@ -648,7 +898,7 @@ export default function AdminDashboardView({ user }: Props) {
         id: `payment-${o.id}`, 
         type: "payments" as const, 
         text: `Payment of ${fmtCurrency(o.amount)} settled for Order #${o.id.slice(-6)}`, 
-        time: o.created_at,
+        time: o.paid_at || o.created_at,
         severity: "normal" as const
       })),
       ...openDisputes.map((o) => ({ 
@@ -690,7 +940,7 @@ export default function AdminDashboardView({ user }: Props) {
       updatedAt: openDisputes[0]?.created_at || now.toISOString(),
       age: openDisputes[0] ? getDaysOld(openDisputes[0].created_at) : 0,
       sla: openDisputes[0] ? getSLAStatus(getDaysOld(openDisputes[0].created_at)) : "ok",
-      cta: "Resolve", 
+      cta: "Review",
       target: "disputes" as const,
       description: "Disputes requiring immediate attention"
     },
@@ -708,15 +958,15 @@ export default function AdminDashboardView({ user }: Props) {
     },
     { 
       id: "flagged-products", 
-      label: "Flagged Content", 
-      count: flaggedProducts.length, 
-      priority: getFlaggedContentPriority(flaggedProducts.length), 
+      label: "Hidden Listings",
+      count: inactiveProducts.length,
+      priority: getFlaggedContentPriority(inactiveProducts.length),
       updatedAt: products[0]?.created_at || now.toISOString(),
       age: 0,
       sla: "ok",
       cta: "Review", 
       target: "products" as const,
-      description: "Products reported or hidden for review"
+      description: "Inactive products; this is not a report/flag queue"
     },
     { 
       id: "pending-orders", 
@@ -732,7 +982,7 @@ export default function AdminDashboardView({ user }: Props) {
     },
     {
       id: "notifications",
-      label: "Unread Notifications",
+      label: "Unread Account Notifications",
       count: notifications.filter((n) => !n.is_read).length,
       priority: "low",
       updatedAt: notifications[0]?.created_at || now.toISOString(),
@@ -740,9 +990,9 @@ export default function AdminDashboardView({ user }: Props) {
       sla: "ok",
       cta: "View",
       target: "notifications" as const,
-      description: "Unread system notifications"
+      description: "Unread notifications for your admin account"
     }
-  ], [openDisputes, verifications, pendingVerification, flaggedProducts, orders, products, notifications]);
+  ], [openDisputes, verifications, pendingVerification, inactiveProducts, orders, products, notifications]);
   
   function getFlaggedContentPriority(count: number): PriorityLevel {
     if (count > 3) return "high";
@@ -751,96 +1001,131 @@ export default function AdminDashboardView({ user }: Props) {
   }
   
   // Action handlers
-  const handleResolveDispute = async (orderId: string) => {
-    try {
-      await adminApi.updateOrderStatus(orderId, "paid");
-      toast.success(`Dispute on order #${orderId.slice(-6)} resolved`);
-      await fetchCriticalData(); // Refresh orders data
-    } catch (error) {
-      toast.error("Failed to resolve dispute");
-    }
-  };
-  
   const handleVerifySeller = async (verificationId: string) => {
     try {
-      await verificationApi.approve(verificationId);
+      const result = await verificationApi.approve(verificationId);
+      if (result.error) throw new Error(result.error);
       toast.success("Seller verified successfully");
-      await fetchSecondaryData(); // Refresh verifications data
+      await fetchSecondaryData(true);
     } catch (error) {
-      toast.error("Failed to verify seller");
+      console.error("Failed to verify seller:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to verify seller");
     }
   };
   
   const handleRejectVerification = async (verificationId: string) => {
     try {
-      await verificationApi.reject(verificationId, "Verification rejected by admin");
+      const result = await verificationApi.reject(verificationId, "Verification rejected by admin");
+      if (result.error) throw new Error(result.error);
       toast.success("Verification rejected");
-      await fetchSecondaryData(); // Refresh verifications data
+      await fetchSecondaryData(true);
     } catch (error) {
-      toast.error("Failed to reject verification");
+      console.error("Failed to reject verification:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to reject verification");
     }
   };
   
   const handleRestoreProduct = async (productId: string) => {
     try {
-      // Note: Need to add this endpoint to admin API
+      const result = await adminApi.updateProduct(productId, { is_active: true });
+      if (result.error) throw new Error(result.error);
       toast.success("Product restored successfully");
-      await fetchCriticalData(); // Refresh products data
+      await fetchCriticalData();
     } catch (error) {
-      toast.error("Failed to restore product");
+      console.error("Failed to restore product:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to restore product");
+    }
+  };
+
+  const handleCreateCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = categoryName.trim();
+    if (!name) return;
+
+    try {
+      const result = await categoriesApi.create({ name });
+      if (result.error) throw new Error(result.error);
+      setCategoryName("");
+      setIsAddingCategory(false);
+      setDataCache((prev) => {
+        const { categories: _categories, ...rest } = prev;
+        return rest;
+      });
+      await fetchSecondaryData(true);
+      toast.success("Category created");
+    } catch (error) {
+      console.error("Failed to create category:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to create category");
+    }
+  };
+
+  const handleSetCategoryActive = async (category: Category) => {
+    try {
+      const result = await categoriesApi.setActive(category.id, !category.is_active);
+      if (result.error) throw new Error(result.error);
+      setDataCache((prev) => {
+        const { categories: _categories, ...rest } = prev;
+        return rest;
+      });
+      await fetchSecondaryData(true);
+      toast.success(category.is_active ? "Category deactivated" : "Category activated");
+    } catch (error) {
+      console.error("Failed to update category:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update category");
     }
   };
   
   const handleRemoveProduct = async (productId: string) => {
     try {
-      await adminApi.removeProduct(productId);
+      const result = await adminApi.removeProduct(productId);
+      if (result.error) throw new Error(result.error);
       toast.success("Product removed");
       await fetchCriticalData(); // Refresh products data
     } catch (error) {
-      toast.error("Failed to remove product");
+      console.error("Failed to remove product:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to remove product");
     }
   };
   
   const handleBanUser = async (userId: string) => {
     try {
-      await adminApi.banUser(userId);
+      const result = await adminApi.banUser(userId);
+      if (result.error) throw new Error(result.error);
       toast.success("User banned");
       await fetchCriticalData(); // Refresh users data
     } catch (error) {
-      toast.error("Failed to ban user");
+      console.error("Failed to ban user:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to ban user");
     }
   };
   
   const handleUnbanUser = async (userId: string) => {
     try {
-      await adminApi.unbanUser(userId);
+      const result = await adminApi.unbanUser(userId);
+      if (result.error) throw new Error(result.error);
       toast.success("User unbanned");
       await fetchCriticalData(); // Refresh users data
     } catch (error) {
-      toast.error("Failed to unban user");
+      console.error("Failed to unban user:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to unban user");
     }
   };
   
-  const handleUpdateUserRole = async (userId: string, role: string) => {
+  const handleUpdateUserRole = async (userId: string, role: AdminUserRole) => {
     try {
-      await adminApi.updateUserRole(userId, role as any);
+      const result = await adminApi.updateUserRole(userId, role);
+      if (result.error) throw new Error(result.error);
       toast.success(`User role updated to ${role}`);
       await fetchCriticalData(); // Refresh users data
     } catch (error) {
-      toast.error("Failed to update user role");
+      console.error("Failed to update user role:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update user role");
     }
   };
   
   const handleGenerateReport = async () => {
     try {
-      const reportData = {
-        dateRange: rangePreset,
-        stats,
-        orders: orders.length,
-        products: products.length,
-        users: users.length
-      };
-      const csvContent = `Admin Report - ${new Date().toLocaleDateString()}\n\nPlatform Statistics:\nTotal Users: ${users.length}\nTotal Orders: ${orders.length}\nTotal Products: ${products.length}\nTotal Revenue: GHS ${stats?.totalRevenue || 0}\nCommission: GHS ${stats?.commission || 0}`;
+      const csvContent = `Admin Report - ${new Date().toLocaleDateString()}\n\nPlatform Statistics:\nTotal Users: ${users.length}\nTotal Orders: ${orders.length}\nTotal Products: ${products.length}\nGross Order Volume: GHS ${stats?.totalRevenue ?? 0}\nRecorded Commission: GHS ${stats?.commission ?? 0}`;
       const blob = new Blob([csvContent], { type: "text/csv" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -849,7 +1134,8 @@ export default function AdminDashboardView({ user }: Props) {
       a.click();
       toast.success("Report generated and downloaded");
     } catch (error) {
-      toast.error("Failed to generate report");
+      console.error("Failed to generate admin report:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate report");
     }
   };
   
@@ -858,37 +1144,64 @@ export default function AdminDashboardView({ user }: Props) {
     setTab("users");
   };
   
-  const handleCampaign = () => {
-    toast.info("Campaign feature coming soon. Stay tuned!");
-  };
-  
   const handleMarkNotificationRead = async (notificationId: string) => {
     try {
-      await notificationsApi.markAsRead(notificationId);
-      await fetchNotificationsAndReferrals(); // Refresh notifications data
+      const result = await notificationsApi.markAsRead(notificationId);
+      if (result.error) throw new Error(result.error);
+      await fetchNotificationsAndReferrals(true);
     } catch (error) {
       console.error("Failed to mark notification read:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to mark notification as read");
     }
   };
   
   const handleMarkAllNotificationsRead = async () => {
     try {
-      await notificationsApi.markAllAsRead();
+      const result = await notificationsApi.markAllAsRead();
+      if (result.error) throw new Error(result.error);
       toast.success("All notifications marked as read");
-      await fetchNotificationsAndReferrals(); // Refresh notifications data
+      await fetchNotificationsAndReferrals(true);
     } catch (error) {
-      toast.error("Failed to mark all notifications as read");
+      console.error("Failed to mark all notifications as read:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to mark all notifications as read");
     }
   };
   
   // Bulk actions
   const handleBulkAction = async () => {
     if (!bulkAction || selectedItems.size === 0) return;
-    
-    toast.info(`Processing ${selectedItems.size} items...`);
-    setSelectedItems(new Set());
-    setBulkAction("");
-    handleRefresh();
+    const ids = [...selectedItems];
+
+    try {
+      if (bulkAction === "export") {
+        const rows = tab === "users"
+          ? users.filter((item) => selectedItems.has(item.id)).map((item) => [item.full_name ?? "", item.email, item.role])
+          : products.filter((item) => selectedItems.has(item.id)).map((item) => [item.title, item.seller?.full_name ?? "", item.price, item.category ?? ""]);
+        const csv = rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
+        const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `admin-${tab}-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else if (tab === "users" && ["ban", "unban", "verify"].includes(bulkAction)) {
+        const result = await adminApi.bulkUsers(ids, bulkAction as "ban" | "unban" | "verify");
+        if (result.error) throw new Error(result.error);
+      } else if (tab === "products" && ["approve", "reject", "delete"].includes(bulkAction)) {
+        const result = await adminApi.bulkProducts(ids, bulkAction as "approve" | "reject" | "delete");
+        if (result.error) throw new Error(result.error);
+      } else {
+        throw new Error("Choose an action supported for this list");
+      }
+
+      toast.success(bulkAction === "export" ? "Selected records exported" : `Updated ${ids.length} selected ${tab}`);
+      setSelectedItems(new Set());
+      setBulkAction("");
+      await fetchCriticalData();
+    } catch (error) {
+      console.error("Bulk admin action failed:", error);
+      toast.error(error instanceof Error ? error.message : "Bulk action failed");
+    }
   };
   
   const toggleSelection = (id: string) => {
@@ -913,15 +1226,15 @@ export default function AdminDashboardView({ user }: Props) {
   const exportCsv = () => {
     const csv = [
       ["Metric", "Value", "Previous Period", "Change"],
-      ["Users (range)", String(rangeOrders.length), String(prevOrders.length), fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))],
+      ["Users (range)", String(rangeUsers.length), String(prevUsers.length), fmtDelta(percentDelta(rangeUsers.length, prevUsers.length))],
       ["Products (range)", String(rangeProducts.length), String(prevProducts.length), fmtDelta(percentDelta(rangeProducts.length, prevProducts.length))],
       ["Orders (range)", String(rangeOrders.length), String(prevOrders.length), fmtDelta(percentDelta(rangeOrders.length, prevOrders.length))],
       ["Gross Merchandise Value", gmv.toFixed(2), prevGmv.toFixed(2), fmtDelta(percentDelta(gmv, prevGmv))],
-      ["Platform Revenue", revenue.toFixed(2), prevRevenue.toFixed(2), fmtDelta(percentDelta(revenue, prevRevenue))],
+      ["Recorded Platform Commission", revenue.toFixed(2), prevRevenue.toFixed(2), fmtDelta(percentDelta(revenue, prevRevenue))],
       ["Active Sellers", String(activeSellers.length), "-", "-"],
       ["Verified Sellers", String(verifiedSellers.length), "-", "-"],
       ["Open Disputes", String(openDisputes.length), "-", "-"],
-      ["Dispute Rate", `${disputeRate.toFixed(2)}%`, "-", "-"],
+      ["Dispute Rate (selected period)", `${disputeRate.toFixed(2)}%`, "-", "-"],
     ].map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -937,7 +1250,13 @@ export default function AdminDashboardView({ user }: Props) {
   const filteredUsers = users.filter((u) => !search || `${u.full_name} ${u.email} ${u.role}`.toLowerCase().includes(search));
   const filteredProducts = products.filter((p) => !search || `${p.title} ${p.seller?.full_name} ${p.category}`.toLowerCase().includes(search));
   const filteredOrders = orders.filter((o) => !search || `${o.id} ${o.product?.title} ${o.buyer?.full_name} ${o.seller?.full_name} ${o.status}`.toLowerCase().includes(search));
-  const filteredDisputes = openDisputes.filter((o) => !search || `${o.id} ${o.product?.title} ${o.buyer?.full_name} ${o.seller?.full_name}`.toLowerCase().includes(search));
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null;
+  const filteredDisputes = disputes.filter((dispute) =>
+    !search ||
+    `${dispute.order_id} ${dispute.reason} ${dispute.description} ${dispute.raised_by.full_name} ${dispute.raised_by.email} ${dispute.order?.product ?? ""}`
+      .toLowerCase()
+      .includes(search)
+  );
   const filteredCategories = categories.filter((c) => !search || c.name.toLowerCase().includes(search));
   const filteredServices = services.filter((s) => !search || `${s.title} ${s.provider?.full_name}`.toLowerCase().includes(search));
   const filteredNotifications = notifications.filter((n) => !search || `${n.title} ${n.body}`.toLowerCase().includes(search));
@@ -957,7 +1276,7 @@ export default function AdminDashboardView({ user }: Props) {
     compliance: {
       title: "Compliance Dashboard",
       description: "Disputes, verification status, and content moderation",
-      primaryMetrics: ["Disputes", "Verification Queue", "Flagged Content", "Dispute Rate"],
+      primaryMetrics: ["Disputes", "Verification Queue", "Hidden Listings", "Dispute Rate"],
     },
     content: {
       title: "Content Dashboard",
@@ -1022,7 +1341,9 @@ export default function AdminDashboardView({ user }: Props) {
           </div>
         </div>
         
-        {/* Role Tabs */}
+        <p className="mt-4 text-xs text-slate-400">
+          Dashboard views only; access is controlled by your admin account.
+        </p>
         <div className="mt-4 flex flex-wrap gap-1 border-b border-slate-200">
           {(["operations", "finance", "compliance", "content", "growth"] as AdminRole[]).map((role) => (
             <button
@@ -1039,7 +1360,7 @@ export default function AdminDashboardView({ user }: Props) {
               {role === "compliance" && <Shield className="inline h-4 w-4 mr-1" />}
               {role === "content" && <Layers className="inline h-4 w-4 mr-1" />}
               {role === "growth" && <TrendingUp className="inline h-4 w-4 mr-1" />}
-              {role}
+              {role} view
             </button>
           ))}
         </div>
@@ -1106,9 +1427,6 @@ export default function AdminDashboardView({ user }: Props) {
               </Button>
               <Button variant="outline" size="sm" onClick={() => setTab("leaderboard")} className="text-xs">
                 <Trophy className="mr-1 h-3 w-3" /> Leaderboard
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleCampaign} className="text-xs">
-                <Mail className="mr-1 h-3 w-3" /> Campaign
               </Button>
             </>
           )}
@@ -1245,7 +1563,7 @@ export default function AdminDashboardView({ user }: Props) {
               {enhancedStats ? (
                 <>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">Active Users</span>
+                    <span className="text-sm text-slate-600">Non-banned Users</span>
                     <span className="font-semibold">{enhancedStats.users.active.toLocaleString()}</span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -1265,7 +1583,7 @@ export default function AdminDashboardView({ user }: Props) {
                     <span className="font-semibold">{enhancedStats.products.active}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">This Month Revenue</span>
+                    <span className="text-sm text-slate-600">Platform Commission (this month)</span>
                     <span className="font-semibold text-emerald-600">{fmtCurrency(enhancedStats.revenue.thisMonth)}</span>
                   </div>
                   <div className="border-t pt-2 mt-2">
@@ -1294,19 +1612,19 @@ export default function AdminDashboardView({ user }: Props) {
                 <>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-600">Total Users</span>
-                    <span className="font-semibold">{stats?.totalUsers || users.length}</span>
+                    <span className="font-semibold">{stats?.totalUsers ?? users.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-600">Total Orders</span>
-                    <span className="font-semibold">{stats?.totalOrders || orders.length}</span>
+                    <span className="font-semibold">{stats?.totalOrders ?? orders.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-600">Total Products</span>
-                    <span className="font-semibold">{stats?.totalProducts || products.length}</span>
+                    <span className="font-semibold">{stats?.totalProducts ?? products.length}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">Revenue (10%)</span>
-                    <span className="font-semibold text-emerald-600">{fmtCurrency(stats?.commission || revenue)}</span>
+                    <span className="text-sm text-slate-600">Recorded Commission</span>
+                    <span className="font-semibold text-emerald-600">{fmtCurrency(stats?.commission ?? revenue)}</span>
                   </div>
                 </>
               )}
@@ -1324,8 +1642,8 @@ export default function AdminDashboardView({ user }: Props) {
                     <span className="text-slate-600">{systemHealth.database.responseTime}ms</span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">API Uptime</span>
-                    <span className="text-slate-600">{Math.floor(systemHealth.api.uptime / 3600)}h</span>
+                    <span className="text-slate-500">API Runtime</span>
+                    <span className="text-slate-600">Convex managed</span>
                   </div>
                 </div>
               )}
@@ -1406,7 +1724,7 @@ export default function AdminDashboardView({ user }: Props) {
                       <>
                         <Card className="bg-teal-50 border-teal-200">
                           <CardContent className="p-3 lg:p-4">
-                            <p className="text-xs lg:text-sm text-teal-700">Revenue</p>
+                            <p className="text-xs lg:text-sm text-teal-700">Platform Commission</p>
                             <p className="text-xl lg:text-2xl font-bold text-teal-900">{fmtCurrency(revenue)}</p>
                             <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(revenue, prevRevenue))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
                               {fmtDelta(percentDelta(revenue, prevRevenue))}
@@ -1422,9 +1740,9 @@ export default function AdminDashboardView({ user }: Props) {
                         </Card>
                         <Card>
                           <CardContent className="p-3 lg:p-4">
-                            <p className="text-xs lg:text-sm text-slate-500">Commission</p>
-                            <p className="text-lg lg:text-xl font-bold text-slate-900">{COMMISSION_RATE * 100}%</p>
-                            <p className="text-xs text-slate-500">Platform fee</p>
+                            <p className="text-xs lg:text-sm text-slate-500">Recorded Commission Rate</p>
+                            <p className="text-lg lg:text-xl font-bold text-slate-900">{recordedCommissionRate.toFixed(1)}%</p>
+                            <p className="text-xs text-slate-500">From settled orders in this period</p>
                           </CardContent>
                         </Card>
                         <Card>
@@ -1458,16 +1776,16 @@ export default function AdminDashboardView({ user }: Props) {
                     </Card>
                     <Card>
                       <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Flagged Content</p>
-                        <p className="text-lg lg:text-xl font-bold text-slate-900">{flaggedProducts.length}</p>
-                        <p className="text-xs text-slate-500">Products</p>
+                        <p className="text-xs lg:text-sm text-slate-500">Hidden Listings</p>
+                        <p className="text-lg lg:text-xl font-bold text-slate-900">{inactiveProducts.length}</p>
+                        <p className="text-xs text-slate-500">Inactive products, not reported content</p>
                       </CardContent>
                     </Card>
                     <Card>
                       <CardContent className="p-3 lg:p-4">
                         <p className="text-xs lg:text-sm text-slate-500">Dispute Rate</p>
                         <p className="text-lg lg:text-xl font-bold text-slate-900">{disputeRate.toFixed(1)}%</p>
-                        <p className="text-xs text-slate-500">of all orders</p>
+                        <p className="text-xs text-slate-500">of orders in selected period</p>
                       </CardContent>
                     </Card>
                   </>
@@ -1499,9 +1817,9 @@ export default function AdminDashboardView({ user }: Props) {
                     </Card>
                     <Card>
                       <CardContent className="p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm text-slate-500">Flagged</p>
-                        <p className="text-xl lg:text-2xl font-bold text-red-900">{flaggedProducts.length}</p>
-                        <p className="text-xs text-slate-500">Needs review</p>
+                        <p className="text-xs lg:text-sm text-slate-500">Hidden Listings</p>
+                        <p className="text-xl lg:text-2xl font-bold text-red-900">{inactiveProducts.length}</p>
+                        <p className="text-xs text-slate-500">Inactive products</p>
                       </CardContent>
                     </Card>
                   </>
@@ -1514,8 +1832,8 @@ export default function AdminDashboardView({ user }: Props) {
                       <CardContent className="p-3 lg:p-4">
                         <p className="text-xs lg:text-sm text-slate-500">Total Users</p>
                         <p className="text-xl lg:text-2xl font-bold text-slate-900">{users.length}</p>
-                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(users.length, Math.floor(users.length * 0.8)))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
-                          {fmtDelta(percentDelta(users.length, Math.floor(users.length * 0.8)))}
+                        <p className={`text-xs font-semibold ${String(fmtDelta(percentDelta(rangeUsers.length, prevUsers.length))).startsWith("+") ? "text-emerald-600" : "text-red-600"}`}>
+                          {fmtDelta(percentDelta(rangeUsers.length, prevUsers.length))} in selected period
                         </p>
                       </CardContent>
                     </Card>
@@ -1549,8 +1867,8 @@ export default function AdminDashboardView({ user }: Props) {
                 <Card>
                   <CardContent className="p-3 lg:p-4">
                     <p className="text-xs lg:text-sm text-slate-500">Platform Revenue</p>
-                    <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(stats?.commission || revenue)}</p>
-                    <p className="text-xs text-slate-500">{COMMISSION_RATE * 100}% of settled</p>
+                    <p className="text-lg lg:text-xl font-bold text-slate-900">{fmtCurrency(stats?.commission ?? revenue)}</p>
+                    <p className="text-xs text-slate-500">Sum recorded on settled orders</p>
                   </CardContent>
                 </Card>
               </div>
@@ -1561,9 +1879,6 @@ export default function AdminDashboardView({ user }: Props) {
                 <Card>
                   <CardHeader className="pb-2 flex flex-row items-center justify-between">
                     <CardTitle className="text-sm">Recent Activity</CardTitle>
-                    <Button variant="ghost" size="sm" className="h-8 text-xs">
-                      View All
-                    </Button>
                   </CardHeader>
                   <CardContent>
                     {loadingStates.activity ? (
@@ -1912,8 +2227,6 @@ export default function AdminDashboardView({ user }: Props) {
                         <option value="ban">Ban Selected</option>
                         <option value="unban">Unban Selected</option>
                         <option value="verify">Verify Users</option>
-                        <option value="make_seller">Make Seller</option>
-                        <option value="make_admin">Make Admin</option>
                         <option value="export">Export Selected</option>
                       </select>
                       <Button size="sm" onClick={handleBulkAction} disabled={!bulkAction} className="h-8">Apply</Button>
@@ -1971,7 +2284,7 @@ export default function AdminDashboardView({ user }: Props) {
                             <td className="py-2 pr-4">
                               <select
                                 value={u.role}
-                                onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
+                                onChange={(e) => handleUpdateUserRole(u.id, e.target.value as AdminUserRole)}
                                 className="text-sm border rounded px-2 py-1"
                               >
                                 <option value="user">User</option>
@@ -2038,7 +2351,6 @@ export default function AdminDashboardView({ user }: Props) {
                         <option value="approve">Approve Products</option>
                         <option value="reject">Reject Products</option>
                         <option value="delete">Delete Products</option>
-                        <option value="feature">Feature Products</option>
                         <option value="export">Export Selected</option>
                       </select>
                       <Button size="sm" onClick={handleBulkAction} disabled={!bulkAction} className="h-8">Apply</Button>
@@ -2122,62 +2434,85 @@ export default function AdminDashboardView({ user }: Props) {
           
           {/* Orders Tab */}
           {tab === "orders" && (
-            <Card>
-              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div>
-                  <CardTitle>Orders Management</CardTitle>
-                  <CardDescription>Track and manage all orders</CardDescription>
-                </div>
-                <Input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Filter orders..."
-                  className="w-full sm:w-64"
-                />
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-slate-500 border-b">
-                        <th className="py-2 pr-4">Order ID</th>
-                        <th className="py-2 pr-4">Product</th>
-                        <th className="py-2 pr-4">Buyer</th>
-                        <th className="py-2 pr-4">Seller</th>
-                        <th className="py-2 pr-4">Amount</th>
-                        <th className="py-2 pr-4">Status</th>
-                        <th className="py-2 pr-4">Date</th>
-                        <th className="py-2 pr-4">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredOrders.map((o) => (
-                        <tr key={o.id} className="border-b">
-                          <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
-                          <td className="py-2 pr-4 max-w-[150px] truncate">{o.product?.title || "-"}</td>
-                          <td className="py-2 pr-4">{o.buyer?.full_name || "-"}</td>
-                          <td className="py-2 pr-4">{o.seller?.full_name || "-"}</td>
-                          <td className="py-2 pr-4">GHS {o.amount}</td>
-                          <td className="py-2 pr-4 capitalize">
-                            <span className={getOrderStatusTextClass(o.status)}>
-                              {o.status}
-                            </span>
-                          </td>
-                          <td className="py-2 pr-4 text-slate-500">
-                            {new Date(o.created_at).toLocaleDateString()}
-                          </td>
-                          <td className="py-2 pr-4">
-                            <Button size="sm" variant="outline" onClick={() => setSelectedOrderId(o.id)}>
-                              View
-                            </Button>
-                          </td>
+            <>
+              <Card>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <CardTitle>Orders Management</CardTitle>
+                    <CardDescription>Track and manage all orders</CardDescription>
+                  </div>
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filter orders..."
+                    className="w-full sm:w-64"
+                  />
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-500 border-b">
+                          <th className="py-2 pr-4">Order ID</th>
+                          <th className="py-2 pr-4">Product</th>
+                          <th className="py-2 pr-4">Buyer</th>
+                          <th className="py-2 pr-4">Seller</th>
+                          <th className="py-2 pr-4">Amount</th>
+                          <th className="py-2 pr-4">Status</th>
+                          <th className="py-2 pr-4">Date</th>
+                          <th className="py-2 pr-4">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {filteredOrders.map((o) => (
+                          <tr key={o.id} className="border-b">
+                            <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
+                            <td className="py-2 pr-4 max-w-[150px] truncate">{o.product?.title || "-"}</td>
+                            <td className="py-2 pr-4">{o.buyer?.full_name || "-"}</td>
+                            <td className="py-2 pr-4">{o.seller?.full_name || "-"}</td>
+                            <td className="py-2 pr-4">GHS {o.amount}</td>
+                            <td className="py-2 pr-4 capitalize">
+                              <span className={getOrderStatusTextClass(o.status)}>{o.status}</span>
+                            </td>
+                            <td className="py-2 pr-4 text-slate-500">
+                              {new Date(o.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="py-2 pr-4">
+                              <Button size="sm" variant="outline" onClick={() => setSelectedOrderId(o.id)}>
+                                View
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredOrders.length === 0 && (
+                          <tr><td colSpan={8} className="py-8 text-center text-slate-500">No orders found</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+              {selectedOrder && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="admin-order-title">
+                  <Card className="w-full max-w-lg">
+                    <CardHeader className="flex flex-row items-start justify-between">
+                      <div>
+                        <CardTitle id="admin-order-title">Order #{selectedOrder.id.slice(-6)}</CardTitle>
+                        <CardDescription>{new Date(selectedOrder.created_at).toLocaleString()}</CardDescription>
+                      </div>
+                      <Button variant="outline" onClick={() => setSelectedOrderId(null)}>Close</Button>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p><span className="font-medium">Product:</span> {selectedOrder.product?.title || "Unavailable"}</p>
+                      <p><span className="font-medium">Buyer:</span> {selectedOrder.buyer?.full_name || "Unavailable"} ({selectedOrder.buyer?.email || "No email"})</p>
+                      <p><span className="font-medium">Seller:</span> {selectedOrder.seller?.full_name || "Unavailable"} ({selectedOrder.seller?.email || "No email"})</p>
+                      <p><span className="font-medium">Amount:</span> {fmtCurrency(selectedOrder.amount)}</p>
+                      <p><span className="font-medium">Status:</span> {selectedOrder.status}</p>
+                    </CardContent>
+                  </Card>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </>
           )}
           
           {/* Disputes Tab */}
@@ -2186,7 +2521,7 @@ export default function AdminDashboardView({ user }: Props) {
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <CardTitle>Disputes Management</CardTitle>
-                  <CardDescription>Resolve order disputes</CardDescription>
+                  <CardDescription>Review dispute reasons and record a resolution. Closing a dispute does not issue a refund or payout.</CardDescription>
                 </div>
                 <Input
                   value={searchTerm}
@@ -2200,42 +2535,73 @@ export default function AdminDashboardView({ user }: Props) {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-500 border-b">
-                        <th className="py-2 pr-4">Order ID</th>
-                        <th className="py-2 pr-4">Buyer</th>
-                        <th className="py-2 pr-4">Product</th>
+                        <th className="py-2 pr-4">Order</th>
+                        <th className="py-2 pr-4">Raised By</th>
+                        <th className="py-2 pr-4">Reason</th>
                         <th className="py-2 pr-4">Amount</th>
-                        <th className="py-2 pr-4">Age</th>
-                        <th className="py-2 pr-4">Actions</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Resolution / Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredDisputes.map((o) => {
-                        const daysOld = getDaysOld(o.created_at);
+                      {loadingStates.disputes ? (
+                        <tr><td colSpan={6} className="py-8 text-center text-slate-500">Loading disputes...</td></tr>
+                      ) : filteredDisputes.map((dispute) => {
+                        const daysOld = getDaysOld(dispute.created_at);
                         return (
-                          <tr key={o.id} className="border-b">
-                            <td className="py-2 pr-4">#{o.id.slice(-6)}</td>
-                            <td className="py-2 pr-4">{o.buyer?.full_name || "-"}</td>
-                            <td className="py-2 pr-4">{o.product?.title || "-"}</td>
-                            <td className="py-2 pr-4">GHS {o.amount}</td>
+                          <tr key={dispute.id} className="border-b align-top">
                             <td className="py-2 pr-4">
-                              <span className={`px-2 py-0.5 rounded text-xs ${getSLABadge(getSLAStatus(daysOld))}`}>
-                                {daysOld} days
-                              </span>
+                              <p>#{dispute.order_id.slice(-6)}</p>
+                              <p className="text-xs text-slate-500">{dispute.order?.product ?? "Product unavailable"}</p>
+                              <p className="text-xs text-slate-500">{new Date(dispute.created_at).toLocaleString()}</p>
                             </td>
                             <td className="py-2 pr-4">
-                              <div className="flex gap-1">
-                                <Button size="sm" onClick={() => handleResolveDispute(o.id)}>
-                                  <Check className="mr-1 h-3 w-3" /> Resolve
-                                </Button>
-                              </div>
+                              {dispute.raised_by.full_name}
+                              <p className="text-xs text-slate-500">{dispute.raised_by.email}</p>
+                            </td>
+                            <td className="py-2 pr-4 max-w-xs">
+                              <p className="font-medium">{dispute.reason}</p>
+                              {dispute.description && <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap">{dispute.description}</p>}
+                            </td>
+                            <td className="py-2 pr-4">{fmtCurrency(dispute.order?.amount ?? 0)}</td>
+                            <td className="py-2 pr-4">
+                              <Badge variant={dispute.status === "open" ? "destructive" : "secondary"}>
+                                {dispute.status}
+                              </Badge>
+                              {dispute.status === "open" && <p className="mt-1 text-xs text-slate-500">{daysOld} days open</p>}
+                              {dispute.resolved_at && <p className="mt-1 text-xs text-slate-500">{new Date(dispute.resolved_at).toLocaleString()}</p>}
+                            </td>
+                            <td className="py-2 pr-4 min-w-64">
+                              {dispute.status === "open" ? (
+                                <div className="space-y-2">
+                                  <Input
+                                    value={disputeResolutionDrafts[dispute.id] ?? ""}
+                                    onChange={(event) => setDisputeResolutionDrafts((drafts) => ({
+                                      ...drafts,
+                                      [dispute.id]: event.target.value,
+                                    }))}
+                                    placeholder="Resolution note"
+                                    aria-label={`Resolution note for dispute ${dispute.order_id.slice(-6)}`}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleResolveDispute(dispute)}
+                                    disabled={!disputeResolutionDrafts[dispute.id]?.trim()}
+                                  >
+                                    Record and close
+                                  </Button>
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap text-xs text-slate-600">{dispute.resolution || "No resolution note"}</p>
+                              )}
                             </td>
                           </tr>
                         );
                       })}
-                      {filteredDisputes.length === 0 && (
+                      {!loadingStates.disputes && filteredDisputes.length === 0 && (
                         <tr>
                           <td colSpan={6} className="text-center py-8 text-slate-500">
-                            No disputes to display
+                            No disputes found
                           </td>
                         </tr>
                       )}
@@ -2328,12 +2694,26 @@ export default function AdminDashboardView({ user }: Props) {
                     placeholder="Filter categories..."
                     className="w-full sm:w-64"
                   />
-                  <Button size="sm">
-                    <Plus className="mr-1 h-4 w-4" /> Add
+                  <Button size="sm" onClick={() => setIsAddingCategory((open) => !open)}>
+                    <Plus className="mr-1 h-4 w-4" /> {isAddingCategory ? "Cancel" : "Add"}
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
+                {isAddingCategory && (
+                  <form onSubmit={handleCreateCategory} className="mb-4 flex gap-2">
+                    <Input
+                      autoFocus
+                      aria-label="New category name"
+                      value={categoryName}
+                      onChange={(event) => setCategoryName(event.target.value)}
+                      placeholder="Category name"
+                      maxLength={60}
+                      required
+                    />
+                    <Button type="submit" disabled={!categoryName.trim()}>Create category</Button>
+                  </form>
+                )}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
@@ -2358,8 +2738,12 @@ export default function AdminDashboardView({ user }: Props) {
                           </td>
                           <td className="py-2 pr-4">
                             <div className="flex gap-1">
-                              <Button size="sm" variant="outline">
-                                <Edit className="h-3 w-3" />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleSetCategoryActive(c)}
+                              >
+                                {c.is_active ? "Deactivate" : "Activate"}
                               </Button>
                             </div>
                           </td>
@@ -2377,8 +2761,8 @@ export default function AdminDashboardView({ user }: Props) {
             <Card>
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                  <CardTitle>Services Management</CardTitle>
-                  <CardDescription>Manage professional services</CardDescription>
+                  <CardTitle>Active Services</CardTitle>
+                  <CardDescription>Browse active professional-service listings. Moderation controls are not available here.</CardDescription>
                 </div>
                 <Input
                   value={searchTerm}
@@ -2398,7 +2782,6 @@ export default function AdminDashboardView({ user }: Props) {
                         <th className="py-2 pr-4">Price</th>
                         <th className="py-2 pr-4">Rating</th>
                         <th className="py-2 pr-4">Status</th>
-                        <th className="py-2 pr-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2419,18 +2802,11 @@ export default function AdminDashboardView({ user }: Props) {
                               {s.is_active ? "Active" : "Inactive"}
                             </Badge>
                           </td>
-                          <td className="py-2 pr-4">
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="outline">
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
                         </tr>
                       ))}
                       {filteredServices.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="text-center py-8 text-slate-500">
+                          <td colSpan={6} className="text-center py-8 text-slate-500">
                             No services found
                           </td>
                         </tr>
@@ -2460,7 +2836,7 @@ export default function AdminDashboardView({ user }: Props) {
                   <Card>
                     <CardContent className="p-4">
                       <p className="text-sm text-slate-500">Qualified Referrals</p>
-                      <p className="text-2xl font-bold">{referralStats?.qualified_referrals || 0}</p>
+                      <p className="text-2xl font-bold">{referralStats?.total_qualified_referrals || 0}</p>
                     </CardContent>
                   </Card>
                   <Card>
@@ -2493,7 +2869,7 @@ export default function AdminDashboardView({ user }: Props) {
                         <tbody>
                           {referralStats.referrals.slice(0, 10).map((r: any, idx: number) => (
                             <tr key={idx} className="border-b">
-                              <td className="py-2 pr-4">{r.referred_id?.slice(-8) || "-"}</td>
+                              <td className="py-2 pr-4">{r.referred_name || r.referred_id?.slice(-8) || "-"}</td>
                               <td className="py-2 pr-4 capitalize">{r.type || "Buyer"}</td>
                               <td className="py-2 pr-4">{r.created_at ? new Date(r.created_at).toLocaleDateString() : "-"}</td>
                               <td className="py-2 pr-4">
@@ -2518,7 +2894,7 @@ export default function AdminDashboardView({ user }: Props) {
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <CardTitle>Notifications</CardTitle>
-                  <CardDescription>System notifications and alerts</CardDescription>
+                  <CardDescription>Your account notifications and alerts</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleMarkAllNotificationsRead}>
@@ -2571,46 +2947,91 @@ export default function AdminDashboardView({ user }: Props) {
           {tab === "settings" && (
             <Card>
               <CardContent className="p-6">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                  <p className="font-semibold text-slate-900">Settings</p>
+                <div className="mb-5">
+                  <h2 className="font-semibold text-slate-900">Marketplace and withdrawal settings</h2>
                   <p className="mt-1 text-sm text-slate-600">
-                    Configure alerts, thresholds, and moderation defaults in this section.
+                    Changes are stored in Convex. Commission applies only when future payments are processed; settled orders are not recalculated.
                   </p>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Dispute Alert Threshold</p>
-                      <p className="text-xs text-slate-500 mt-1">Notify when disputes exceed 5%</p>
-                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 5%</p>
-                    </div>
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Verification SLA</p>
-                      <p className="text-xs text-slate-500 mt-1">48 hours for seller verification</p>
-                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 48h</p>
-                    </div>
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Commission Rate</p>
-                      <p className="text-xs text-slate-500 mt-1">Currently 10% per transaction</p>
-                      <p className="text-xs text-teal-600 mt-2 font-medium">Current: 10%</p>
-                    </div>
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Auto-flag Products</p>
-                      <p className="text-xs text-slate-500 mt-1">Flag suspicious listings automatically</p>
-                      <p className="text-xs text-teal-600 mt-2 font-medium">Enabled</p>
-                    </div>
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Email Notifications</p>
-                      <p className="text-xs text-slate-500 mt-1">Receive email alerts for urgent issues</p>
-                      <p className="text-xs text-teal-600 mt-2 font-medium">Enabled</p>
-                    </div>
-                    <div className="rounded-lg bg-white p-3 border">
-                      <p className="text-sm font-medium">Data Export</p>
-                      <p className="text-xs text-slate-500 mt-1">Export user data in compliance with GDPR</p>
-                      <Button size="sm" variant="outline" className="mt-2">
-                        <Download className="mr-1 h-3 w-3" /> Export
-                      </Button>
-                    </div>
-                  </div>
                 </div>
+                {loadingStates.settings ? (
+                  <p className="py-8 text-center text-slate-500">Loading settings...</p>
+                ) : settingsLoadError ? (
+                  <div className="space-y-3 py-6 text-center" role="alert">
+                    <p className="text-sm text-red-700">{settingsLoadError}</p>
+                    <Button type="button" variant="outline" onClick={() => fetchAdminSettings(true)}>Retry</Button>
+                  </div>
+                ) : !adminSettings ? (
+                  <p className="py-8 text-center text-slate-500">Settings are unavailable.</p>
+                ) : (
+                  <form onSubmit={handleSaveAdminSettings} className="space-y-5">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-1 text-sm font-medium">
+                        Commission rate (%)
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          required
+                          value={adminSettings.commission_rate * 100}
+                          onChange={(event) => setAdminSettings({
+                            ...adminSettings,
+                            commission_rate: Number(event.target.value) / 100,
+                          })}
+                        />
+                        <span className="block text-xs font-normal text-slate-500">Used for new customer payments.</span>
+                      </label>
+                      <label className="space-y-1 text-sm font-medium">
+                        Minimum withdrawal (GHS)
+                        <Input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          required
+                          value={adminSettings.min_withdrawal}
+                          onChange={(event) => setAdminSettings({
+                            ...adminSettings,
+                            min_withdrawal: Number(event.target.value),
+                          })}
+                        />
+                      </label>
+                      <label className="space-y-1 text-sm font-medium">
+                        Daily withdrawal limit (%)
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          required
+                          value={adminSettings.withdrawal_percentage * 100}
+                          onChange={(event) => setAdminSettings({
+                            ...adminSettings,
+                            withdrawal_percentage: Number(event.target.value) / 100,
+                          })}
+                        />
+                        <span className="block text-xs font-normal text-slate-500">Percentage of the weighted available wallet balance.</span>
+                      </label>
+                      <label className="space-y-1 text-sm font-medium">
+                        Payout cooldown (hours after last sale)
+                        <Input
+                          type="number"
+                          min="0"
+                          max="720"
+                          step="1"
+                          required
+                          value={adminSettings.payout_cooldown_hours}
+                          onChange={(event) => setAdminSettings({
+                            ...adminSettings,
+                            payout_cooldown_hours: Number(event.target.value),
+                          })}
+                        />
+                      </label>
+                    </div>
+                    <Button type="submit" disabled={isSavingSettings}>
+                      {isSavingSettings ? "Saving..." : "Save Settings"}
+                    </Button>
+                  </form>
+                )}
               </CardContent>
             </Card>
           )}
@@ -2704,22 +3125,34 @@ export default function AdminDashboardView({ user }: Props) {
                               </div>
                               <div>
                                 <p className="font-medium text-sm">{f.user?.full_name || "Anonymous"}</p>
-                                <p className="text-xs text-slate-500">{f.user?.email || "User feedback"}</p>
+                                <p className="text-xs text-slate-500">{f.reporter_email || f.user?.email || "User feedback"}</p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
+                            {typeof f.rating === "number" && <div className="flex items-center gap-1">
                               {[1, 2, 3, 4, 5].map((star) => (
                                 <Star
                                   key={star}
                                   className={`h-4 w-4 ${star <= f.rating ? "fill-accent text-accent" : "text-muted"}`}
                                 />
                               ))}
-                            </div>
+                            </div>}
                           </div>
                           {f.feedback_text && (
                             <p className="mt-3 text-sm text-slate-600 bg-slate-50 rounded p-3">{f.feedback_text}</p>
                           )}
+                          {f.report_image_urls?.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {f.report_image_urls.map((imageUrl: string, index: number) => (
+                                <PrivateReportScreenshot key={`${f.id}-report-image-${index}`} imageUrl={imageUrl} index={index} />
+                              ))}
+                            </div>
+                          )}
                           <div className="mt-3 flex flex-wrap gap-2">
+                            {f.feedback_type?.startsWith("issue_report_") && (
+                              <Badge variant="destructive" className="text-xs">
+                                {f.feedback_type.replace("issue_report_", "Issue report: ")}
+                              </Badge>
+                            )}
                             {f.would_recommend !== null && (
                               <Badge variant={f.would_recommend ? "default" : "destructive"} className="text-xs">
                                 {f.would_recommend ? "Would Recommend" : "Would Not Recommend"}
@@ -2744,16 +3177,86 @@ export default function AdminDashboardView({ user }: Props) {
           {/* Payouts Tab */}
           {tab === "payouts" && (
             <Card>
-              <CardHeader>
-                <CardTitle>Payout Management</CardTitle>
-                <CardDescription>Manage seller payouts and financial transactions</CardDescription>
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle>Payouts</CardTitle>
+                <CardDescription>Review seller withdrawal requests and transfer state.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="rounded-lg border p-4 text-center text-slate-500 py-8">
-                  <Banknote className="mx-auto h-12 w-12 mb-3 opacity-50" />
-                  <p className="font-medium">Payout System</p>
-                  <p className="text-sm">Payout processing and management will be displayed here.</p>
-                  <p className="text-xs mt-2">Connected sellers can request payouts through their dashboard.</p>
+                <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  Sending a payout initiates a real Paystack transfer. Rejection returns the requested amount to the seller’s wallet.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-slate-500">
+                        <th className="py-2 pr-4">Seller</th>
+                        <th className="py-2 pr-4">Amount</th>
+                        <th className="py-2 pr-4">Destination</th>
+                        <th className="py-2 pr-4">Requested</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loadingStates.payouts ? (
+                        <tr><td colSpan={6} className="py-8 text-center text-slate-500">Loading payout requests...</td></tr>
+                      ) : payoutsLoadError ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center">
+                            <p className="mb-2 text-sm text-red-700">{payoutsLoadError}</p>
+                            <Button size="sm" variant="outline" onClick={() => fetchPayouts(true)}>Retry</Button>
+                          </td>
+                        </tr>
+                      ) : payouts.map((payout) => (
+                        <tr key={payout.id} className="border-b align-top">
+                          <td className="py-3 pr-4">
+                            <p className="font-medium">{payout.seller.full_name}</p>
+                            <p className="text-xs text-slate-500">{payout.seller.email}</p>
+                            {payout.order && <p className="text-xs text-slate-500">Order #{payout.order.id.slice(-6)}</p>}
+                          </td>
+                          <td className="py-3 pr-4">
+                            {fmtCurrency(payout.amount)}
+                            {!payout.funds_reserved && payout.status === "pending" && (
+                              <p className="mt-1 text-xs text-amber-700">Legacy request; funds are not reserved</p>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">
+                            {payout.momo_number || "Not set"}
+                            {payout.network && <p className="text-xs text-slate-500">{payout.network}</p>}
+                          </td>
+                          <td className="py-3 pr-4">{new Date(payout.created_at).toLocaleString()}</td>
+                          <td className="py-3 pr-4">
+                            <Badge variant={payout.status === "completed" ? "default" : payout.status === "pending" ? "secondary" : payout.status === "processing" ? "outline" : "destructive"}>
+                              {payout.status}
+                            </Badge>
+                            {payout.failure_reason && <p className="mt-1 max-w-xs text-xs text-red-600">{payout.failure_reason}</p>}
+                            {payout.transfer_reference && <p className="mt-1 text-xs text-slate-500">Ref: {payout.transfer_reference}</p>}
+                          </td>
+                          <td className="py-3 pr-4">
+                            {payout.status === "pending" ? (
+                              <div className="flex flex-wrap gap-2">
+                                {payout.funds_reserved && (
+                                  <Button size="sm" onClick={() => handleApprovePayout(payout)} disabled={payoutActionId !== null}>
+                                    {payoutActionId === payout.id ? "Processing..." : "Send via Paystack"}
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="outline" onClick={() => handleRejectPayout(payout)} disabled={payoutActionId !== null}>
+                                  Reject
+                                </Button>
+                              </div>
+                            ) : payout.status === "processing" ? (
+                              <span className="text-xs text-slate-500">Transfer initiated; awaiting Paystack settlement status.</span>
+                            ) : payout.status === "needs_review" ? (
+                              <span className="text-xs text-amber-700">Transfer outcome is uncertain; verify in Paystack before taking further action.</span>
+                            ) : <span className="text-xs text-slate-500">No action available</span>}
+                          </td>
+                        </tr>
+                      ))}
+                      {!loadingStates.payouts && !payoutsLoadError && payouts.length === 0 && (
+                        <tr><td colSpan={6} className="py-8 text-center text-slate-500">No payout requests found</td></tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </CardContent>
             </Card>
@@ -2764,7 +3267,7 @@ export default function AdminDashboardView({ user }: Props) {
             <Card>
               <CardHeader>
                 <CardTitle>Leaderboard</CardTitle>
-                <CardDescription>Top performers and referral leaders</CardDescription>
+                <CardDescription>Top sellers ranked by paid sales</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -2805,5 +3308,36 @@ export default function AdminDashboardView({ user }: Props) {
         </div>
       </div>
     </section>
+  );
+}
+
+function PrivateReportScreenshot({ imageUrl, index }: { imageUrl: string; index: number }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void feedbackApi.fetchReportScreenshot(imageUrl).then(({ data, error: loadError }) => {
+      if (cancelled) return;
+      if (loadError || !data) {
+        setError(loadError || "Screenshot could not be loaded.");
+        return;
+      }
+      objectUrl = URL.createObjectURL(data);
+      setPreviewUrl(objectUrl);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl]);
+
+  if (error) return <span className="text-sm text-red-600">{error}</span>;
+  if (!previewUrl) return <span className="text-sm text-slate-500">Loading screenshot...</span>;
+  return (
+    <a href={previewUrl} target="_blank" rel="noreferrer" className="text-sm text-primary underline">
+      View private screenshot {index + 1}
+    </a>
   );
 }

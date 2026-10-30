@@ -40,7 +40,7 @@ interface ReferralStats {
   commission_discount_remaining: number;
   referral_level: number;
   is_campus_ambassador: boolean;
-  next_milestone: number | null;
+  next_milestone: string | null;
   next_reward: string;
   progress_to_next: number;
 }
@@ -48,57 +48,25 @@ interface ReferralStats {
 interface Milestone {
   level: number;
   name: string;
-  required_referrals: number;
+  required: number;
   reward: string;
-  reward_type: string;
-  reward_value: string;
-  description: string;
 }
 
-const MILESTONES: Milestone[] = [
-  {
-    level: 1,
-    name: "Starter",
-    required_referrals: 3,
-    reward: "GHS 5 platform credit",
-    reward_type: "credit",
-    reward_value: "5",
-    description: "Invite 3 friends who make a purchase or become sellers"
-  },
-  {
-    level: 2,
-    name: "Growth",
-    required_referrals: 10,
-    reward: "GHS 20 platform credit",
-    reward_type: "credit",
-    reward_value: "20",
-    description: "Reach 10 qualified referrals"
-  },
-  {
-    level: 3,
-    name: "Champion",
-    required_referrals: 25,
-    reward: "0% commission for 20 sales",
-    reward_type: "commission_discount",
-    reward_value: "20",
-    description: "Reach 25 qualified referrals"
-  },
-  {
-    level: 4,
-    name: "Campus Ambassador",
-    required_referrals: 50,
-    reward: "Campus Ambassador badge + permanent 5% discount",
-    reward_type: "ambassador",
-    reward_value: "5",
-    description: "Reach 50 qualified referrals"
-  }
-];
+function isMilestone(value: unknown): value is Milestone {
+  if (!value || typeof value !== "object") return false;
+  const milestone = value as Partial<Milestone>;
+  return typeof milestone.level === "number"
+    && typeof milestone.name === "string"
+    && typeof milestone.required === "number"
+    && typeof milestone.reward === "string";
+}
 
 export default function ReferralsPage() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<ReferralStats | null>(null);
-  const [milestones, setMilestones] = useState<Milestone[]>(MILESTONES);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
   const { celebration, celebrate, close } = useCelebration();
   const [hasCelebrated, setHasCelebrated] = useState(false);
@@ -127,46 +95,45 @@ export default function ReferralsPage() {
     loadReferralData();
   }, []);
 
-  useEffect(() => {
-    loadReferralData();
-  }, []);
-
   const loadReferralData = async () => {
     setLoading(true);
-    
-    // Load dashboard data
-    const { data: dashboardData, error } = await referralsApi.getDashboard();
-    
-    if (error) {
-      // Fall back to basic getCode
-      const { data: codeData } = await referralsApi.getCode();
-      if (codeData) {
+    setLoadError(null);
+    const [{ data: dashboardData, error: dashboardError }, { data: milestoneData, error: milestoneError }] =
+      await Promise.all([referralsApi.getDashboard(), referralsApi.getMilestones()]);
+    const activeMilestones = (milestoneData ?? []).filter(isMilestone);
+    setMilestones(activeMilestones);
+
+    if (dashboardData) {
+      setStats(dashboardData);
+    } else {
+      const { data: codeData, error: codeError } = await referralsApi.getCode();
+      if (!codeData) {
+        setLoadError(codeError || dashboardError || "Could not load referral information.");
+        setStats(null);
+      } else {
+        const totalQualified = (codeData.qualified_buyer_referrals ?? 0) + (codeData.qualified_seller_referrals ?? 0);
+        const nextMilestone = activeMilestones.find((milestone) => milestone.required > totalQualified);
         setStats({
-          referral_code: codeData.referral_code,
-          referral_link: codeData.referral_link,
-          total_referrals: codeData.total_referrals,
-          qualified_buyer_referrals: 0,
-          qualified_seller_referrals: 0,
-          total_qualified: 0,
-          platform_credit: 0,
-          commission_discount_remaining: 0,
-          referral_level: codeData.referral_level,
-          is_campus_ambassador: codeData.is_campus_ambassador,
-          next_milestone: 3,
-          next_reward: "GHS 5 platform credit",
-          progress_to_next: 0
+          referral_code: codeData.referral_code ?? "",
+          referral_link: codeData.referral_link ?? "",
+          total_referrals: codeData.total_referrals ?? 0,
+          qualified_buyer_referrals: codeData.qualified_buyer_referrals ?? 0,
+          qualified_seller_referrals: codeData.qualified_seller_referrals ?? 0,
+          total_qualified: totalQualified,
+          platform_credit: codeData.platform_credit ?? 0,
+          commission_discount_remaining: codeData.commission_discount_remaining ?? 0,
+          referral_level: codeData.referral_level ?? 0,
+          is_campus_ambassador: Boolean(codeData.is_campus_ambassador),
+          next_milestone: nextMilestone?.name ?? null,
+          next_reward: nextMilestone?.reward ?? "All milestones reached",
+          progress_to_next: nextMilestone
+            ? Math.min(100, Math.round((totalQualified / nextMilestone.required) * 100))
+            : 100,
         });
       }
-    } else if (dashboardData) {
-      setStats(dashboardData);
     }
-    
-    // Load milestones from API
-    const { data: milestonesData } = await referralsApi.getMilestones();
-    if (milestonesData) {
-      setMilestones(milestonesData);
-    }
-    
+
+    if (milestoneError) setLoadError((current) => current ?? milestoneError);
     setLoading(false);
   };
 
@@ -253,6 +220,12 @@ export default function ReferralsPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8">
+        {loadError && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
+            {loadError}
+            {!stats && <Button variant="outline" className="ml-3" onClick={() => void loadReferralData()}>Retry</Button>}
+          </div>
+        )}
         {/* Stats Overview */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white">
@@ -260,7 +233,7 @@ export default function ReferralsPage() {
               <div className="flex justify-center mb-2">
                 <CircularProgress 
                   value={stats?.total_referrals || 0} 
-                  max={stats?.next_milestone || 10}
+                  max={milestones.find((milestone) => milestone.name === stats?.next_milestone)?.required ?? 10}
                   size={70}
                   strokeWidth={6}
                 />
@@ -274,7 +247,7 @@ export default function ReferralsPage() {
               <div className="flex justify-center mb-2">
                 <CircularProgress 
                   value={stats?.total_qualified || 0} 
-                  max={stats?.next_milestone || 10}
+                  max={milestones.find((milestone) => milestone.name === stats?.next_milestone)?.required ?? 10}
                   size={70}
                   strokeWidth={6}
                 />
@@ -368,7 +341,7 @@ export default function ReferralsPage() {
                     Progress to Next Reward
                   </h3>
                   <p className="text-sm text-gray-600">
-                    {stats.total_qualified} / {stats.next_milestone} qualified referrals
+                    {stats.total_qualified} / {milestones.find((milestone) => milestone.name === stats.next_milestone)?.required ?? "—"} qualified referrals
                   </p>
                 </div>
                 <div className="text-right">
@@ -412,7 +385,7 @@ export default function ReferralsPage() {
                   </div>
                   
                   <h3 className="font-semibold text-gray-900 mb-1">{milestone.name}</h3>
-                  <p className="text-xs text-gray-500 mb-3">{milestone.description}</p>
+                  <p className="text-xs text-gray-500 mb-3">At {milestone.required} qualified referrals</p>
                   
                   <div className="text-sm font-bold text-purple-600">
                     {milestone.reward}

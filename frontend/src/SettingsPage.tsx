@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./card";
 import { Input } from "./input";
-import { authApi } from "./api";
+import { authApi, userApi } from "./api";
 import { useSettings, Theme, ColorScheme, NotificationSettings, PrivacySettings } from "./SettingsContext";
 import { Language, languageNames, languageFlags } from "./i18n";
 
@@ -381,24 +381,35 @@ function LanguageSettingsComponent() {
 function DangerZoneSettings() {
   const { translations } = useSettings();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-
+  const [confirmation, setConfirmation] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleDeleteAccount = async () => {
+    if (confirmation !== "DELETE") return;
     setLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const result = await userApi.deleteMyAccount();
+      if (result.error) throw new Error(result.error);
+      const signOut = await authApi.signOut();
       localStorage.removeItem("wm_user");
       localStorage.removeItem("wm_settings");
+      localStorage.removeItem("wm-profile-setup");
       window.dispatchEvent(new Event("wm-auth-change"));
-      toast.success(translations.success);
-      navigate("/");
-    } catch {
-      toast.error(translations.error);
+      if (signOut.error) {
+        console.error("Account was deleted, but client sign-out failed:", signOut.error);
+        toast.error("Your account was anonymized. Please refresh to complete sign-out.");
+      } else {
+        toast.success("Account deleted. Financial and audit records were retained.");
+      }
+      navigate("/", { replace: true });
+    } catch (error) {
+      console.error("Account deletion failed:", error);
+      toast.error(error instanceof Error ? error.message : translations.error);
     } finally {
       setLoading(false);
+      setConfirmation("");
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -413,13 +424,13 @@ function DangerZoneSettings() {
               <Trash2 className="w-5 h-5 text-red-500 dark:text-red-400" />
               <div>
                 <p className="font-medium text-red-900 dark:text-red-300">{translations.deleteAccount}</p>
-                <p className="text-sm text-red-600 dark:text-red-400">Permanently delete your account</p>
+                <p className="text-sm text-red-600 dark:text-red-400">Your profile and sign-in will be removed. Financial and audit records will be retained.</p>
               </div>
             </div>
             {showDeleteConfirm ? (
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)} className="dark:border-slate-600">Cancel</Button>
-                <Button variant="destructive" size="sm" onClick={handleDeleteAccount} disabled={loading} className="bg-red-600 hover:bg-red-700">
+                <Button variant="outline" size="sm" onClick={() => { setShowDeleteConfirm(false); setConfirmation(""); }} className="dark:border-slate-600">Cancel</Button>
+                <Button variant="destructive" size="sm" onClick={handleDeleteAccount} disabled={loading || confirmation !== "DELETE"} className="bg-red-600 hover:bg-red-700">
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Delete"}
                 </Button>
               </div>
@@ -427,7 +438,11 @@ function DangerZoneSettings() {
               <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700">{translations.delete}</Button>
             )}
           </div>
-          {showDeleteConfirm && <p className="mt-3 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 p-2 rounded">{translations.deleteAccountWarning}</p>}
+          {showDeleteConfirm && <div className="mt-3 space-y-2 rounded bg-red-100 p-3 dark:bg-red-900/30">
+            <p className="text-sm text-red-600 dark:text-red-400">{translations.deleteAccountWarning} This cannot be undone. Orders, payouts, and audit records will remain under an anonymized account.</p>
+            <label htmlFor="delete-account-confirm" className="block text-sm font-medium text-red-800 dark:text-red-300">Type DELETE to confirm</label>
+            <Input id="delete-account-confirm" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" />
+          </div>}
         </div>
       </CardContent>
     </Card>

@@ -47,7 +47,7 @@ const Footer = () => (
               </Link>
             </li>
             <li>
-              <Link to="/safety" className="text-muted-foreground hover:text-foreground transition-colors">
+              <Link to="/buyer-protection" className="text-muted-foreground hover:text-foreground transition-colors">
                 Safety Tips
               </Link>
             </li>

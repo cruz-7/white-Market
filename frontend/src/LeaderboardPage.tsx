@@ -6,7 +6,6 @@ import { Button } from "./button";
 import { 
   Trophy, 
   Medal, 
-  Crown, 
   User, 
   TrendingUp,
   ArrowLeft,
@@ -18,13 +17,12 @@ import { Confetti } from "./confetti";
 
 interface LeaderboardEntry {
   rank: number;
-  user_id: string;
-  full_name: string;
+  id: string;
+  name: string;
   avatar_url?: string;
   total_referrals: number;
   qualified_referrals: number;
   referral_level: number;
-  is_campus_ambassador: boolean;
 }
 
 export default function LeaderboardPage() {
@@ -57,8 +55,15 @@ export default function LeaderboardPage() {
       setLeaderboard(data || []);
       // Show confetti for returning user in top 3
       if (!isRefresh && data && data.length > 0) {
-        const currentUserId = localStorage.getItem('wm_user_id');
-        if (currentUserId && data.slice(0, 3).some(e => e.user_id === currentUserId)) {
+        let currentUserId: string | undefined;
+        try {
+          currentUserId = (JSON.parse(localStorage.getItem("wm_user") ?? "null") as
+            | { id?: string }
+            | null)?.id;
+        } catch {
+          currentUserId = undefined;
+        }
+        if (currentUserId && data.slice(0, 3).some((entry) => entry.id === currentUserId)) {
           setShowConfetti(true);
           setTimeout(() => setShowConfetti(false), 5000);
         }
@@ -132,7 +137,7 @@ export default function LeaderboardPage() {
                   <User className="w-8 h-8 text-gray-500" />
                 </div>
                 <h3 className="font-semibold text-gray-900 truncate">
-                  {leaderboard[1]?.full_name || 'User'}
+                  {leaderboard[1]?.name || 'User'}
                 </h3>
                 <div className="flex items-center justify-center gap-1 my-2">
                   <Medal className="w-5 h-5 text-gray-400" />
@@ -141,11 +146,7 @@ export default function LeaderboardPage() {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500">referrals</p>
-                {leaderboard[1]?.is_campus_ambassador && (
-                  <Badge className="mt-2 bg-purple-100 text-purple-700">
-                    <Crown className="w-3 h-3 mr-1" /> Ambassador
-                  </Badge>
-                )}
+                {!!leaderboard[1]?.referral_level && <Badge className="mt-2 bg-purple-100 text-purple-700">Level {leaderboard[1].referral_level}</Badge>}
               </CardContent>
             </Card>
 
@@ -159,7 +160,7 @@ export default function LeaderboardPage() {
                   <User className="w-10 h-10 text-white" />
                 </div>
                 <h3 className="font-bold text-lg text-gray-900 truncate">
-                  {leaderboard[0]?.full_name || 'User'}
+                  {leaderboard[0]?.name || 'User'}
                 </h3>
                 <div className="flex items-center justify-center gap-1 my-2">
                   <span className="text-3xl font-bold text-yellow-600">
@@ -167,11 +168,7 @@ export default function LeaderboardPage() {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500">referrals</p>
-                {leaderboard[0]?.is_campus_ambassador && (
-                  <Badge className="mt-2 bg-purple-100 text-purple-700">
-                    <Crown className="w-3 h-3 mr-1" /> Ambassador
-                  </Badge>
-                )}
+                {!!leaderboard[0]?.referral_level && <Badge className="mt-2 bg-purple-100 text-purple-700">Level {leaderboard[0].referral_level}</Badge>}
               </CardContent>
             </Card>
 
@@ -182,7 +179,7 @@ export default function LeaderboardPage() {
                   <User className="w-7 h-7 text-amber-700" />
                 </div>
                 <h3 className="font-semibold text-gray-900 truncate">
-                  {leaderboard[2]?.full_name || 'User'}
+                  {leaderboard[2]?.name || 'User'}
                 </h3>
                 <div className="flex items-center justify-center gap-1 my-2">
                   <Medal className="w-5 h-5 text-amber-600" />
@@ -191,11 +188,7 @@ export default function LeaderboardPage() {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500">referrals</p>
-                {leaderboard[2]?.is_campus_ambassador && (
-                  <Badge className="mt-2 bg-purple-100 text-purple-700">
-                    <Crown className="w-3 h-3 mr-1" /> Ambassador
-                  </Badge>
-                )}
+                {!!leaderboard[2]?.referral_level && <Badge className="mt-2 bg-purple-100 text-purple-700">Level {leaderboard[2].referral_level}</Badge>}
               </CardContent>
             </Card>
           </div>
@@ -249,7 +242,7 @@ export default function LeaderboardPage() {
           <div className="space-y-2">
             {leaderboard.map((entry) => (
               <Card 
-                key={entry.user_id} 
+                key={entry.id}
                 className={`${getRankBg(entry.rank)} border transition hover:shadow-md`}
               >
                 <CardContent className="p-4">
@@ -261,7 +254,7 @@ export default function LeaderboardPage() {
                       {entry.avatar_url ? (
                         <img 
                           src={entry.avatar_url} 
-                          alt={entry.full_name}
+                          alt={entry.name}
                           className="w-12 h-12 rounded-full object-cover"
                         />
                       ) : (
@@ -271,14 +264,9 @@ export default function LeaderboardPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-gray-900 truncate">
-                          {entry.full_name || 'Anonymous User'}
+                          {entry.name || 'Anonymous User'}
                         </h3>
-                        {entry.is_campus_ambassador && (
-                          <Badge className="bg-purple-100 text-purple-700 text-xs flex-shrink-0">
-                            <Crown className="w-3 h-3 mr-1" /> Ambassador
-                          </Badge>
-                        )}
-                        {entry.referral_level > 0 && !entry.is_campus_ambassador && (
+                        {entry.referral_level > 0 && (
                           <Badge className="bg-green-100 text-green-700 text-xs flex-shrink-0">
                             Level {entry.referral_level}
                           </Badge>

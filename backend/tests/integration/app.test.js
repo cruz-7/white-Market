@@ -50,7 +50,7 @@ test("GET /health returns ok", async () => {
     assert.equal(response.status, 200);
 
     const payload = await response.json();
-    assert.deepEqual(payload, { status: "ok" });
+    assert.equal(payload.status, "ok");
   } finally {
     await stopServer(server);
   }

@@ -1,15 +1,17 @@
 /**
  * API Service Layer
- * Connects frontend to the Express backend
- * Base URL:
- * - Dev default: http://localhost:5000
- * - Production default: relative paths (same origin/reverse proxy)
+ *
+ * Talks to the Convex backend through the Convex React client. Every helper
+ * keeps the `{ data?, error? }` contract the UI already relies on, so calling
+ * code does not need to change when a request fails.
  */
 
-import { supabase } from "./supabase-client";
+import { api as generatedApi } from "../convex/_generated/api";
+import { convex, convexAccessToken, getConvexAuthBridge } from "./convex-client";
+const api = generatedApi.functions;
 
-const API_BASE_URL = String(
-  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "")
+const CONVEX_SITE_URL = String(
+  import.meta.env.VITE_CONVEX_SITE_URL || import.meta.env.VITE_CONVEX_URL || ""
 ).replace(/\/+$/, "");
 
 interface ApiResponse<T = any> {
@@ -17,88 +19,52 @@ interface ApiResponse<T = any> {
   error?: string;
 }
 
-function resolveApiUrl(endpoint: string): string {
-  return API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
+function toMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return "Request failed";
 }
 
-async function fetchApi<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<ApiResponse<T>> {
-  const url = resolveApiUrl(endpoint);
-  
-  // Get token - first try from localStorage, then from Supabase session
-  let token: string | null = null;
-  
-  // First try to get from localStorage
-  const userJson = localStorage.getItem("wm_user");
-  if (userJson) {
-    try {
-      token = JSON.parse(userJson).access_token || null;
-    } catch {
-      token = null;
-    }
+/** Runs a Convex call and normalises it to the `{ data?, error? }` shape. */
+async function run<T>(operation: () => Promise<T>): Promise<ApiResponse<T>> {
+  try {
+    return { data: await operation() };
+  } catch (error) {
+    console.error("[api]", error);
+    return { error: toMessage(error) };
   }
-  
-  // If no token in localStorage, try to get from Supabase session
-  if (!token && supabase) {
-    try {
-      // First try to get the session - wait a bit for it to load on page refresh
-      let { data: { session } } = await supabase.auth.getSession();
-      
-      // If no session, wait briefly and try again (handles page refresh race condition)
-      if (!session?.access_token) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const result = await supabase.auth.getSession();
-        session = result.data.session;
-      }
-      
-      if (session?.access_token) {
-        token = session.access_token;
-      } else {
-        // Try getUser as fallback - it works with persisted session
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          // Try getting session again after getUser refreshes it
-          const { data: { session: newSession } } = await supabase.auth.getSession();
-          token = newSession?.access_token || null;
-        }
-      }
-      
-      // Debug: log token status
-      console.log('Token retrieval:', token ? 'Token found' : 'No token found');
-    } catch (err) {
-      console.error('Error getting Supabase session:', err);
-    }
-  } else if (!token) {
-    console.log('No supabase client or token already found');
+}
+
+/** Uploads an image to Convex file storage and returns its public URL. */
+async function uploadImage(
+  file: File,
+  endpoint = "/upload"
+): Promise<ApiResponse<{ image_url: string }>> {
+  const token = convexAccessToken();
+  if (!token) {
+    return { error: "You must be signed in to upload images" };
   }
-  
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    ...options.headers,
-  };
-  
-  if (token) {
-    (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  if (!CONVEX_SITE_URL) {
+    return { error: "VITE_CONVEX_SITE_URL is not configured" };
   }
 
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers,
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`${CONVEX_SITE_URL}${endpoint}`, {
+      method: "POST",
+        headers: { Authorization: `Bearer ${convexAccessToken()}` },
+      body: formData,
     });
 
     const data = await response.json().catch(() => ({}));
-
     if (!response.ok) {
-      return { error: data.error || `HTTP ${response.status}: Request failed` };
+      return { error: (data as { error?: string }).error || "Upload failed" };
     }
-
-    return { data };
+    return { data: data as { image_url: string } };
   } catch (error) {
-    console.error(`API Error [${endpoint}]:`, error);
-    return { error: error instanceof Error ? error.message : "Network error" };
+    return { error: toMessage(error) };
   }
 }
 
@@ -108,6 +74,7 @@ export interface AuthSignupParams {
   email: string;
   password: string;
   full_name: string;
+  role?: "user" | "seller";
 }
 
 export interface AuthLoginParams {
@@ -129,47 +96,128 @@ export interface AuthResponse {
   access_token?: string;
 }
 
+const RESET_EMAIL_KEY = "wm_reset_email";
+
 export const authApi = {
   signup: (params: AuthSignupParams) =>
-    fetchApi<AuthResponse>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify(params),
+    run(async () => {
+      const bridge = getConvexAuthBridge();
+      const result = await bridge.signIn("password", {
+        email: params.email.trim().toLowerCase(),
+        password: params.password,
+        full_name: params.full_name?.trim(),
+        name: params.full_name?.trim(),
+        role: params.role ?? "user",
+        flow: "signUp",
+      });
+      bridge.refreshClientAuth();
+
+      const profile = await accountApi.me();
+      return {
+        message: "Account created",
+        signingIn: result.signingIn,
+        user: profile.data?.user,
+      };
     }),
 
   login: (params: AuthLoginParams) =>
-    fetchApi<AuthResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(params),
+    run(async () => {
+      const bridge = getConvexAuthBridge();
+      const result = await bridge.signIn("password", {
+        email: params.email.trim().toLowerCase(),
+        password: params.password,
+        flow: "signIn",
+      });
+      bridge.refreshClientAuth();
+
+      const profile = await accountApi.me();
+      return {
+        message: "Signed in",
+        signingIn: result.signingIn,
+        user: profile.data?.user,
+      };
+    }),
+
+  signOut: () =>
+    run(async () => {
+      const bridge = getConvexAuthBridge();
+      await bridge.signOut();
+      localStorage.removeItem("wm_user");
+      window.dispatchEvent(new Event("wm-auth-change"));
+      return { message: "Signed out" };
     }),
 
   confirmEmail: (email: string) =>
-    fetchApi<{ message: string }>("/auth/confirm-email", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+    run(() =>
+      convex.mutation(api.account.confirmEmail, { email: email.trim().toLowerCase() })
+    ) as Promise<ApiResponse<{ message: string; user_id?: string; status: string }>>,
 
   forgotPassword: (email: string) =>
-    fetchApi<{ message: string }>("/auth/forgot-password", {
-      method: "POST",
-      body: JSON.stringify({ email }),
+    run(async () => {
+      const normalized = email.trim().toLowerCase();
+      localStorage.setItem(RESET_EMAIL_KEY, normalized);
+      await convex.action(generatedApi.auth.signIn, {
+        provider: "password",
+        params: {
+          email: normalized,
+          flow: "reset",
+          redirectTo: "/reset-password",
+        },
+      });
+      return { message: "Password reset link sent" };
     }),
 
-  resetPassword: (access_token: string, password: string) =>
-    fetchApi<{ message: string; user?: { id: string; email: string } }>("/auth/reset-password", {
-      method: "POST",
-      body: JSON.stringify({ access_token, password }),
+  resetPassword: (code: string, password: string, email?: string) =>
+    run(async () => {
+      const normalizedEmail = (
+        email ?? localStorage.getItem(RESET_EMAIL_KEY) ?? ""
+      ).trim().toLowerCase();
+      if (!normalizedEmail) {
+        throw new Error("This reset link is missing the account email. Request a new one.");
+      }
+
+      await convex.action(generatedApi.auth.signIn, {
+        provider: "password",
+        params: {
+          email: normalizedEmail,
+          code,
+          newPassword: password,
+          flow: "reset-verification",
+        },
+      });
+
+      localStorage.removeItem(RESET_EMAIL_KEY);
+      return { message: "Password reset successfully" };
     }),
 
   changePassword: (current_password: string, new_password: string) =>
-    fetchApi<{ message: string; user?: { id: string; email: string } }>("/auth/change-password", {
-      method: "POST",
-      body: JSON.stringify({ current_password, new_password }),
-    }),
+    run(() =>
+      convex.action(api.account.changePassword, { current_password, new_password })
+    ) as Promise<ApiResponse<{ message: string; user?: { id: string; email: string } }>>,
 
-  verifyResetToken: (access_token: string) =>
-    fetchApi<{ valid: boolean; user_id?: string; error?: string }>("/auth/verify-reset-token?access_token=" + encodeURIComponent(access_token), {
-      method: "GET",
-    }),
+  verifyResetToken: (code: string) =>
+    Promise.resolve<ApiResponse<{ valid: boolean; user_id?: string; error?: string }>>(
+      code ? { data: { valid: true } } : { error: "Invalid reset token" }
+    ),
+};
+
+// ==================== ACCOUNT API ====================
+
+export interface AccountUser {
+  id: string;
+  email: string;
+  role: string;
+  full_name: string;
+  verified: boolean;
+  avatar_url: string | null;
+}
+
+export const accountApi = {
+  /** The signed-in user's own identity. */
+  me: () =>
+    run(() => convex.query(api.account.me)) as Promise<
+      ApiResponse<{ message: string; user: AccountUser }>
+    >,
 };
 
 // ==================== PRODUCTS API ====================
@@ -181,6 +229,7 @@ export interface Product {
   description?: string;
   price: number;
   image_url?: string;
+  condition?: string;
   category_id?: string;
   category?: string;
   is_active?: boolean;
@@ -208,112 +257,123 @@ export interface Product {
 }
 
 export const productsApi = {
-  getAll: (params?: string | { 
-    q?: string; 
-    category_id?: string; 
-    min_price?: number; 
-    max_price?: number; 
+  getAll: (params?: string | {
+    q?: string;
+    category_id?: string;
+    min_price?: number;
+    max_price?: number;
     sort?: "price_asc" | "price_desc" | "newest" | "oldest";
     page?: number;
     limit?: number;
     seller_id?: string;
     is_active?: boolean;
   }) => {
-    const normalized = typeof params === "string" ? { q: params } : params;
-    const queryParams = new URLSearchParams();
-    if (normalized?.q) queryParams.set("q", normalized.q);
-    if (normalized?.category_id) queryParams.set("category_id", normalized.category_id);
-    if (normalized?.min_price !== undefined) queryParams.set("min_price", String(normalized.min_price));
-    if (normalized?.max_price !== undefined) queryParams.set("max_price", String(normalized.max_price));
-    if (normalized?.sort) queryParams.set("sort", normalized.sort);
-    if (normalized?.page !== undefined) queryParams.set("page", String(normalized.page));
-    if (normalized?.limit !== undefined) queryParams.set("limit", String(normalized.limit));
-    if (normalized?.seller_id) queryParams.set("seller_id", normalized.seller_id);
-    if (normalized?.is_active !== undefined) queryParams.set("is_active", String(normalized.is_active));
-    
-    const endpoint = queryParams.toString() ? `/products?${queryParams.toString()}` : "/products";
-    return fetchApi<Product[]>(endpoint);
+    const normalized = typeof params === "string" ? { q: params } : params ?? {};
+    return run(() =>
+      convex.query(api.products.list, {
+        q: normalized.q,
+        category_id: normalized.category_id as any,
+        min_price: normalized.min_price,
+        max_price: normalized.max_price,
+        sort: normalized.sort,
+        page: normalized.page,
+        limit: normalized.limit,
+        seller_id: normalized.seller_id as any,
+        is_active: normalized.is_active,
+      })
+    ) as Promise<ApiResponse<Product[]>>;
   },
 
   getById: (id: string) =>
-    fetchApi<Product>(`/products/${id}`),
+    run(() => convex.query(api.products.get, { id: id as any })) as Promise<ApiResponse<Product>>,
 
   getBySeller: (sellerId: string) =>
-    fetchApi<Product[]>(`/products/seller/${sellerId}`),
+    run(() =>
+      convex.query(api.products.bySeller, { sellerId: sellerId as any })
+    ) as Promise<ApiResponse<Product[]>>,
 
   // Get trending products
   getTrending: (limit = 10) =>
-    fetchApi<Product[]>(`/products?trending=true&limit=${limit}`),
+    run(() => convex.query(api.products.trending, { limit })) as Promise<ApiResponse<Product[]>>,
 
   // Track product view
   trackView: (productId: string) =>
-    fetchApi<any>(`/products/${productId}/view`, { method: "POST" }),
+    run(() => convex.mutation(api.products.recordView, { id: productId as any })),
 
   // Track product click
   trackClick: (productId: string) =>
-    fetchApi<any>(`/products/${productId}/click`, { method: "POST" }),
+    run(() => convex.mutation(api.products.recordClick, { id: productId as any })),
 
-  create: (product: { title: string; description?: string; price: number; image_url?: string; category_id?: string }) =>
-    fetchApi<{ message: string }>("/products", {
-      method: "POST",
-      body: JSON.stringify(product),
-    }),
+  create: (product: {
+    title: string;
+    description?: string;
+    price: number;
+    image_url?: string;
+    category_id?: string;
+    condition?: string;
+    campus?: string;
+    stock_quantity?: number;
+    negotiable?: boolean;
+  }) =>
+    run(() =>
+      convex.mutation(api.products.create, {
+        title: product.title,
+        description: product.description,
+        price: product.price,
+        image_url: product.image_url,
+        category_id: product.category_id as any,
+        condition: product.condition,
+        campus: product.campus,
+        stock_quantity: product.stock_quantity,
+        negotiable: product.negotiable,
+      })
+    ),
 
-  update: (id: string, product: { title?: string; description?: string; price?: number; image_url?: string; category_id?: string; is_active?: boolean; stock_quantity?: number }) =>
-    fetchApi<{ message: string; product: Product }>(`/products/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(product),
-    }),
+  update: (
+    id: string,
+    product: {
+      title?: string;
+      description?: string;
+      price?: number;
+      image_url?: string;
+      category_id?: string;
+      is_active?: boolean;
+      stock_quantity?: number;
+      condition?: string;
+      negotiable?: boolean;
+    }
+  ) =>
+    run(() =>
+      convex.mutation(api.products.update, {
+        id: id as any,
+        title: product.title,
+        description: product.description,
+        price: product.price,
+        image_url: product.image_url,
+        category_id: product.category_id as any,
+        is_active: product.is_active,
+        stock_quantity: product.stock_quantity,
+        condition: product.condition,
+        negotiable: product.negotiable,
+      })
+    ),
 
   delete: (id: string) =>
-    fetchApi<{ message: string }>(`/products/${id}`, {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.products.remove, { id: id as any })),
 
   recordView: (id: string) =>
-    fetchApi<{ message: string }>(`/products/${id}/view`, {
-      method: "POST",
-    }),
+    run(() => convex.mutation(api.products.recordView, { id: id as any })),
 
-  uploadImage: async (file: File): Promise<ApiResponse<{ image_url: string }>> => {
-    const formData = new FormData();
-    formData.append("image", file);
-
-    let token: string | null = null;
-    const userJson = localStorage.getItem("wm_user");
-    if (userJson) {
-      try {
-        token = JSON.parse(userJson).access_token || null;
-      } catch { token = null; }
-    }
-    if (!token && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      token = session?.access_token || null;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/products/upload-image`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        return { error: data.error || "Upload failed" };
-      }
-      return { data };
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : "Upload error" };
-    }
-  },
+  uploadImage: (file: File): Promise<ApiResponse<{ image_url: string }>> =>
+    uploadImage(file),
 };
 
 // ==================== ORDERS API ====================
 
 export interface Order {
   id: string;
-  product_id: string;
+  product_id?: string;
+  fashion_id?: string;
   buyer_id: string;
   seller_id: string;
   amount: number;
@@ -328,7 +388,8 @@ export interface Order {
 }
 
 export interface CreateOrderParams {
-  product_id: string;
+  product_id?: string;
+  fashion_id?: string;
 }
 
 export interface UpdateOrderStatusParams {
@@ -337,39 +398,41 @@ export interface UpdateOrderStatusParams {
 
 export const ordersApi = {
   create: (params: CreateOrderParams) =>
-    fetchApi<{ message: string; order_id: string; amount: number }>("/orders", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
+    run(() =>
+      convex.mutation(api.orders.create, {
+        product_id: params.product_id as any,
+        fashion_id: params.fashion_id as any,
+      })
+    ),
 
   getMyOrders: () =>
-    fetchApi<Order[]>("/orders/my-orders"),
+    run(() => convex.query(api.orders.myOrders)) as Promise<ApiResponse<Order[]>>,
 
   getSales: () =>
-    fetchApi<Order[]>("/orders/sales"),
+    run(() => convex.query(api.orders.sales)) as Promise<ApiResponse<Order[]>>,
 
   getById: (id: string) =>
-    fetchApi<Order & { buyer?: { full_name?: string }; seller?: { full_name?: string } }>(`/orders/${id}`),
+    run(() =>
+      convex.query(api.orders.get, { id: id as any })
+    ) as Promise<ApiResponse<Order & { buyer?: { full_name?: string }; seller?: { full_name?: string } }>>,
 
   updateStatus: (id: string, params: UpdateOrderStatusParams) =>
-    fetchApi<{ message: string; order: Order }>(`/orders/${id}/status`, {
-      method: "PATCH",
-      body: JSON.stringify(params),
-    }),
+    run(() => convex.mutation(api.orders.updateStatus, { id: id as any, status: params.status })),
 
   completeOrder: (id: string) =>
-    fetchApi<{ message: string; order: Order; seller_amount: number }>(`/orders/${id}/complete`, {
-      method: "POST",
-    }),
+    run(() => convex.mutation(api.orders.complete, { id: id as any })),
 
-  createDispute: (id: string, reason: string) =>
-    fetchApi<{ message: string; dispute: any }>(`/orders/${id}/dispute`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    }),
+  createDispute: (id: string, reason: string, description?: string) =>
+    run(() =>
+      convex.mutation(api.orders.createDispute, {
+        id: id as any,
+        reason,
+        description,
+      })
+    ),
 
   getDispute: (id: string) =>
-    fetchApi<{ dispute: any }>(`/orders/${id}/dispute`),
+    run(() => convex.query(api.orders.getDispute, { id: id as any })),
 };
 
 // ==================== PAYMENTS API ====================
@@ -388,19 +451,18 @@ export interface PaymentResponse {
 
 export const paymentsApi = {
   initialize: (params: InitializePaymentParams) =>
-    fetchApi<PaymentResponse>("/payments/initialize", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
+    run(() =>
+      convex.action(api.payments.initialize, {
+        order_id: params.order_id as any,
+        callback_url: params.callback_url,
+      })
+    ) as Promise<ApiResponse<PaymentResponse>>,
 
   walletPay: (order_id: string) =>
-    fetchApi<{ message: string; order_id: string; balance: number }>("/payments/wallet-pay", {
-      method: "POST",
-      body: JSON.stringify({ order_id }),
-    }),
+    run(() => convex.mutation(api.payments.walletPay, { order_id: order_id as any })),
 
   verify: (reference: string) =>
-    fetchApi<{ message: string; order_id: string }>(`/payments/verify/${reference}`),
+    run(() => convex.action(api.payments.verify, { reference })),
 };
 
 // ==================== MESSAGES API ====================
@@ -423,6 +485,7 @@ export interface ChatMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
+  receiver_id?: string;
   text?: string | null;
   image_url?: string | null;
   created_at: string;
@@ -431,22 +494,34 @@ export interface ChatMessage {
 
 export const messagesApi = {
   getConversations: () =>
-    fetchApi<{ conversations: Conversation[] }>("/messages/conversations"),
+    run(() => convex.query(api.messages.conversations)) as Promise<
+      ApiResponse<{ conversations: Conversation[] }>
+    >,
 
   upsertConversation: (params: { product_id: string; buyer_id?: string }) =>
-    fetchApi<{ conversation: { id: string } }>("/messages/conversations/upsert", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
+    run(() =>
+      convex.mutation(api.messages.upsert, {
+        product_id: params.product_id as any,
+        buyer_id: params.buyer_id as any,
+      })
+    ),
 
   getConversationMessages: (conversationId: string) =>
-    fetchApi<{ messages: ChatMessage[] }>(`/messages/conversations/${conversationId}/messages`),
+    run(() =>
+      convex.query(api.messages.messages, { conversationId: conversationId as any })
+    ) as Promise<ApiResponse<{ messages: ChatMessage[] }>>,
 
   sendMessage: (params: { conversation_id: string; text?: string; image_url?: string }) =>
-    fetchApi<{ message: ChatMessage }>("/messages", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
+    run(() =>
+      convex.mutation(api.messages.send, {
+        conversation_id: params.conversation_id as any,
+        text: params.text,
+        image_url: params.image_url,
+      })
+    ),
+
+  markRead: (conversation_id: string) =>
+    run(() => convex.mutation(api.messages.markRead, { conversation_id: conversation_id as any })),
 };
 
 // ==================== USER API ====================
@@ -464,86 +539,76 @@ export interface UserProfile {
 
 export const userApi = {
   getProfile: () =>
-    fetchApi<UserProfile>("/protected/profile"),
+    run(() => convex.query(api.profile.get)) as Promise<ApiResponse<UserProfile>>,
 
-  updateProfile: (data: Partial<UserProfile>) =>
-    fetchApi<{ message: string }>("/protected/profile", {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
+  updateProfile: (data: Partial<UserProfile> & { momo_provider?: string; seller_bio?: string }) =>
+    run(() =>
+      convex.mutation(api.profile.update, {
+        full_name: data.full_name,
+        avatar_url: data.avatar_url,
+        momo_number: data.momo_number,
+        momo_provider: data.momo_provider,
+        campus: data.campus,
+        whatsapp: data.whatsapp,
+        seller_bio: data.seller_bio,
+        role: data.role,
+      })
+    ),
+
+  deleteMyAccount: () =>
+    run(() => convex.mutation(api.profile.deleteMyAccount, {})),
 
   getWallet: () =>
-    fetchApi<{ balance: number; pending_earnings: number }>("/protected/wallet"),
+    run(() =>
+      convex.query(api.wallet.summary)
+    ) as Promise<ApiResponse<{ balance: number; pending_earnings: number }>>,
 
   topUp: (amount: number) =>
-    fetchApi<{ message: string }>("/protected/wallet/topup", {
-      method: "POST",
-      body: JSON.stringify({ amount }),
-    }),
+    run(() => convex.mutation(api.wallet.topUp, { amount })),
 
-withdraw: (amount: number, momo_number?: string) =>
-    fetchApi<{ message: string }>("/protected/wallet/withdraw", {
-      method: "POST",
-      body: JSON.stringify({ amount, momo_number }),
-    }),
+  withdraw: (amount: number, momo_number?: string) =>
+    run(() => convex.mutation(api.wallet.withdraw, { amount, momo_number })),
 
   getTransactions: () =>
-    fetchApi<any[]>("/protected/wallet/transactions"),
+    run(() => convex.query(api.wallet.recentTransactions)) as Promise<ApiResponse<any[]>>,
 };
 
 export const sellerApi = {
   getTopSellers: (limit = 3) =>
-    fetchApi<{ sellers: any[]; count: number }>(`/sellers/top?limit=${limit}`),
+    run(() => convex.query(api.sellers.top, { limit })) as Promise<
+      ApiResponse<{ sellers: any[]; count: number }>
+    >,
 
   getProfile: () =>
-    fetchApi<{
-      id: string;
-      full_name: string;
-      seller_display_name?: string;
-      seller_profile_image_url?: string;
-      last_name_change?: string;
-      can_change_name: boolean;
-      days_remaining: number;
-    }>("/protected/seller"),
+    run(() => convex.query(api.profile.sellerProfile)) as Promise<
+      ApiResponse<{
+        id: string;
+        full_name: string;
+        seller_display_name?: string;
+        seller_profile_image_url?: string;
+        last_name_change?: string;
+        can_change_name: boolean;
+        days_remaining: number;
+      }>
+    >,
 
-  updateProfile: (data: { seller_display_name?: string; seller_profile_image_url?: string }) =>
-    fetchApi<{ message: string; user?: any; last_name_change?: string; days_remaining?: number }>("/protected/seller", {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
+  updateProfile: (data: {
+    seller_display_name?: string;
+    seller_profile_image_url?: string;
+    seller_bio?: string;
+    seller_response_time?: string;
+  }) =>
+    run(() =>
+      convex.mutation(api.profile.updateSellerProfile, {
+        seller_display_name: data.seller_display_name,
+        seller_profile_image_url: data.seller_profile_image_url,
+        seller_bio: data.seller_bio,
+        seller_response_time: data.seller_response_time,
+      })
+    ),
 
-  uploadProfileImage: async (file: File): Promise<ApiResponse<{ image_url: string }>> => {
-    const formData = new FormData();
-    formData.append("image", file);
-
-    let token: string | null = null;
-    const userJson = localStorage.getItem("wm_user");
-    if (userJson) {
-      try {
-        token = JSON.parse(userJson).access_token || null;
-      } catch { token = null; }
-    }
-    if (!token && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      token = session?.access_token || null;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/products/upload-image`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        return { error: data.error || "Upload failed" };
-      }
-      return { data };
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : "Upload error" };
-    }
-  },
+  uploadProfileImage: (file: File): Promise<ApiResponse<{ image_url: string }>> =>
+    uploadImage(file),
 };
 
 // ==================== VERIFICATION API ====================
@@ -558,6 +623,7 @@ export interface VerificationStatus {
 
 export interface VerificationRequest {
   document_type: "student_id" | "admission_letter";
+  document_url?: string;
 }
 
 export interface Verification {
@@ -577,30 +643,27 @@ export interface Verification {
 
 export const verificationApi = {
   getStatus: () =>
-    fetchApi<VerificationStatus>("/verification/status"),
+    run(() => convex.query(api.verification.status)) as Promise<ApiResponse<VerificationStatus>>,
 
   submitRequest: (params: VerificationRequest) =>
-    fetchApi<{ message: string; verification_id?: string; status: string }>("/verification/request", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }),
+    run(() =>
+      convex.mutation(api.verification.request, {
+        document_type: params.document_type,
+        document_url: params.document_url,
+      })
+    ),
 
   // Admin endpoints
   getAllPending: (status?: string) =>
-    fetchApi<{ verifications: Verification[] }>(
-      status ? `/admin/verifications?status=${status}` : "/admin/verifications"
-    ),
+    run(() =>
+      convex.query(api.verification.listPending, { status })
+    ) as Promise<ApiResponse<{ verifications: Verification[] }>>,
 
   approve: (id: string) =>
-    fetchApi<{ message: string; status: string }>(`/verification/admin/verification/${id}/approve`, {
-      method: "PATCH",
-    }),
+    run(() => convex.mutation(api.verification.approve, { id: id as any })),
 
   reject: (id: string, reason?: string) =>
-    fetchApi<{ message: string; status: string }>(`/verification/admin/verification/${id}/reject`, {
-      method: "PATCH",
-      body: JSON.stringify({ reason }),
-    }),
+    run(() => convex.mutation(api.verification.reject, { id: id as any, reason })),
 };
 
 // ==================== ADMIN API ====================
@@ -612,6 +675,7 @@ export interface AdminUser {
   full_name?: string | null;
   email: string;
   role: AdminUserRole;
+  verified?: boolean;
   created_at?: string;
   momo_number?: string | null;
 }
@@ -637,7 +701,8 @@ export interface AdminOrder {
   buyer_id: string;
   seller_id: string;
   amount: number;
-  status: "pending" | "paid" | "cancelled" | "disputed" | "confirmed";
+  commission?: number;
+  status: string;
   created_at: string;
   paid_at?: string | null;
   product?: {
@@ -654,151 +719,233 @@ export interface AdminOrder {
   };
 }
 
+export interface AdminDispute {
+  id: string;
+  order_id: string;
+  status: string;
+  reason: string;
+  description: string;
+  resolution: string;
+  created_at: string;
+  resolved_at?: string | null;
+  raised_by: { full_name: string; email: string };
+  order: {
+    amount: number;
+    status: string;
+    buyer_id: string;
+    seller_id: string;
+    product: string;
+  } | null;
+}
+
+export interface AdminPayout {
+  id: string;
+  amount: number;
+  net_amount: number;
+  status: string;
+  funds_reserved: boolean;
+  momo_number: string | null;
+  network: string | null;
+  failure_reason: string | null;
+  transfer_reference: string | null;
+  created_at: string;
+  processed_at?: string | null;
+  seller: { id: string; full_name: string; email: string };
+  order: { id: string; amount: number; status: string } | null;
+}
+
+export interface AdminSettings {
+  commission_rate: number;
+  min_withdrawal: number;
+  withdrawal_percentage: number;
+  payout_cooldown_hours: number;
+}
+
 export const adminApi = {
   getAllUsers: () =>
-    fetchApi<AdminUser[]>("/admin/users"),
+    run(() => convex.query(api.admin.users)) as Promise<ApiResponse<AdminUser[]>>,
 
   updateUserRole: (userId: string, role: AdminUserRole) =>
-    fetchApi<{ message: string }>(`/admin/users/${userId}/role`, {
-      method: "PATCH",
-      body: JSON.stringify({ role }),
-    }),
+    run(() => convex.mutation(api.admin.setUserRole, { id: userId as any, role })),
 
   banUser: (userId: string) =>
-    fetchApi<{ message: string }>(`/admin/ban-user/${userId}`, {
-      method: "PATCH",
-    }),
+    run(() => convex.mutation(api.admin.banUser, { id: userId as any })),
 
   unbanUser: (userId: string) =>
-    fetchApi<{ message: string }>(`/admin/unban-user/${userId}`, {
-      method: "PATCH",
-    }),
+    run(() => convex.mutation(api.admin.unbanUser, { id: userId as any })),
+
+  bulkUsers: (userIds: string[], action: "ban" | "unban" | "verify") =>
+    run(() =>
+      convex.mutation(api.admin.bulkUsers, {
+        userIds: userIds as any,
+        action,
+      })
+    ),
 
   getAllProducts: () =>
-    fetchApi<AdminProduct[]>("/admin/products"),
+    run(() => convex.query(api.admin.products)) as Promise<ApiResponse<AdminProduct[]>>,
 
   removeProduct: (productId: string) =>
-    fetchApi<{ message: string }>(`/admin/product/${productId}`, {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.products.adminRemove, { id: productId as any })),
+
+  updateProduct: (productId: string, updates: { is_active?: boolean }) =>
+    run(() =>
+      convex.mutation(api.products.update, { id: productId as any, ...updates })
+    ),
+
+  bulkProducts: (productIds: string[], action: "approve" | "reject" | "delete") =>
+    run(() =>
+      convex.mutation(api.admin.bulkProducts, {
+        productIds: productIds as any,
+        action,
+      })
+    ),
 
   getAllOrders: () =>
-    fetchApi<AdminOrder[]>("/admin/orders"),
+    run(() => convex.query(api.admin.orders)) as Promise<ApiResponse<AdminOrder[]>>,
+
+  getDisputes: () =>
+    run(() => convex.query(api.admin.disputes)) as Promise<ApiResponse<AdminDispute[]>>,
+
+  resolveDispute: (id: string, resolution: string) =>
+    run(() =>
+      convex.mutation(api.admin.resolveDispute, { id: id as any, resolution })
+    ),
+
+  getSettings: () =>
+    run(() => convex.query(api.admin.adminSettings)) as Promise<ApiResponse<AdminSettings>>,
+
+  updateSettings: (settings: AdminSettings) =>
+    run(() => convex.mutation(api.admin.updateAdminSettings, settings)) as Promise<ApiResponse<AdminSettings>>,
 
   updateOrderStatus: (orderId: string, status: "pending" | "paid" | "cancelled") =>
-    fetchApi<{ message: string; order: AdminOrder }>(`/admin/orders/${orderId}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    }),
+    run(() => convex.mutation(api.admin.setOrderStatus, { id: orderId as any, status })),
 
   getStats: () =>
-    fetchApi<{
-      totalUsers: number;
-      totalOrders: number;
-      totalRevenue: number;
-      totalProducts?: number;
-      commission?: number;
-    }>("/admin/stats"),
+    run(() => convex.query(api.admin.stats)) as Promise<
+      ApiResponse<{
+        totalUsers: number;
+        totalOrders: number;
+        totalRevenue: number;
+        totalProducts?: number;
+        commission?: number;
+      }>
+    >,
 
   // Enhanced stats with more details
   getDashboardStats: () =>
-    fetchApi<{
-      users: { total: number; active: number; newToday: number; newThisWeek: number };
-      orders: { total: number; pending: number; completed: number; cancelled: number; revenue: number };
-      products: { total: number; active: number; pending: number };
-      revenue: { total: number; thisMonth: number; lastMonth: number; averageOrder: number };
-      referrals: { total: number; qualified: number; creditsIssued: number };
-      growth: { userGrowth: number; orderGrowth: number; revenueGrowth: number };
-    }>("/admin/dashboard-stats"),
+    run(() => convex.query(api.admin.dashboardStats)) as Promise<
+      ApiResponse<{
+        users: { total: number; active: number; newToday: number; newThisWeek: number };
+        orders: { total: number; pending: number; completed: number; cancelled: number; revenue: number };
+        products: { total: number; active: number; pending: number };
+        revenue: { total: number; thisMonth: number; lastMonth: number; averageOrder: number };
+        referrals: { total: number; qualified: number; creditsIssued: number };
+        growth: { userGrowth: number; orderGrowth: number; revenueGrowth: number };
+      }>
+    >,
 
   // System health
   getSystemHealth: () =>
-    fetchApi<{
-      status: string;
-      database: { connected: boolean; responseTime: number };
-      api: { responseTime: number; uptime: number };
-      storage: { used: number; total: number };
-    }>("/admin/system-health"),
+    run(() => convex.query(api.admin.systemHealth)) as Promise<
+      ApiResponse<{
+        status: string;
+        database: { connected: boolean; responseTime: number };
+      }>
+    >,
 
   // Get recent activity
   getRecentActivity: (limit = 20) =>
-    fetchApi<any[]>(`/admin/activity?limit=${limit}`),
+    run(() => convex.query(api.admin.activity, { limit })) as Promise<ApiResponse<any[]>>,
 
   // Get top sellers
   getTopSellers: (limit = 10) =>
-    fetchApi<any[]>(`/admin/top-sellers?limit=${limit}`),
+    run(() => convex.query(api.admin.topSellers, { limit })) as Promise<ApiResponse<any[]>>,
 
   // Get revenue analytics
   getRevenueAnalytics: (period: "week" | "month" | "year" = "month") =>
-    fetchApi<{ daily: any[]; weekly: any[]; monthly: any[] }>(`/admin/revenue-analytics?period=${period}`),
+    run(() =>
+      convex.query(api.admin.revenueAnalytics, { period })
+    ) as Promise<ApiResponse<{ daily: any[]; weekly: any[]; monthly: any[] }>>,
 
   // Get user analytics
   getUserAnalytics: () =>
-    fetchApi<{ registrations: any[]; byRole: any; byVerification: any }>("/admin/user-analytics"),
+    run(() =>
+      convex.query(api.admin.userAnalytics)
+    ) as Promise<ApiResponse<{ registrations: any[]; byRole: any; byVerification: any }>>,
 
   // Get financial stats
   getFinancialStats: () =>
-    fetchApi<{
-      total_wallet_balance: number;
-      total_platform_credit: number;
-      seller_liability: number;
-      total_transaction_volume: number;
-      total_commission: number;
-      platform_profit: number;
-      paystack_balance: number;
-      available_for_withdrawal: number;
-      pending_payouts: number;
-      completed_payouts: number;
-      failed_payouts: number;
-      total_referral_credits: number;
-      active_referral_credits: number;
-      cash_flow: {
-        paystack_balance: number;
-        seller_liability: number;
-        net_platform_funds: number;
+    run(async () => {
+      const [stats, settings] = await Promise.all([
+        convex.query(api.wallet.platformStats),
+        convex.query(api.wallet.settings),
+      ]);
+      return {
+        ...stats,
+        settings: {
+          commission_rate: settings.commission_rate,
+          min_withdrawal: settings.min_withdrawal,
+          withdrawal_percentage: settings.withdrawal_percentage,
+          payout_cooldown_hours: settings.payout_cooldown_hours,
+        },
       };
-      settings: {
-        commission_rate: number;
-        min_withdrawal: number;
-        withdrawal_percentage: number;
-        payout_cooldown_hours: number;
-      };
-    }>("/admin/financial-stats"),
-
-  // Approve payout
-  approvePayout: (payoutId: string) =>
-    fetchApi<{ success: boolean; message: string }>(`/admin/payouts/${payoutId}/approve`, { method: "POST" }),
-
-  // Reject payout
-  rejectPayout: (payoutId: string, reason: string) =>
-    fetchApi<{ success: boolean; message: string }>(`/admin/payouts/${payoutId}/reject`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
     }),
+};
 
-  // Freeze/unfreeze user wallet
-  freezeWallet: (userId: string, freeze: boolean, fraudFlags?: string[]) =>
-    fetchApi<{ success: boolean; message: string }>(`/admin/users/${userId}/freeze-wallet`, {
-      method: "POST",
-      body: JSON.stringify({ freeze, fraud_flags: fraudFlags }),
-    }),
+export const adminPayoutsApi = {
+  getAll: () =>
+    run(() => convex.query(api.payouts.adminList)) as Promise<ApiResponse<AdminPayout[]>>,
 
-  // Bulk actions
-  bulkUpdateUsers: (userIds: string[], action: "ban" | "unban" | "verify") =>
-    fetchApi<{ message: string; updated: number }>("/admin/bulk-users", {
-      method: "POST",
-      body: JSON.stringify({ userIds, action }),
-    }),
+  approve: (payoutId: string) =>
+    run(() => convex.action(api.payouts.approve, { payout_id: payoutId as any })),
 
-  bulkUpdateProducts: (productIds: string[], action: "approve" | "reject" | "delete") =>
-    fetchApi<{ message: string; updated: number }>("/admin/bulk-products", {
-      method: "POST",
-      body: JSON.stringify({ productIds, action }),
-    }),
+  reject: (payoutId: string, reason: string) =>
+    run(() => convex.mutation(api.payouts.reject, { payout_id: payoutId as any, reason })),
+};
 
-  // Export data
-  exportData: (type: "users" | "orders" | "products" | "revenue", format: "csv" | "json" = "csv") =>
-    fetchApi<any>(`/admin/export?type=${type}&format=${format}`),
+export const servicesApiLegacy = {
+  // Get all services with optional filters
+  getAll: async (
+    serviceType?: string,
+    limit = 20,
+    offset = 0,
+    sort = "created_at.desc"
+  ): Promise<ApiResponse<{ services: Service[]; total: number }>> => {
+    const result = await run(() =>
+      convex.query(api.services.list, {
+        service_type: serviceType,
+        limit,
+        offset,
+        sort,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { services: result.data as Service[], total: (result.data as Service[]).length } };
+  },
+
+  // Get service by ID
+  getById: async (id: string): Promise<ApiResponse<{ service: Service; reviews: ServiceReview[] }>> => {
+    const result = await run(() => convex.query(api.services.byId, { id: id as any }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    const { reviews, ...service } = result.data as any;
+    return { data: { service: service as Service, reviews: (reviews ?? []) as ServiceReview[] } };
+  },
+
+  // Get service types with counts
+  getTypes: async (): Promise<ApiResponse<ServiceType[]>> => {
+    const result = await run(() => convex.query(api.services.metaTypes));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return {
+      data: (result.data as { type: string; count: number }[]).map((row) => ({
+        id: row.type,
+        name: row.type,
+        icon: "",
+        description: "",
+        count: row.count,
+      })),
+    };
+  },
 };
 
 // ==================== SELLERS API ====================
@@ -837,16 +984,20 @@ export interface SellerPublicProfile {
 
 export const sellersApi = {
   getMe: () =>
-    fetchApi<SellerStats>("/sellers/me"),
+    run(() => convex.query(api.sellers.me)) as unknown as Promise<ApiResponse<SellerStats>>,
 
   getById: (id: string) =>
-    fetchApi<SellerPublicProfile>(`/sellers/${id}`),
+    run(() =>
+      convex.query(api.sellers.byId, { id: id as any })
+    ) as unknown as Promise<ApiResponse<SellerPublicProfile>>,
 
   getAll: () =>
-    fetchApi<{ sellers: any[] }>("/sellers"),
+    run(() => convex.query(api.sellers.list)) as Promise<ApiResponse<{ sellers: any[] }>>,
 
   getTop: (limit = 6) =>
-    fetchApi<{ sellers: any[]; count: number }>(`/sellers/top?limit=${limit}`),
+    run(() =>
+      convex.query(api.sellers.top, { limit })
+    ) as Promise<ApiResponse<{ sellers: any[]; count: number }>>,
 };
 
 // ==================== CATEGORIES API ====================
@@ -864,10 +1015,24 @@ export interface Category {
 
 export const categoriesApi = {
   getAll: () =>
-    fetchApi<Category[]>("/categories"),
+    run(async () => {
+      await convex.mutation(api.categories.ensureDefaults, {});
+      return convex.query(api.categories.list);
+    }) as unknown as Promise<ApiResponse<Category[]>>,
+
+  getAllForAdmin: () =>
+    run(() => convex.query(api.categories.listForAdmin)) as Promise<ApiResponse<Category[]>>,
+
+  create: (data: { name: string }) =>
+    run(() => convex.mutation(api.categories.create, data)),
+
+  setActive: (id: string, is_active: boolean) =>
+    run(() => convex.mutation(api.categories.setActive, { id: id as any, is_active })),
 
   getById: (id: string) =>
-    fetchApi<{ category: Category; products: Product[]; pagination: any }>(`/categories/${id}`),
+    run(() =>
+      convex.query(api.categories.get, { id: id as any })
+    ) as unknown as Promise<ApiResponse<{ category: Category; products: Product[]; pagination: any }>>,
 };
 
 // ==================== REVIEWS API ====================
@@ -890,24 +1055,44 @@ export interface Review {
 
 export const reviewsApi = {
   getForSeller: (sellerId: string, page = 1, limit = 10) =>
-    fetchApi<{ reviews: Review[]; rating: number; review_count: number; pagination: any }>(
-      `/reviews/seller/${sellerId}?page=${page}&limit=${limit}`
-    ),
+    run(() =>
+      convex.query(api.reviews.sellerReviews, {
+        sellerId: sellerId as any,
+        page,
+        limit,
+      })
+    ) as Promise<
+      ApiResponse<{ reviews: Review[]; rating: number; review_count: number; pagination: any }>
+    >,
 
   getForOrder: (orderId: string) =>
-    fetchApi<{ review: Review | null }>(`/reviews/order/${orderId}`),
+    run(() =>
+      convex.query(api.reviews.orderReview, { orderId: orderId as any })
+    ) as Promise<ApiResponse<{ review: Review | null }>>,
 
-  create: (review: { order_id: string; rating: number; comment?: string; is_seller_review?: boolean }) =>
-    fetchApi<{ review: Review }>("/reviews", {
-      method: "POST",
-      body: JSON.stringify(review),
-    }),
+  create: (review: {
+    order_id: string;
+    rating: number;
+    comment?: string;
+    is_seller_review?: boolean;
+  }) =>
+    run(() =>
+      convex.mutation(api.reviews.create, {
+        order_id: review.order_id as any,
+        rating: review.rating,
+        comment: review.comment,
+        is_seller_review: review.is_seller_review,
+      })
+    ),
 
   update: (id: string, review: { rating?: number; comment?: string }) =>
-    fetchApi<{ review: Review }>(`/reviews/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(review),
-    }),
+    run(() =>
+      convex.mutation(api.reviews.update, {
+        id: id as any,
+        rating: review.rating,
+        comment: review.comment,
+      })
+    ),
 };
 
 // ==================== FAVORITES API ====================
@@ -922,104 +1107,63 @@ export interface Favorite {
 
 export const favoritesApi = {
   getAll: () =>
-    fetchApi<{ favorites: Favorite[] }>("/favorites"),
+    run(() => convex.query(api.favorites?.list)) as Promise<ApiResponse<{ favorites: Favorite[] }>>,
 
   add: (product_id: string) =>
-    fetchApi<{ favorite: Favorite }>("/favorites", {
-      method: "POST",
-      body: JSON.stringify({ product_id }),
-    }),
+    run(() => convex.mutation(api.favorites?.add, { product_id: product_id as any })),
 
   remove: (productId: string) =>
-    fetchApi<{ message: string }>(`/favorites/${productId}`, {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.favorites?.remove, { product_id: productId as any })),
 
   check: (productId: string) =>
-    fetchApi<{ is_favorited: boolean }>(`/favorites/check/${productId}`),
+    run(() =>
+      convex.query(api.favorites?.check, { product_id: productId as any })
+    ) as Promise<ApiResponse<{ is_favorited: boolean }>>,
 };
 
 export const likesApi = {
   getLikeCount: (productId: string) =>
-    fetchApi<{ like_count: number }>(`/favorites/likes/product/${productId}`),
-  
+    run(() =>
+      convex.query(api.favorites?.likeCount, { product_id: productId as any })
+    ) as Promise<ApiResponse<{ like_count: number }>>,
+
   like: (productId: string) =>
-    fetchApi<{ like: any; like_count: number }>(`/favorites/likes/product/${productId}`, {
-      method: "POST",
-    }),
-  
+    run(() =>
+      convex.mutation(api.favorites?.like, { product_id: productId as any })
+    ) as Promise<ApiResponse<{ like: any; like_count: number }>>,
+
   unlike: (productId: string) =>
-    fetchApi<{ message: string; like_count: number }>(`/favorites/likes/product/${productId}`, {
-      method: "DELETE",
-    }),
-  
+    run(() =>
+      convex.mutation(api.favorites?.unlike, { product_id: productId as any })
+    ) as Promise<ApiResponse<{ message: string; like_count: number }>>,
+
   checkLike: (productId: string) =>
-    fetchApi<{ is_liked: boolean }>(`/favorites/likes/check/${productId}`),
+    run(() =>
+      convex.query(api.favorites?.isLiked, { product_id: productId as any })
+    ) as Promise<ApiResponse<{ is_liked: boolean }>>,
 };
 
 // ==================== SEARCH API ====================
 
 export const searchApi = {
   saveQuery: (query: string) =>
-    fetchApi<{ history: any }>("/search/history", {
-      method: "POST",
-      body: JSON.stringify({ query }),
-    }),
+    run(() => convex.mutation(api.search?.addHistory, { query })),
 
   getHistory: (limit = 10) =>
-    fetchApi<{ history: { query: string; created_at: string }[] }>(`/search/history?limit=${limit}`),
+    run(() =>
+      convex.query(api.search?.history, { limit })
+    ) as Promise<ApiResponse<{ history: { query: string; created_at?: string }[] }>>,
 
   clearHistory: () =>
-    fetchApi<{ message: string }>("/search/history", {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.search?.clearHistory)),
 
   getSuggestions: (query: string, limit = 5) =>
-    fetchApi<{ suggestions: { id: string; title: string; image_url: string }[]; popular: string[] }>(
-      `/search/suggestions?q=${encodeURIComponent(query)}&limit=${limit}`
-    ),
+    run(() =>
+      convex.query(api.search?.suggestions, { q: query, limit })
+    ) as Promise<
+      ApiResponse<{ suggestions: { id: string; title: string; image_url: string }[]; popular: string[] }>
+    >,
 
-  searchByImage: async (imageFile: File) => {
-    const formData = new FormData();
-    formData.append('image', imageFile);
-
-    const url = resolveApiUrl('/search/image');
-
-    // Get token for authentication
-    let token: string | null = null;
-    const userJson = localStorage.getItem("wm_user");
-    if (userJson) {
-      try {
-        token = JSON.parse(userJson).access_token || null;
-      } catch {
-        token = null;
-      }
-    }
-
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        return { error: data.error || `HTTP ${response.status}: Request failed` };
-      }
-
-      return { data };
-    } catch (error) {
-      console.error('Image search API error:', error);
-      return { error: error instanceof Error ? error.message : "Network error" };
-    }
-  },
 };
 
 // ==================== REFERRALS API ====================
@@ -1031,52 +1175,58 @@ export interface ReferralStats {
   recent_referrals?: { referred_id: string; created_at: string }[];
   qualified_buyer_referrals?: number;
   qualified_seller_referrals?: number;
+  total_qualified?: number;
+  platform_credit?: number;
+  commission_discount_remaining?: number;
   referral_level?: number;
   is_campus_ambassador?: boolean;
 }
 
 export const referralsApi = {
   getCode: () =>
-    fetchApi<ReferralStats>("/referrals/code"),
+    run(() => convex.query(api.referrals?.myCode)) as Promise<ApiResponse<ReferralStats>>,
 
   getDashboard: () =>
-    fetchApi<any>("/referrals/dashboard"),
+    run(() => convex.query(api.referrals?.dashboard)) as Promise<ApiResponse<any>>,
 
   getLeaderboard: (limit = 20) =>
-    fetchApi<any[]>(`/referrals/leaderboard?limit=${limit}`),
+    run(() => convex.query(api.referrals?.leaderboard, { limit })) as Promise<ApiResponse<any[]>>,
 
   getMilestones: () =>
-    fetchApi<any[]>("/referrals/milestones"),
+    run(() => convex.query(api.referrals?.milestones)) as Promise<ApiResponse<any[]>>,
 
   verify: (referral_code?: string, referrer_email?: string) =>
-    fetchApi<{ valid: boolean; referrer: { id: string; name: string } }>("/referrals/verify", {
-      method: "POST",
-      body: JSON.stringify({ referral_code, referrer_email }),
-    }),
+    run(() =>
+      convex.query(api.referrals?.verify, { referral_code: referral_code ?? referrer_email })
+    ) as Promise<ApiResponse<{ valid: boolean; referrer: { id: string; name: string } }>>,
 
   claim: (referral_code?: string, referrer_email?: string) =>
-    fetchApi<{ message: string }>("/referrals/claim", {
-      method: "POST",
-      body: JSON.stringify({ referral_code, referrer_email }),
-    }),
+    run(() =>
+      convex.mutation(api.referrals?.claim, { referral_code: referral_code ?? referrer_email })
+    ),
+
+  claimForNewUser: (referral_code: string) =>
+    run(() => convex.mutation(api.referrals.claimForNewUser, { referral_code })),
 
   getStats: () =>
-    fetchApi<{
-      total_referrals: number;
-      qualified_referrals: number;
-      pending_referrals: number;
-      buyer_referrals: number;
-      seller_referrals: number;
-      platform_credit: number;
-      commission_discount_remaining: number;
-      referral_level: number;
-      is_campus_ambassador: boolean;
-      referrals: any[];
-      rewards: any[];
-    }>("/referrals/stats"),
+    run(() => convex.query(api.referrals?.stats)) as Promise<
+      ApiResponse<{
+        total_referrals: number;
+        qualified_referrals: number;
+        pending_referrals: number;
+        buyer_referrals: number;
+        seller_referrals: number;
+        platform_credit: number;
+        commission_discount_remaining: number;
+        referral_level: number;
+        is_campus_ambassador: boolean;
+        referrals: any[];
+        rewards: any[];
+      }>
+    >,
 
   getAdminStats: () =>
-    fetchApi<any>("/referrals/admin-stats"),
+    run(() => convex.query(api.referrals?.adminStats)) as Promise<ApiResponse<any>>,
 };
 
 // ==================== NOTIFICATIONS API ====================
@@ -1094,44 +1244,42 @@ export interface Notification {
 
 export const notificationsApi = {
   getAll: (page = 1, limit = 20, unread_only = false) =>
-    fetchApi<{
-      notifications: Notification[];
-      unread_count: number;
-      pagination: any;
-    }>(`/notifications?page=${page}&limit=${limit}&unread_only=${unread_only}`),
+    run(() =>
+      convex.query(api.notifications?.list, { page, limit, unread_only })
+    ) as Promise<
+      ApiResponse<{
+        notifications: Notification[];
+        unread_count: number;
+        pagination: any;
+      }>
+    >,
 
   getUnreadCount: () =>
-    fetchApi<{ unread_count: number }>("/notifications/unread-count"),
+    run(() =>
+      convex.query(api.notifications?.unreadCount)
+    ) as Promise<ApiResponse<{ unread_count: number }>>,
 
   markAsRead: (id: string) =>
-    fetchApi<{ message: string }>(`/notifications/${id}/read`, {
-      method: "PATCH",
-    }),
+    run(() => convex.mutation(api.notifications?.markRead, { id: id as any })),
 
   markAllAsRead: () =>
-    fetchApi<{ message: string }>("/notifications/read-all", {
-      method: "PATCH",
-    }),
+    run(() => convex.mutation(api.notifications?.readAll)),
 
   delete: (id: string) =>
-    fetchApi<{ message: string }>(`/notifications/${id}`, {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.notifications?.remove, { id: id as any })),
 
   clearAll: () =>
-    fetchApi<{ message: string }>("/notifications/clear-all", {
-      method: "DELETE",
-    }),
+    run(() => convex.mutation(api.notifications?.clearAll)),
 };
 
 // ==================== UTILITY ====================
 
 export function isApiConfigured(): boolean {
-  return Boolean(import.meta.env.VITE_API_URL || import.meta.env.DEV);
+  return Boolean(import.meta.env.VITE_CONVEX_URL);
 }
 
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  return CONVEX_SITE_URL;
 }
 
 // ============== Services API ==============
@@ -1150,7 +1298,7 @@ export interface Service {
   title: string;
   description: string;
   price: number;
-  price_type: 'fixed' | 'hourly' | 'starting_from';
+  price_type: "fixed" | "hourly" | "starting_from";
   location: string;
   availability: string;
   response_time: string;
@@ -1187,7 +1335,7 @@ export interface ServiceBooking {
   id: string;
   service_id: string;
   user_id: string;
-  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  status: "pending" | "confirmed" | "in_progress" | "completed" | "cancelled";
   notes: string;
   scheduled_date: string;
   scheduled_time: string;
@@ -1201,29 +1349,54 @@ export const servicesApi = {
     serviceType?: string,
     limit = 20,
     offset = 0,
-    sort = 'created_at.desc'
+    sort = "created_at.desc"
   ): Promise<ApiResponse<{ services: Service[]; total: number }>> => {
-    const params = new URLSearchParams();
-    if (serviceType) params.append('service_type', serviceType);
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    params.append('sort', sort);
-    return fetchApi(`/services?${params.toString()}`);
+    const result = await run(() =>
+      convex.query(api.services.list, {
+        service_type: serviceType,
+        limit,
+        offset,
+        sort,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    const services = result.data as unknown as Service[];
+    return { data: { services, total: services.length } };
   },
 
   // Get service by ID
   getById: async (id: string): Promise<ApiResponse<{ service: Service; reviews: ServiceReview[] }>> => {
-    return fetchApi(`/services/${id}`);
+    const result = await run(() => convex.query(api.services.byId, { id: id as any }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    const { reviews, ...service } = result.data as any;
+    return {
+      data: {
+        service: service as Service,
+        reviews: (reviews ?? []) as unknown as ServiceReview[],
+      },
+    };
   },
 
   // Get service types with counts
   getTypes: async (): Promise<ApiResponse<ServiceType[]>> => {
-    return fetchApi('/services/meta/types');
+    const result = await run(() => convex.query(api.services.metaTypes));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return {
+      data: (result.data as { type: string; count: number }[]).map((row) => ({
+        id: row.type,
+        name: row.type,
+        icon: "",
+        description: "",
+        count: row.count,
+      })),
+    };
   },
 
   // Get provider's own services
   getMyServices: async (): Promise<ApiResponse<Service[]>> => {
-    return fetchApi('/services/provider/me');
+    const result = await run(() => convex.query(api.services.mine));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: result.data as unknown as Service[] };
   },
 
   // Create new service
@@ -1232,16 +1405,27 @@ export const servicesApi = {
     title: string;
     description: string;
     price: number;
-    price_type: 'fixed' | 'hourly' | 'starting_from';
+    price_type: "fixed" | "hourly" | "starting_from";
     location: string;
     availability: string;
     response_time: string;
     images?: string[];
   }): Promise<ApiResponse<{ service: Service }>> => {
-    return fetchApi('/services', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.services.create, {
+        service_type: data.service_type,
+        title: data.title,
+        description: data.description,
+        price: data.price,
+        price_type: data.price_type,
+        location: data.location,
+        availability: data.availability,
+        response_time: data.response_time,
+        images: data.images,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data as unknown as Service } };
   },
 
   // Update service
@@ -1252,31 +1436,42 @@ export const servicesApi = {
       title: string;
       description: string;
       price: number;
-      price_type: 'fixed' | 'hourly' | 'starting_from';
+      price_type: string;
       location: string;
       availability: string;
       response_time: string;
       images: string[];
     }>
   ): Promise<ApiResponse<{ service: Service }>> => {
-    return fetchApi(`/services/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.services.update, {
+        id: id as any,
+        title: data.title,
+        description: data.description,
+        price: data.price,
+        price_type: data.price_type,
+        location: data.location,
+        availability: data.availability,
+        response_time: data.response_time,
+        images: data.images,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data as unknown as Service } };
   },
 
   // Delete service
   delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
-    return fetchApi(`/services/${id}`, {
-      method: 'DELETE',
-    });
+    const result = await run(() => convex.mutation(api.services.remove, { id: id as any }));
+    if (result.error) return result as ApiResponse<any>;
+    return { data: { success: true } };
   },
 
   // Toggle service active status
   toggle: async (id: string): Promise<ApiResponse<{ service: Service }>> => {
-    return fetchApi(`/services/${id}/toggle`, {
-      method: 'PATCH',
-    });
+    const result = await run(() => convex.mutation(api.services.toggle, { id: id as any }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data as unknown as Service } };
   },
 
   // Create service review
@@ -1284,41 +1479,53 @@ export const servicesApi = {
     serviceId: string,
     data: { rating: number; comment: string }
   ): Promise<ApiResponse<{ review: ServiceReview }>> => {
-    return fetchApi(`/services/${serviceId}/reviews`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.services.review, {
+        id: serviceId as any,
+        rating: data.rating,
+        comment: data.comment,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { review: result.data as unknown as ServiceReview } };
   },
 
   // Create service booking
   createBooking: async (
     serviceId: string,
-    data: {
-      notes: string;
-      scheduled_date: string;
-      scheduled_time: string;
-    }
+    data: { notes: string; scheduled_date: string; scheduled_time: string }
   ): Promise<ApiResponse<{ booking: ServiceBooking }>> => {
-    return fetchApi(`/services/${serviceId}/bookings`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.services.book, {
+        id: serviceId as any,
+        scheduled_date: data.scheduled_date,
+        scheduled_time: data.scheduled_time,
+        notes: data.notes,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { booking: result.data as unknown as ServiceBooking } };
   },
 
   // Get user's bookings (as customer or provider)
-  getMyBookings: async (role: 'customer' | 'provider' = 'customer'): Promise<ApiResponse<{ bookings: ServiceBooking[] }>> => {
-    return fetchApi(`/services/bookings/me?role=${role}`);
+  getMyBookings: async (
+    role: "customer" | "provider" = "customer"
+  ): Promise<ApiResponse<{ bookings: ServiceBooking[] }>> => {
+    const result = await run(() => convex.query(api.services.myBookings, { role }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { bookings: result.data as unknown as ServiceBooking[] } };
   },
 
   // Update booking status (provider only)
   updateBooking: async (
     id: string,
-    status: 'confirmed' | 'in_progress' | 'completed' | 'cancelled'
+    status: "confirmed" | "in_progress" | "completed" | "cancelled"
   ): Promise<ApiResponse<{ booking: ServiceBooking }>> => {
-    return fetchApi(`/services/bookings/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    });
+    const result = await run(() =>
+      convex.mutation(api.services.updateBooking, { id: id as any, status })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { booking: result.data as unknown as ServiceBooking } };
   },
 };
 
@@ -1379,62 +1586,64 @@ export interface Payout {
 export const walletApi = {
   // Get wallet information
   getWallet: () =>
-    fetchApi<{ wallet: WalletInfo }>("/payouts/wallet"),
+    run(() => convex.query(api.wallet?.info)) as Promise<ApiResponse<{ wallet: WalletInfo }>>,
 
   // Get withdrawal limits
   getLimits: () =>
-    fetchApi<WithdrawalLimits>("/payouts/limits"),
+    run(() => convex.query(api.wallet?.limits)) as Promise<ApiResponse<WithdrawalLimits>>,
 
   // Request withdrawal
   withdraw: (amount: number, momoNumber: string, network: string) =>
-    fetchApi<{ success: boolean; message: string; wallet: WalletInfo; payout: any }>(
-      "/payouts/withdraw",
-      {
-        method: "POST",
-        body: JSON.stringify({ amount, momo_number: momoNumber, network }),
-      }
-    ),
+    run(() =>
+      convex.mutation(api.wallet?.withdraw, {
+        amount,
+        momo_number: momoNumber,
+        network,
+      })
+    ) as Promise<
+      ApiResponse<{ success: boolean; message: string; wallet: WalletInfo; payout: any }>
+    >,
 
   // Check withdrawal eligibility
   checkEligibility: (amount: number) =>
-    fetchApi<{ eligible: boolean; reason: string; wallet_balance: number; daily_limit: number }>(
-      "/payouts/check-eligibility",
-      {
-        method: "POST",
-        body: JSON.stringify({ amount }),
-      }
-    ),
+    run(() =>
+      convex.query(api.wallet?.checkEligibility, { amount })
+    ) as Promise<
+      ApiResponse<{ eligible: boolean; reason: string; wallet_balance: number; daily_limit: number }>
+    >,
 
   // Get transaction history
-  getTransactions: (limit = 50, offset = 0, type?: string) => {
-    let url = `/payouts/transactions?limit=${limit}&offset=${offset}`;
-    if (type) url += `&type=${type}`;
-    return fetchApi<{ transactions: Transaction[]; has_more: boolean }>(url);
-  },
+  getTransactions: (limit = 50, offset = 0, type?: string) =>
+    run(async () => {
+      const result = await convex.query(api.wallet?.ledger, { limit, offset });
+      const transactions = ((result as any).ledger as any[]).filter(
+        (entry) => !type || entry.type === type
+      );
+      return { transactions, has_more: (result as any).has_more };
+    }) as Promise<ApiResponse<{ transactions: Transaction[]; has_more: boolean }>>,
 
   // Get payout history
   getPayoutHistory: (limit = 20, offset = 0) =>
-    fetchApi<{ payouts: Payout[]; has_more: boolean }>(
-      `/payouts/history?limit=${limit}&offset=${offset}`
-    ),
+    run(() =>
+      convex.query(api.payouts?.history, { limit, offset })
+    ) as Promise<ApiResponse<{ payouts: Payout[]; has_more: boolean }>>,
 
   // Get wallet ledger/history
   getLedger: (limit = 50, offset = 0) =>
-    fetchApi<{ ledger: any[]; has_more: boolean }>(
-      `/payouts/ledger?limit=${limit}&offset=${offset}`
-    ),
+    run(() =>
+      convex.query(api.wallet?.ledger, { limit, offset })
+    ) as Promise<ApiResponse<{ ledger: any[]; has_more: boolean }>>,
 };
 
 export const healthApi = {
   check: async (): Promise<ApiResponse<{ status: string }>> => {
-    let primaryError: string | undefined;
+    if (!CONVEX_SITE_URL) {
+      return { error: "VITE_CONVEX_SITE_URL is not configured" };
+    }
 
-    // Keep this probe "simple" (no auth, no JSON Content-Type) to avoid unnecessary
-    // CORS preflights and make failures easier to debug.
     try {
-      const response = await fetch(resolveApiUrl("/health"), {
+      const response = await fetch(`${CONVEX_SITE_URL}/health`, {
         method: "GET",
-        headers: { Accept: "application/json" },
       });
 
       const data = await response.json().catch(() => ({}));
@@ -1442,41 +1651,15 @@ export const healthApi = {
         return { data: { status: "ok" } };
       }
 
-      primaryError =
-        typeof (data as any)?.error === "string"
-          ? (data as any).error
-          : `HTTP ${response.status}: Health check failed`;
+      return {
+        error:
+          typeof (data as any)?.error === "string"
+            ? (data as any).error
+            : `HTTP ${response.status}: Health check failed`,
+      };
     } catch (error) {
-      primaryError = error instanceof Error ? error.message : "Network error";
+      return { error: toMessage(error) };
     }
-
-    // Fallback for environments still running older backend builds without /health.
-    try {
-      const probe = await fetch(resolveApiUrl("/protected/me"), {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-      const contentType = probe.headers.get("content-type") || "";
-
-      // 401 JSON means backend auth middleware responded correctly.
-      if ((probe.status === 401 || probe.status === 200) && contentType.includes("application/json")) {
-        return { data: { status: "ok" } };
-      }
-    } catch {
-      // continue to next fallback
-    }
-
-    try {
-      const root = await fetch(resolveApiUrl("/"), { method: "GET" });
-      const text = await root.text();
-      if (root.ok && text.includes("White Market backend is running")) {
-        return { data: { status: "ok" } };
-      }
-    } catch {
-      // swallow and return primary failure
-    }
-
-    return { error: primaryError || "Backend health check failed" };
   },
 };
 
@@ -1548,36 +1731,42 @@ export const booksApi = {
     search?: string,
     limit = 20,
     offset = 0,
-    sort = 'newest'
+    sort = "newest"
   ): Promise<ApiResponse<BooksAndNotesItem[]>> => {
-    const params = new URLSearchParams();
-    if (book_type) params.append('book_type', book_type);
-    if (subject) params.append('subject', subject);
-    if (course_code) params.append('course_code', course_code);
-    if (academic_level) params.append('academic_level', academic_level);
-    if (condition) params.append('condition', condition);
-    if (min_price) params.append('min_price', min_price.toString());
-    if (max_price) params.append('max_price', max_price.toString());
-    if (search) params.append('search', search);
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    params.append('sort', sort);
-    return fetchApi(`/books?${params.toString()}`);
+    const result = await run(() =>
+      convex.query(api.books?.list, {
+        book_type,
+        subject,
+        course_code,
+        academic_level,
+        condition,
+        min_price,
+        max_price,
+        search,
+        limit,
+        offset,
+        sort,
+      })
+    );
+    return result as unknown as ApiResponse<BooksAndNotesItem[]>;
   },
 
   // Get by ID
   getById: async (id: string): Promise<ApiResponse<BooksAndNotesItem>> => {
-    return fetchApi(`/books/${id}`);
+    const result = await run(() => convex.mutation(api.books.byId, { id: id as any }));
+    return result as unknown as ApiResponse<BooksAndNotesItem>;
   },
 
   // Get book types
   getTypes: async (): Promise<ApiResponse<string[]>> => {
-    return fetchApi('/books/meta/types');
+    const result = await run(() => convex.query(api.books?.metaTypes));
+    return result as ApiResponse<string[]>;
   },
 
   // Get subjects
   getSubjects: async (): Promise<ApiResponse<string[]>> => {
-    return fetchApi('/books/meta/subjects');
+    const result = await run(() => convex.query(api.books?.metaSubjects));
+    return result as ApiResponse<string[]>;
   },
 
   // Create listing
@@ -1600,10 +1789,8 @@ export const booksApi = {
     location?: string;
     images?: string[];
   }): Promise<ApiResponse<BooksAndNotesItem>> => {
-    return fetchApi('/books', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() => convex.mutation(api.books?.create, { ...data }));
+    return result as unknown as ApiResponse<BooksAndNotesItem>;
   },
 
   // Update listing
@@ -1615,6 +1802,7 @@ export const booksApi = {
       isbn: string;
       author: string;
       edition: string;
+      publisher: string;
       book_type: string;
       subject: string;
       course_code: string;
@@ -1626,24 +1814,21 @@ export const booksApi = {
       images: string[];
     }>
   ): Promise<ApiResponse<BooksAndNotesItem>> => {
-    return fetchApi(`/books/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() => convex.mutation(api.books?.update, { id: id as any, ...data }));
+    return result as unknown as ApiResponse<BooksAndNotesItem>;
   },
 
   // Delete listing
   delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
-    return fetchApi(`/books/${id}`, {
-      method: 'DELETE',
-    });
+    const result = await run(() => convex.mutation(api.books?.remove, { id: id as any }));
+    if (result.error) return result as ApiResponse<any>;
+    return { data: { success: true } };
   },
 
   // Mark as sold
   markAsSold: async (id: string): Promise<ApiResponse<BooksAndNotesItem>> => {
-    return fetchApi(`/books/${id}/sold`, {
-      method: 'POST',
-    });
+    const result = await run(() => convex.mutation(api.books?.markSold, { id: id as any }));
+    return result as unknown as ApiResponse<BooksAndNotesItem>;
   },
 
   // Create review
@@ -1651,18 +1836,22 @@ export const booksApi = {
     id: string,
     data: { rating: number; comment?: string }
   ): Promise<ApiResponse<any>> => {
-    return fetchApi(`/books/${id}/reviews`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.books?.review, { id: id as any, rating: data.rating, comment: data.comment })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Get user's books
-  getUserBooks: async (userId: string, limit = 20, offset = 0): Promise<ApiResponse<BooksAndNotesItem[]>> => {
-    const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    return fetchApi(`/books/user/${userId}?${params.toString()}`);
+  getUserBooks: async (
+    userId: string,
+    limit = 20,
+    offset = 0
+  ): Promise<ApiResponse<BooksAndNotesItem[]>> => {
+    const result = await run(() =>
+      convex.query(api.books?.byUser, { userId: userId as any, limit, offset })
+    );
+    return result as unknown as ApiResponse<BooksAndNotesItem[]>;
   },
 };
 
@@ -1693,6 +1882,7 @@ export interface FashionItem {
   // Status
   is_active: boolean;
   is_sold: boolean;
+  is_reserved?: boolean;
   // Stats
   view_count: number;
   rating: number;
@@ -1738,34 +1928,40 @@ export const fashionApi = {
     gender?: string,
     limit = 20,
     offset = 0,
-    sort = 'rating'
+    sort = "rating"
   ): Promise<ApiResponse<FashionItem[]>> => {
-    const params = new URLSearchParams();
-    if (category) params.append('category', category);
-    if (size) params.append('size', size);
-    if (color) params.append('color', color);
-    if (brand) params.append('brand', brand);
-    if (condition) params.append('condition', condition);
-    if (gender) params.append('gender', gender);
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    params.append('sort', sort);
-    return fetchApi(`/fashion?${params.toString()}`);
+    const result = await run(() =>
+      convex.query(api.fashion?.list, {
+        category,
+        size,
+        color,
+        brand,
+        condition,
+        gender,
+        limit,
+        offset,
+        sort,
+      })
+    );
+    return result as unknown as ApiResponse<FashionItem[]>;
   },
 
   // Get by ID
   getById: async (id: string): Promise<ApiResponse<FashionItem>> => {
-    return fetchApi(`/fashion/${id}`);
+    const result = await run(() => convex.mutation(api.fashion.byId, { id: id as any }));
+    return result as unknown as ApiResponse<FashionItem>;
   },
 
   // Get categories
   getCategories: async (): Promise<ApiResponse<string[]>> => {
-    return fetchApi('/fashion/meta/categories');
+    const result = await run(() => convex.query(api.fashion?.metaCategories));
+    return result as ApiResponse<string[]>;
   },
 
   // Get available filters
   getFilters: async (): Promise<ApiResponse<FashionFilters>> => {
-    return fetchApi('/fashion/meta/filters');
+    const result = await run(() => convex.query(api.fashion?.metaFilters));
+    return result as ApiResponse<FashionFilters>;
   },
 
   // Create listing
@@ -1773,7 +1969,7 @@ export const fashionApi = {
     title: string;
     description?: string;
     price: number;
-    price_type?: 'fixed' | 'hourly' | 'from';
+    price_type?: "fixed" | "hourly" | "from";
     location?: string;
     size?: string;
     color?: string;
@@ -1782,10 +1978,23 @@ export const fashionApi = {
     gender?: string;
     images?: string[];
   }): Promise<ApiResponse<{ service: FashionItem }>> => {
-    return fetchApi('/fashion', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.fashion?.create, {
+        title: data.title,
+        description: data.description,
+        category: (data as any).category ?? "clothing",
+        gender: data.gender ?? "unisex",
+        size: data.size,
+        color: data.color,
+        brand: data.brand,
+        condition: data.condition ?? "good",
+        price: data.price,
+        location: data.location,
+        images: data.images,
+      })
+    );
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data } };
   },
 
   // Update listing
@@ -1795,7 +2004,7 @@ export const fashionApi = {
       title: string;
       description: string;
       price: number;
-      price_type: 'fixed' | 'hourly' | 'from';
+      price_type: "fixed" | "hourly" | "from";
       location: string;
       size: string;
       color: string;
@@ -1805,24 +2014,23 @@ export const fashionApi = {
       images: string[];
     }>
   ): Promise<ApiResponse<{ service: FashionItem }>> => {
-    return fetchApi(`/fashion/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() => convex.mutation(api.fashion?.update, { id: id as any, ...data }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data } };
   },
 
   // Delete listing
   delete: async (id: string): Promise<ApiResponse<{ success: boolean }>> => {
-    return fetchApi(`/fashion/${id}`, {
-      method: 'DELETE',
-    });
+    const result = await run(() => convex.mutation(api.fashion?.remove, { id: id as any }));
+    if (result.error) return result as ApiResponse<any>;
+    return { data: { success: true } };
   },
 
   // Toggle active status
   toggle: async (id: string): Promise<ApiResponse<{ service: FashionItem }>> => {
-    return fetchApi(`/fashion/${id}/toggle`, {
-      method: 'PATCH',
-    });
+    const result = await run(() => convex.mutation(api.fashion.toggle, { id: id as any }));
+    if (result.error || !result.data) return result as ApiResponse<any>;
+    return { data: { service: result.data } };
   },
 
   // Create review
@@ -1830,30 +2038,38 @@ export const fashionApi = {
     id: string,
     data: { rating: number; comment?: string }
   ): Promise<ApiResponse<any>> => {
-    return fetchApi(`/fashion/${id}/reviews`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.fashion?.review, {
+        id: id as any,
+        rating: data.rating,
+        comment: data.comment,
+      })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Mark as sold
   markAsSold: async (id: string): Promise<ApiResponse<FashionItem>> => {
-    return fetchApi(`/fashion/${id}/sold`, {
-      method: 'POST',
-    });
+    const result = await run(() => convex.mutation(api.fashion?.markSold, { id: id as any }));
+    return result as unknown as ApiResponse<FashionItem>;
   },
 
   // Get user's fashion items
-  getUserFashion: async (userId: string, limit = 20, offset = 0): Promise<ApiResponse<FashionItem[]>> => {
-    const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    params.append('offset', offset.toString());
-    return fetchApi(`/fashion/user/${userId}?${params.toString()}`);
+  getUserFashion: async (
+    userId: string,
+    limit = 20,
+    offset = 0
+  ): Promise<ApiResponse<FashionItem[]>> => {
+    const result = await run(() =>
+      convex.query(api.fashion?.byUser, { userId: userId as any, limit, offset })
+    );
+    return result as unknown as ApiResponse<FashionItem[]>;
   },
 
   // Get brands
   getBrands: async (): Promise<ApiResponse<string[]>> => {
-    return fetchApi('/fashion/meta/brands');
+    const result = await run(() => convex.query(api.fashion.metaBrands));
+    return result as ApiResponse<string[]>;
   },
 };
 
@@ -1861,7 +2077,10 @@ export const fashionApi = {
 export const ratingsApi = {
   // Get seller rating stats
   getSellerStats: async (sellerId: string): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/seller/${sellerId}/stats`);
+    const result = await run(() =>
+      convex.query(api.ratings.sellerStats, { sellerId: sellerId as any })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Get ratings for a seller
@@ -1869,18 +2088,20 @@ export const ratingsApi = {
     sellerId: string,
     page = 1,
     limit = 10,
-    sort = 'recent'
+    sort = "recent"
   ): Promise<ApiResponse<any>> => {
-    const params = new URLSearchParams();
-    params.append('page', page.toString());
-    params.append('limit', limit.toString());
-    params.append('sort', sort);
-    return fetchApi(`/ratings/seller/${sellerId}?${params.toString()}`);
+    const result = await run(() =>
+      convex.query(api.ratings.sellerRatings, { sellerId: sellerId as any, page, limit, sort })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Get rating for a specific order
   getOrderRating: async (orderId: string): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/order/${orderId}`);
+    const result = await run(() =>
+      convex.query(api.ratings.orderRating, { orderId: orderId as any })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Submit a new rating
@@ -1899,10 +2120,24 @@ export const ratingsApi = {
     review_photos?: string[];
     is_anonymous?: boolean;
   }): Promise<ApiResponse<any>> => {
-    return fetchApi('/ratings', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.ratings.create, {
+        order_id: data.order_id as any,
+        seller_id: data.seller_id as any,
+        overall_rating: data.overall_rating,
+        product_quality_rating: data.product_quality_rating,
+        communication_rating: data.communication_rating,
+        delivery_speed_rating: data.delivery_speed_rating,
+        packaging_rating: data.packaging_rating,
+        value_for_money_rating: data.value_for_money_rating,
+        review_text: data.review_text,
+        review_title: data.review_title,
+        feedback_tags: data.feedback_tags,
+        review_photos: data.review_photos,
+        is_anonymous: data.is_anonymous,
+      })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Update an existing rating
@@ -1922,10 +2157,15 @@ export const ratingsApi = {
       is_anonymous?: boolean;
     }
   ): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/${ratingId}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.ratings.update, {
+        id: ratingId as any,
+        overall_rating: data.overall_rating,
+        review_text: data.review_text,
+        review_title: data.review_title,
+      })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Add seller response to a rating
@@ -1933,10 +2173,10 @@ export const ratingsApi = {
     ratingId: string,
     response: string
   ): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/${ratingId}/response`, {
-      method: 'POST',
-      body: JSON.stringify({ response }),
-    });
+    const result = await run(() =>
+      convex.mutation(api.ratings.respond, { id: ratingId as any, response })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Vote on rating helpfulness
@@ -1944,31 +2184,30 @@ export const ratingsApi = {
     ratingId: string,
     isHelpful: boolean
   ): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/${ratingId}/helpful`, {
-      method: 'POST',
-      body: JSON.stringify({ is_helpful: isHelpful }),
-    });
+    const result = await run(() =>
+      convex.mutation(api.ratings?.markHelpful, { id: ratingId as any, is_helpful: isHelpful })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Get user's rating history
-  getUserHistory: async (
-    page = 1,
-    limit = 10
-  ): Promise<ApiResponse<any>> => {
-    const params = new URLSearchParams();
-    params.append('page', page.toString());
-    params.append('limit', limit.toString());
-    return fetchApi(`/ratings/user/history?${params.toString()}`);
+  getUserHistory: async (page = 1, limit = 10): Promise<ApiResponse<any>> => {
+    const result = await run(() => convex.query(api.ratings?.userHistory, { page, limit }));
+    return result as ApiResponse<any>;
   },
 
   // Get orders eligible for rating
   getEligibleOrders: async (): Promise<ApiResponse<any>> => {
-    return fetchApi('/ratings/eligible-orders');
+    const result = await run(() => convex.query(api.ratings?.eligibleOrders));
+    return result as ApiResponse<any>;
   },
 
   // Get product rating stats
   getProductStats: async (productId: string): Promise<ApiResponse<any>> => {
-    return fetchApi(`/ratings/product/${productId}/stats`);
+    const result = await run(() =>
+      convex.query(api.ratings?.productStats, { productId: productId as any })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Get ratings for a product
@@ -1976,13 +2215,12 @@ export const ratingsApi = {
     productId: string,
     page = 1,
     limit = 10,
-    sort = 'recent'
+    sort = "recent"
   ): Promise<ApiResponse<any>> => {
-    const params = new URLSearchParams();
-    params.append('page', page.toString());
-    params.append('limit', limit.toString());
-    params.append('sort', sort);
-    return fetchApi(`/ratings/product/${productId}?${params.toString()}`);
+    const result = await run(() =>
+      convex.query(api.ratings?.productRatings, { productId: productId as any, page, limit, sort })
+    );
+    return result as ApiResponse<any>;
   },
 
   // Submit a product rating
@@ -1991,52 +2229,81 @@ export const ratingsApi = {
     rating: number;
     comment?: string;
   }): Promise<ApiResponse<any>> => {
-    return fetchApi('/ratings/product', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() =>
+      convex.mutation(api.ratings?.rateProduct, {
+        product_id: data.product_id as any,
+        rating: data.rating,
+        comment: data.comment,
+      })
+    );
+    return result as ApiResponse<any>;
   },
 };
 
 // Website Feedback API
 export const feedbackApi = {
+  uploadReportScreenshot: (file: File) =>
+    uploadImage(file, "/report-upload"),
+
+  fetchReportScreenshot: async (url: string): Promise<ApiResponse<Blob>> => {
+    const token = convexAccessToken();
+    if (!token) return { error: "Sign in with an administrator account to view this screenshot." };
+    try {
+      const target = new URL(url);
+      const expectedOrigin = new URL(CONVEX_SITE_URL).origin;
+      if (target.origin !== expectedOrigin || !target.pathname.startsWith("/report-file/")) {
+        return { error: "Screenshot URL is not a trusted White Market file." };
+      }
+      const response = await fetch(target.href, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        return { error: response.status === 403 ? "Administrator access is required." : "Screenshot could not be loaded." };
+      }
+      return { data: await response.blob() };
+    } catch (error) {
+      return { error: toMessage(error) };
+    }
+  },
+
   // Submit website feedback
   submitFeedback: async (data: {
-    rating: number;
+    rating?: number;
     feedback_type?: string;
     feedback_text?: string;
+    reporter_email?: string;
+    report_image_urls?: string[];
     would_recommend?: boolean;
     improved_features?: string[];
     is_satisfied?: boolean;
     page_url?: string;
     session_duration_seconds?: number;
   }): Promise<ApiResponse<any>> => {
-    return fetchApi('/feedback', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const result = await run(() => convex.mutation(api.feedback.create, { ...data }));
+    return result as ApiResponse<any>;
   },
 
   // Get top testimonials for home page
   getTestimonials: async (limit = 3): Promise<ApiResponse<any>> => {
-    return fetchApi(`/feedback/testimonials?limit=${limit}`);
+    const result = await run(() => convex.query(api.feedback.testimonials, { limit }));
+    return result as ApiResponse<any>;
   },
 
   // Get feedback stats
   getStats: async (): Promise<ApiResponse<any>> => {
-    return fetchApi('/feedback/stats');
+    const result = await run(() => convex.query(api.feedback.stats));
+    return result as ApiResponse<any>;
   },
 
   // Get all feedback (admin only)
   getAll: async (page = 1, limit = 20): Promise<ApiResponse<any>> => {
-    const params = new URLSearchParams();
-    params.append('page', page.toString());
-    params.append('limit', limit.toString());
-    return fetchApi(`/feedback?${params.toString()}`);
+    const result = await run(() => convex.query(api.feedback.list, { page, limit }));
+    return result as ApiResponse<any>;
   },
 
   // Get single feedback (admin only)
   getById: async (feedbackId: string): Promise<ApiResponse<any>> => {
-    return fetchApi(`/feedback/${feedbackId}`);
+    const result = await run(() => convex.query(api.feedback?.byId, { id: feedbackId as any }));
+    return result as ApiResponse<any>;
   },
 };

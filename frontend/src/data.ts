@@ -20,19 +20,21 @@ export type Product = {
   sellerAvatar?: string;
   category: string;
   image: string;
+  description?: string;
   is_active: boolean;
-  stock_status: "in_stock" | "limited" | "out_of_stock";
+  stock_status: "in_stock" | "limited" | "out_of_stock" | "unknown";
+  stock_quantity?: number;
   views: number;
   rating: number;
   reviews: number;
   average_rating?: number;
   rating_count?: number;
-  eta: string;
-  delivery_type: "Campus Meetup" | "Pickup Point" | "Hall Lobby Handover";
-  condition: "New" | "Like New" | "Used";
+  eta?: string;
+  delivery_type?: "Campus Meetup" | "Pickup Point" | "Hall Lobby Handover";
+  condition?: string;
   verified_seller: boolean;
-  seller_sales: number;
-  response_time: string;
+  seller_sales?: number;
+  response_time?: string;
   listed_at: string;
 };
 
@@ -121,6 +123,8 @@ const KEYS = {
   activities: "wm_activities",
   seeded: "wm_seeded",
 };
+
+export const PRODUCTS_REFRESH_EVENT = "wm-products-refresh";
 
 const bc = typeof window !== "undefined" && "BroadcastChannel" in window ? new BroadcastChannel("wm-realtime") : null;
 

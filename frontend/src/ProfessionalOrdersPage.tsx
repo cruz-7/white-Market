@@ -1,5 +1,5 @@
-﻿import { useState, useMemo } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Package,
   CheckCircle,
@@ -783,6 +783,8 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
 
 export default function ProfessionalOrdersPage({ user }: Props) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedOrderId = searchParams.get("orderId");
 
   if (!user) {
     return <Navigate to="/auth" replace />;
@@ -801,6 +803,12 @@ export default function ProfessionalOrdersPage({ user }: Props) {
   const orders = user.role === "seller" 
     ? allOrders.filter((o) => o.sellerId === user.id)
     : allOrders.filter((o) => o.buyerId === user.id);
+
+  useEffect(() => {
+    if (!requestedOrderId) return;
+    const order = orders.find((candidate) => candidate.id === requestedOrderId);
+    if (order && order.id !== selectedOrder?.id) setSelectedOrder(order);
+  }, [orders, requestedOrderId, selectedOrder?.id]);
   
   // Filter orders by status
   const activeOrders = orders.filter((o) => 

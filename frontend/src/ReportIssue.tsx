@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, AlertTriangle, MessageSquare, Shield, Upload, CheckCircle, X } from "lucide-react";
+import { ArrowLeft, AlertTriangle, MessageSquare, Shield, CheckCircle, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle } from "./card";
 import { Input } from "./input";
 import { Textarea } from "./textarea";
+import { feedbackApi } from "./api";
 
 export default function ReportIssue() {
   const navigate = useNavigate();
@@ -18,6 +19,20 @@ export default function ReportIssue() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const handleScreenshot = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Screenshot must be 5 MB or smaller.");
+      return;
+    }
+    setSelectedFile(file);
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -47,28 +62,36 @@ export default function ReportIssue() {
     }
 
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsSubmitting(false);
-    setSubmitted(true);
-    toast.success("Report submitted successfully! We'll review it shortly.");
-  };
-
-  const handleAttachScreenshot = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        setSelectedFile(file);
-        toast.success(`Attached: ${file.name}`);
+    try {
+      let reportImageUrls: string[] | undefined;
+      if (selectedFile) {
+        const upload = await feedbackApi.uploadReportScreenshot(selectedFile);
+        if (upload.error || !upload.data?.image_url) {
+          throw new Error(upload.error || "Screenshot upload failed.");
+        }
+        reportImageUrls = [upload.data.image_url];
       }
-    };
-    input.click();
-  };
-
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
+      const { error } = await feedbackApi.submitFeedback({
+        feedback_type: `issue_report_${formData.reportType}`,
+        feedback_text: [
+          `Report type: ${formData.reportType}`,
+          `Related order/user: ${formData.orderId.trim() || "Not provided"}`,
+          "",
+          formData.description.trim(),
+        ].join("\n"),
+        reporter_email: formData.email.trim(),
+        report_image_urls: reportImageUrls,
+        page_url: window.location.href,
+      });
+      if (error) throw new Error(error);
+      setSubmitted(true);
+      toast.success("Report submitted successfully. The admin team can review it in Feedback.");
+    } catch (error) {
+      console.error("Failed to submit issue report:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to submit report. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleReset = () => {
@@ -93,7 +116,7 @@ export default function ReportIssue() {
             </div>
             <h1 className="text-3xl font-bold text-slate-900">Report Submitted!</h1>
             <p className="mt-3 text-lg text-slate-600">
-              Thank you for helping keep White Market safe. Our team will review your report and take appropriate action within 24-48 hours.
+              Thank you for helping keep White Market safe. Your report is now available to the admin team for review.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <Button onClick={handleReset} variant="outline">Submit Another Report</Button>
@@ -217,22 +240,24 @@ export default function ReportIssue() {
                   title="Enter order or user ID"
                 />
               </div>
-              {selectedFile && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                  <Upload className="h-5 w-5 text-green-600" />
-                  <span className="flex-1 text-sm text-green-800">{selectedFile.name}</span>
-                  <button onClick={handleRemoveFile} className="p-1 hover:bg-green-100 rounded" title="Remove file">
-                    <X className="h-4 w-4 text-green-700" />
-                  </button>
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Screenshot (optional)</label>
+                {selectedFile ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3">
+                    <Upload className="h-4 w-4 text-green-700" />
+                    <span className="flex-1 truncate text-sm text-green-800">{selectedFile.name}</span>
+                    <button type="button" onClick={() => setSelectedFile(null)} aria-label="Remove screenshot">
+                      <X className="h-4 w-4 text-green-700" />
+                    </button>
+                  </div>
+                ) : (
+                  <Input type="file" accept="image/*" onChange={handleScreenshot} title="Attach a screenshot" />
+                )}
+                <p className="mt-1 text-xs text-slate-500">Up to 5 MB. Uploading requires sign-in; the report itself can still be submitted without an image.</p>
+              </div>
               <div className="flex flex-wrap items-center gap-4">
                 <Button onClick={handleSubmitReport} disabled={isSubmitting}>
                   {isSubmitting ? "Submitting..." : "Submit Report"}
-                </Button>
-                <Button variant="outline" onClick={handleAttachScreenshot} type="button">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Attach Screenshot
                 </Button>
               </div>
             </CardContent>
@@ -244,9 +269,7 @@ export default function ReportIssue() {
                 If you are in immediate danger, this form is not monitored 24/7. Contact your campus security or local emergency services.
               </p>
               <div className="flex flex-wrap justify-center gap-3">
-                <Button variant="outline" asChild>
-                  <Link to="/safety">View Safety Tips</Link>
-                </Button>
+                <Button variant="outline" asChild><Link to="/buyer-protection">View Safety Tips</Link></Button>
               </div>
             </CardContent>
           </Card>

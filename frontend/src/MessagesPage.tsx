@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MessageCircle, Send, Loader2, ArrowLeft, Image, Check, CheckCheck, MoreVertical, Phone, Video } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "./supabase-client";
+import { useQuery, useMutation } from "convex/react";
+import { api as convexApi } from "../convex/_generated/api";
 import { messagesApi, ChatMessage, Conversation } from "./api";
 import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle } from "./card";
@@ -18,20 +19,49 @@ export default function MessagesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const conversationId = searchParams.get("conversation");
+  const prefillMessage = searchParams.get("prefill");
 
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
   const [showConversationList, setShowConversationList] = useState(true);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const prefillAppliedRef = useRef<string | null>(null);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  const conversationsQuery = useQuery((convexApi as any).functions.messages.conversations);
+  const conversations = conversationsQuery?.conversations ?? [];
+
+  const messagesQuery = useQuery(
+    (convexApi as any).functions.messages.messages,
+    activeConversation?.id ? { conversationId: activeConversation.id } : "skip"
+  );
+  const messages = messagesQuery?.messages ?? [];
+
+  const sendMessage = useMutation((convexApi as any).functions.messages.send);
+  const markRead = useMutation((convexApi as any).functions.messages.markRead);
+
+  const handleSendMessage = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = newMessage.trim();
+    if (!text || !activeConversation?.id || sending || !currentUserId) return;
+
+    setSending(true);
+    try {
+      await sendMessage({ conversation_id: activeConversation.id, text });
+      setNewMessage("");
+      setTimeout(scrollToBottom, 50);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Message could not be sent");
+    } finally {
+      setSending(false);
+    }
+  }, [activeConversation?.id, activeConversation?.seller_id, activeConversation?.buyer_id, currentUserId, newMessage, scrollToBottom, sendMessage, sending]);
 
   // Check for mobile view
   useEffect(() => {
@@ -45,172 +75,59 @@ export default function MessagesPage() {
 
   // Get current user on mount
   useEffect(() => {
-    const getCurrentUser = async () => {
-      const { data: { user } } = await supabase?.auth.getUser() || { data: { user: null } };
-      if (user) {
-        setCurrentUser(user.id);
+    try {
+      const raw = localStorage.getItem("wm_user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setCurrentUserId(parsed.id || null);
       }
-    };
-    getCurrentUser();
+    } catch {
+      setCurrentUserId(null);
+    }
   }, []);
 
-  // Fetch conversations
+  // Pick active conversation from URL or list
   useEffect(() => {
-    const fetchConversations = async () => {
-      try {
-        const response = await messagesApi.getConversations() as { data?: { conversations: Conversation[] } };
-        if (response.data?.conversations) {
-          const convs = response.data.conversations;
-          setConversations(convs);
-          
-          // If there's a conversation in URL, find and set it
-          if (conversationId) {
-            const conv = convs.find(c => c.id === conversationId);
-            if (conv) {
-              setActiveConversation(conv);
-              setShowConversationList(false);
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching conversations:", error);
-      } finally {
-        setLoading(false);
+    if (!conversations.length) return;
+
+    if (conversationId) {
+      const conv = conversations.find((c: any) => c.id === conversationId);
+      if (conv) {
+        setActiveConversation(conv);
+        setShowConversationList(false);
+        return;
       }
-    };
-    fetchConversations();
-  }, [conversationId]);
-
-  // Fetch messages when conversation is selected
-  useEffect(() => {
-    const fetchMessages = async () => {
-      if (!activeConversation?.id || !currentUser) return;
-
-      setLoadingMessages(true);
-      try {
-        const response = await messagesApi.getConversationMessages(activeConversation.id) as { data?: { messages: ChatMessage[] } };
-        if (response.data?.messages) {
-          setMessages(response.data.messages);
-          scrollToBottom();
-        }
-      } catch (error) {
-        console.error("Error fetching messages:", error);
-      } finally {
-        setLoadingMessages(false);
-      }
-    };
-    fetchMessages();
-  }, [activeConversation?.id, currentUser]);
-
-  // Setup realtime subscription
-  useEffect(() => {
-    if (!activeConversation?.id || !supabase) return;
-
-    // Remove previous channel if exists
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
     }
 
-    const channel = supabase
-      .channel(`chat-${activeConversation.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${activeConversation.id}`,
-        },
-        (payload) => {
-          const newMessage = payload.new as ChatMessage;
-          // Add message if not already present
-          setMessages((prev) => {
-            if (prev.some(m => m.id === newMessage.id)) return prev;
-            return [...prev, newMessage];
-          });
-          scrollToBottom();
-
-          // Mark as read if not sender
-          if (newMessage.sender_id !== currentUser) {
-            markAsRead(newMessage.id);
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${activeConversation.id}`,
-        },
-        (payload) => {
-          const updatedMessage = payload.new as ChatMessage;
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === updatedMessage.id ? { ...msg, ...updatedMessage } : msg
-            )
-          );
-        }
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-
-    return () => {
-      if (supabase && channel) {
-        supabase.removeChannel(channel);
+    if (!activeConversation && conversations.length > 0) {
+      setActiveConversation(conversations[0]);
+      if (isMobileView) {
+        setShowConversationList(false);
       }
-    };
-  }, [activeConversation?.id, currentUser]);
-
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  };
-
-  const markAsRead = async (messageId: string) => {
-    try {
-      await supabase?.from("messages").update({ status: "read" }).eq("id", messageId);
-    } catch (error) {
-      console.error("Error marking as read:", error);
     }
-  };
+  }, [conversationId, conversations, activeConversation, isMobileView]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !activeConversation?.id || sending) return;
+  useEffect(() => {
+    if (!conversationId || activeConversation?.id !== conversationId || !prefillMessage) return;
+    const prefillKey = `${conversationId}:${prefillMessage}`;
+    if (prefillAppliedRef.current === prefillKey) return;
+    prefillAppliedRef.current = prefillKey;
+    setNewMessage((current) => current || prefillMessage);
+  }, [activeConversation?.id, conversationId, prefillMessage]);
 
-    setSending(true);
-    try {
-      const response = await messagesApi.sendMessage({
-        conversation_id: activeConversation.id,
-        text: newMessage.trim(),
-      }) as { data?: { message: ChatMessage } };
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length]);
 
-      if (response.data?.message) {
-        const message = response.data.message;
-        setMessages((prev) => [...prev, message]);
-        setNewMessage("");
-        scrollToBottom();
-
-        // Update conversation list
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === activeConversation.id
-              ? { ...conv, last_message: message, updated_at: message.created_at }
-              : conv
-          ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-        );
-      }
-    } catch (error) {
-      console.error("Error sending message:", error);
-      toast.error("Failed to send message");
-    } finally {
-      setSending(false);
+  useEffect(() => {
+    if (!activeConversation?.id || !currentUserId) return;
+    const unread = messages.some(
+      (m: ChatMessage) => m.sender_id !== currentUserId && m.status !== "read"
+    );
+    if (unread) {
+      markRead({ conversation_id: activeConversation.id }).catch(() => {});
     }
-  };
+  }, [activeConversation?.id, currentUserId, messages, markRead]);
 
   const selectConversation = (conv: Conversation) => {
     setActiveConversation(conv);
@@ -225,12 +142,13 @@ export default function MessagesPage() {
   };
 
   const getOtherUserName = (conv: Conversation) => {
-    return conv.buyer_id === currentUser ? conv.seller_name : conv.buyer_name;
+    return conv.buyer_id === currentUserId ? conv.seller_name : conv.buyer_name;
   };
 
   const formatMessageTime = (dateString: string) => {
     try {
-      return formatDistanceToNow(new Date(dateString), { addSuffix: true });
+      const date = new Date(dateString);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch {
       return "";
     }
@@ -249,7 +167,7 @@ export default function MessagesPage() {
     }
   };
 
-  if (loading) {
+  if (conversationsQuery === undefined) {
     return (
       <div className="container mx-auto p-4 max-w-4xl">
         <div className="flex items-center justify-center h-[70vh]">
@@ -305,7 +223,7 @@ export default function MessagesPage() {
                       <p className="text-sm">Start a conversation by contacting a seller</p>
                     </div>
                   ) : (
-                    conversations.map((conv) => (
+                    conversations.map((conv: any) => (
                       <div
                         key={conv.id}
                         onClick={() => selectConversation(conv)}
@@ -370,7 +288,7 @@ export default function MessagesPage() {
 
                     {/* Messages */}
                     <ScrollArea className="flex-1 p-4">
-                      {loadingMessages ? (
+                      {messagesQuery === undefined && activeConversation ? (
                         <div className="flex items-center justify-center h-full">
                           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
@@ -380,8 +298,8 @@ export default function MessagesPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {messages.map((msg, index) => {
-                            const isMe = msg.sender_id === currentUser;
+                          {messages.map((msg: ChatMessage, index: number) => {
+                            const isMe = msg.sender_id === currentUserId;
                             const showAvatar = !isMe && (index === 0 || messages[index - 1].sender_id !== msg.sender_id);
 
                             return (

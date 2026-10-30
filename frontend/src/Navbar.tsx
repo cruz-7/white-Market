@@ -3,7 +3,7 @@ import { Button } from "./button";
 import { Menu, X, LogOut, LayoutDashboard, MessageSquare, ShieldCheck, Heart, Bell, Gift, Package, Settings, Moon, Sun, ShoppingCart } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
-import { supabase } from "./supabase-client";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { useSettings } from "./SettingsContext";
 import { useCart } from "./CartContext";
 import {
@@ -29,6 +29,7 @@ const Navbar = () => {
   const location = useLocation();
   const { isDarkMode, setTheme, translations } = useSettings();
   const { itemCount } = useCart();
+  const { signOut } = useAuthActions();
 
   const isActive = (path: string) => {
     return location.pathname === path || location.pathname.startsWith(path + "/");
@@ -71,12 +72,15 @@ const Navbar = () => {
   }, []);
 
   const handleSignOut = async () => {
-    if (supabase) {
-      await supabase.auth.signOut().catch(() => {});
+    try {
+      await signOut();
+    } catch {
+      // Ignore sign-out errors
     }
     localStorage.removeItem("wm_user");
     setUser(null);
     setIsAdmin(false);
+    window.dispatchEvent(new Event("wm-auth-change"));
     navigate("/");
   };
 
@@ -115,9 +119,9 @@ const Navbar = () => {
                   <button className="flex items-center gap-2 rounded-full border border-border bg-white p-1 pr-3 shadow-sm hover:bg-muted/50 transition-colors dark:bg-slate-800 dark:border-slate-600">
                     <Avatar className="h-7 w-7">
                       <AvatarImage src={user?.avatar_url} />
-                      <AvatarFallback className="text-xs bg-primary text-primary-foreground">${initials}</AvatarFallback>
+                      <AvatarFallback className="text-xs bg-primary text-primary-foreground">{initials}</AvatarFallback>
                     </Avatar>
-                    <span className="text-sm font-medium dark:text-white">${user?.full_name?.split(" ")[0] || "Account"}</span>
+                      <span className="text-sm font-medium dark:text-white">{user?.full_name?.split(" ")[0] || "Account"}</span>
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48">

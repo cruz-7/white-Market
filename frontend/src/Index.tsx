@@ -1,5 +1,6 @@
 ﻿import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { useQuery } from "convex/react";
 import { Button } from "./button";
 import { Badge } from "./badge";
 import { CheckCircle, Star, Shield, ArrowRight, Search, ShoppingBag, MessageSquare, Wallet, Users, Zap, Award, Camera, TrendingUp, Store, Flame } from "lucide-react";
@@ -8,45 +9,30 @@ import { Avatar, AvatarFallback } from "./avatar";
 import { Input } from "./input";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import { feedbackApi, productsApi, sellerApi } from "./api";
+import { categoriesApi, feedbackApi, sellerApi } from "./api";
 import FeedbackPopup from "./FeedbackPopup";
 import ImageSearchModal from "./ImageSearchModal";
+import { api } from "../convex/_generated/api";
+import { toast } from "sonner";
 
-const CATEGORIES = [
-  { name: "Food", icon: "🍲", count: 64 },
-  { name: "Clothing", icon: "👕", count: 52 },
-  { name: "Beauty", icon: "💄", count: 38 },
-  { name: "Accessories", icon: "👜", count: 45 },
-  { name: "Electronics", icon: "📱", count: 22 },
-  { name: "Stationery", icon: "📚", count: 31 },
-  { name: "Custom Items", icon: "🎨", count: 27 },
-  { name: "Other", icon: "📦", count: 19 },
-];
+const CATEGORY_ICONS: Record<string, string> = {
+  clothing: "👕",
+  food: "🍲",
+  electronics: "📱",
+  books: "📚",
+  services: "🛠️",
+  beauty: "💄",
+  housing: "🏠",
+  sports: "🏋️",
+  events: "🎟️",
+  other: "📦",
+};
 
 const STEPS = [
   { icon: Users, title: "Sign Up & Verify", desc: "Create your account with your UG email. Upload your student ID to get verified." },
   { icon: Store, title: "Set Up Shop or Browse", desc: "List your products with photos and prices, or browse what fellow students are selling." },
   { icon: MessageSquare, title: "Connect & Agree", desc: "Chat with the seller, agree on price and a campus meetup spot before you buy." },
   { icon: Wallet, title: "Pay & Handover", desc: "Pay via Mobile Money, then meet on campus for a quick handover." },
-];
-
-const TOP_SELLERS_FALLBACK = [
-  { name: "Nana's Kitchen", skill: "Food & Snacks", rating: 4.9, sales: 127, avatar: "NK" },
-  { name: "Ama Collections", skill: "Clothing & Fashion", rating: 4.8, sales: 89, avatar: "AC" },
-  { name: "TechBro UG", skill: "Electronics & Gadgets", rating: 4.9, sales: 64, avatar: "TB" },
-];
-
-const TRENDING_FALLBACK = [
-  { title: "Homemade Jollof Rice (per plate)", price: 25, seller: "Nana's Kitchen", image: null },
-  { title: "Custom Beaded Bracelets", price: 15, seller: "Ama Beads", image: null },
-  { title: "Laptop Stand (Adjustable)", price: 85, seller: "TechBro UG", image: null },
-  { title: "Shea Butter Body Cream", price: 30, seller: "Glow By Efua", image: null },
-];
-
-const FALLBACK_TESTIMONIALS = [
-  { name: "Ama K.", dept: "Business Admin, L300", text: "I sell homemade snacks on White Market and made GHS 1,200 last month! Way better than posting on WhatsApp status.", avatar: "AK", rating: 5 },
-  { name: "Kwame M.", dept: "Engineering, L200", text: "Found exactly the laptop charger I needed from a verified student. Fast, safe, and cheaper than the shops outside campus!", avatar: "KM", rating: 5 },
-  { name: "Abena F.", dept: "Nursing, L400", text: "The verified badge gives me confidence. I know I'm dealing with real UG students, not random people.", avatar: "AF", rating: 5 },
 ];
 
 const CAMPUS_TRENDING_TOPICS = [
@@ -61,57 +47,48 @@ const Index = () => {
   const navigate = useNavigate();
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [loadingTestimonials, setLoadingTestimonials] = useState(true);
-  const [trendingProducts, setTrendingProducts] = useState<any[]>([]);
   const [featuredSellers, setFeaturedSellers] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [showImageSearch, setShowImageSearch] = useState(false);
+  const trendingProducts = useQuery(api.functions.products.trending, { limit: 4 });
 
   useEffect(() => {
+    const fetchCategories = async () => {
+      const result = await categoriesApi.getAll();
+      if (result.error) {
+        console.error("Failed to fetch categories:", result.error);
+        toast.error(`Could not load categories: ${result.error}`);
+        return;
+      }
+      setCategories(result.data ?? []);
+    };
+
     const fetchTestimonials = async () => {
       try {
         const res = await feedbackApi.getTestimonials(3);
-        if (res.data?.testimonials) {
-          setTestimonials(res.data.testimonials);
-        } else {
-          setTestimonials(FALLBACK_TESTIMONIALS);
-        }
+        if (res.error) throw new Error(res.error);
+        setTestimonials(res.data?.testimonials ?? []);
       } catch (error) {
         console.error("Failed to fetch testimonials:", error);
-        setTestimonials(FALLBACK_TESTIMONIALS);
+        toast.error("Could not load student feedback.");
       } finally {
         setLoadingTestimonials(false);
-      }
-    };
-
-    const fetchTrendingProducts = async () => {
-      try {
-        const res = await productsApi.getTrending(4);
-        if (res.data?.products) {
-          setTrendingProducts(res.data.products);
-        } else {
-          setTrendingProducts(TRENDING_FALLBACK);
-        }
-      } catch (error) {
-        console.error("Failed to fetch trending products:", error);
-        setTrendingProducts(TRENDING_FALLBACK);
       }
     };
 
     const fetchFeaturedSellers = async () => {
       try {
         const res = await sellerApi.getTopSellers(3);
-        if (res.data?.sellers) {
-          setFeaturedSellers(res.data.sellers);
-        } else {
-          setFeaturedSellers(TOP_SELLERS_FALLBACK);
-        }
+        if (res.error) throw new Error(res.error);
+        setFeaturedSellers(res.data?.sellers ?? []);
       } catch (error) {
         console.error("Failed to fetch featured sellers:", error);
-        setFeaturedSellers(TOP_SELLERS_FALLBACK);
+        toast.error("Could not load student shops.");
       }
     };
 
+    void fetchCategories();
     fetchTestimonials();
-    fetchTrendingProducts();
     fetchFeaturedSellers();
   }, []);
   return (
@@ -146,7 +123,7 @@ const Index = () => {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         const val = (e.target as HTMLInputElement).value;
-                        if (val) window.location.href = `/marketplace?search=${encodeURIComponent(val)}`;
+                        if (val) navigate(`/marketplace?search=${encodeURIComponent(val)}`);
                       }
                     }}
                   />
@@ -172,7 +149,7 @@ const Index = () => {
                 {CAMPUS_TRENDING_TOPICS.map((topic) => (
                   <button
                     key={topic.label}
-                    onClick={() => window.location.href = `/marketplace?search=${encodeURIComponent(topic.search)}`}
+                    onClick={() => navigate(`/marketplace?search=${encodeURIComponent(topic.search)}`)}
                     className="text-xs bg-accent/10 text-accent hover:bg-accent/20 px-2 py-1 rounded-full transition-colors"
                   >
                     {topic.label}
@@ -209,17 +186,22 @@ const Index = () => {
         <h2 className="font-display text-2xl font-bold text-center mb-2">Shop by Category</h2>
         <p className="text-center text-muted-foreground mb-8">Find exactly what you need from fellow students</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
-          {CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <Link to={`/marketplace?category=${encodeURIComponent(cat.name)}`} key={cat.name}>
               <Card className="cursor-pointer text-center shadow-sm transition-all hover:border-primary/30 hover:shadow-md group">
                 <CardContent className="p-4">
-                  <span className="text-3xl block mb-2">{cat.icon}</span>
+                  <span className="text-3xl block mb-2">{CATEGORY_ICONS[cat.slug] || "📦"}</span>
                   <h3 className="font-semibold text-sm group-hover:text-primary transition-colors">{cat.name}</h3>
-                  <p className="text-xs text-muted-foreground">{cat.count} items</p>
+                  <p className="text-xs text-muted-foreground">{cat.product_count || 0} items</p>
                 </CardContent>
               </Card>
             </Link>
           ))}
+          {categories.length === 0 && (
+            <p className="col-span-full text-center text-sm text-muted-foreground">
+              No categories are available right now.
+            </p>
+          )}
         </div>
       </section>
 
@@ -263,8 +245,9 @@ const Index = () => {
           </div>
           <p className="text-center text-muted-foreground mb-8">Popular picks from student sellers this week</p>
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-            {trendingProducts.length > 0 ? trendingProducts.slice(0, 4).map((p: any, i: number) => (
-              <Card key={p.id || i} className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
+            {trendingProducts?.length ? trendingProducts.slice(0, 4).map((p: any, i: number) => (
+              <Link key={p.id || i} to={`/product/${p.id}`} className="block">
+              <Card className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
                 <CardContent className="p-0">
                   {p.image_url ? (
                     <img src={p.image_url} alt={p.title} className="aspect-square w-full object-cover rounded-t-lg" />
@@ -275,26 +258,18 @@ const Index = () => {
                   )}
                   <div className="p-3">
                     <h3 className="font-semibold text-sm line-clamp-1 group-hover:text-primary transition-colors">{p.title}</h3>
-                    <p className="text-xs text-muted-foreground">{p.users?.full_name || p.seller_name || "Student Seller"}</p>
+                    <p className="text-xs text-muted-foreground">{p.users?.full_name || "Student Seller"}</p>
                     <p className="font-display font-bold text-primary mt-1">GHS {p.price}</p>
                   </div>
                 </CardContent>
               </Card>
+              </Link>
             )) : (
-              TRENDING_FALLBACK.map((p, i) => (
-                <Card key={i} className="cursor-pointer shadow-sm transition-shadow hover:shadow-md group">
-                  <CardContent className="p-0">
-                    <div className="aspect-square bg-muted/80 rounded-t-lg flex items-center justify-center">
-                      <ShoppingBag className="h-10 w-10 text-muted-foreground/30" />
-                    </div>
-                    <div className="p-3">
-                      <h3 className="font-semibold text-sm line-clamp-1 group-hover:text-primary transition-colors">{p.title}</h3>
-                      <p className="text-xs text-muted-foreground">{p.seller}</p>
-                      <p className="font-display font-bold text-primary mt-1">GHS {p.price}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+              <p className="col-span-full rounded-xl border bg-background p-6 text-center text-sm text-muted-foreground">
+                {trendingProducts === undefined
+                  ? "Loading live listings..."
+                  : "No products have been listed yet. Be the first to sell on campus."}
+              </p>
             )}
           </div>
         </div>
@@ -330,7 +305,8 @@ const Index = () => {
           <p className="text-center text-muted-foreground mb-10">Top-rated student businesses on campus</p>
           <div className="grid gap-6 md:grid-cols-3 max-w-3xl mx-auto">
             {featuredSellers.length > 0 ? featuredSellers.map((h: any, i: number) => (
-              <Card key={h.id} className="text-center shadow-sm transition-shadow hover:shadow-md">
+              <Link key={h.id} to={`/seller/${h.id}`} className="block">
+              <Card className="text-center shadow-sm transition-shadow hover:shadow-md">
                 <CardContent className="p-6">
                   <div className="relative inline-block mb-3">
                     <Avatar className="h-16 w-16">
@@ -355,32 +331,11 @@ const Index = () => {
                   </div>
                 </CardContent>
               </Card>
+              </Link>
             )) : (
-              TOP_SELLERS_FALLBACK.map((h, i) => (
-                <Card key={h.name} className="text-center shadow-sm transition-shadow hover:shadow-md">
-                  <CardContent className="p-6">
-                    <div className="relative inline-block mb-3">
-                      <Avatar className="h-16 w-16">
-                        <AvatarFallback className="bg-primary/10 text-primary font-bold text-lg">{h.avatar}</AvatarFallback>
-                      </Avatar>
-                      {i === 0 && (
-                        <Award className="absolute -top-1 -right-1 h-6 w-6 text-accent fill-accent/20" />
-                      )}
-                    </div>
-                    <Badge variant="outline" className="mb-2 border-primary/30 text-primary">
-                      <CheckCircle className="mr-1 h-3 w-3" /> Verified Seller
-                    </Badge>
-                    <h3 className="font-display font-semibold">{h.name}</h3>
-                    <p className="text-sm text-muted-foreground">{h.skill}</p>
-                    <div className="mt-2 flex items-center justify-center gap-2 text-sm">
-                      <span className="flex items-center gap-1 text-accent">
-                        <Star className="h-3.5 w-3.5 fill-accent" /> {h.rating}
-                      </span>
-                      <span className="text-muted-foreground">• {h.sales} sales</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+              <p className="col-span-full rounded-xl border bg-background p-6 text-center text-sm text-muted-foreground">
+                Student shops will appear here after sellers list products.
+              </p>
             )}
           </div>
         </div>
@@ -413,7 +368,7 @@ const Index = () => {
             ))}
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-3">
+          testimonials.length > 0 ? <div className="grid gap-6 md:grid-cols-3">
             {testimonials.map((t) => (
               <Card key={t.id || t.name} className="shadow-sm transition-shadow hover:shadow-md">
                 <CardContent className="p-6">
@@ -440,7 +395,11 @@ const Index = () => {
                 </CardContent>
               </Card>
             ))}
-          </div>
+          </div> : (
+            <p className="rounded-xl border bg-background p-6 text-center text-sm text-muted-foreground">
+              Student feedback will appear here as the marketplace grows.
+            </p>
+          )
         )}
       </section>
 

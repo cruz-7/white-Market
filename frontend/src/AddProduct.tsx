@@ -1,6 +1,6 @@
 // cspell:ignore Jollof
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Upload, X, ImagePlus, Loader2 } from "lucide-react";
 
@@ -11,10 +11,10 @@ import { Textarea } from "./textarea";
 import { Label } from "./label";
 import { Badge } from "./badge";
 import { categoriesApi, productsApi, type Category } from "./api";
+import { PRODUCTS_REFRESH_EVENT } from "./data";
 
 function AddProduct() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { id: productId } = useParams();
   const isEditMode = Boolean(productId);
   
@@ -128,8 +128,10 @@ function AddProduct() {
         toast.error(result.error);
         return;
       }
-      if (result.data?.image_url) {
-        setForm((prev) => ({ ...prev, image_url: result.data.image_url }));
+
+      const uploadedImageUrl = result.data?.image_url;
+      if (uploadedImageUrl) {
+        setForm((prev) => ({ ...prev, image_url: uploadedImageUrl }));
         toast.success("Image uploaded successfully");
       }
     });
@@ -161,12 +163,18 @@ function AddProduct() {
 
     setLoading(true);
 
-    const productData = {
+    const productData: {
+      title: string;
+      description?: string;
+      price: number;
+      image_url?: string;
+      category_id: string;
+    } = {
       title: form.title.trim(),
-      description: form.description.trim() || undefined,
       price,
-      image_url: form.image_url || undefined,
       category_id: form.category_id,
+      ...(form.description.trim() ? { description: form.description.trim() } : {}),
+      ...(form.image_url ? { image_url: form.image_url } : {}),
     };
 
     let result;
@@ -183,6 +191,7 @@ function AddProduct() {
       return;
     }
 
+    window.dispatchEvent(new Event(PRODUCTS_REFRESH_EVENT));
     toast.success(isEditMode ? "Product updated successfully!" : "Product listed successfully!");
     navigate("/dashboard/products");
   };

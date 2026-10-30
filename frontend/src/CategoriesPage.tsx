@@ -7,42 +7,26 @@ import { Button } from "./button";
 import { Card, CardContent, CardHeader, CardTitle } from "./card";
 import { Input } from "./input";
 import { Badge } from "./badge";
-import { categoriesApi, productsApi, type Category, type Product } from "./api";
+import {
+  categoriesApi,
+  productsApi,
+  servicesApi,
+  type Category,
+  type Product,
+  type Service,
+} from "./api";
 
 // Service types for the services page
 const SERVICE_TYPES = [
-  { id: "tutoring", name: "Tutoring", icon: GraduationCap, description: "Academic tutoring for various courses", color: "from-blue-500 to-blue-600", providers: 12 },
-  { id: "printing", name: "Printing & Copy", icon: Printer, description: "Printing, photocopying, binding", color: "from-green-500 to-green-600", providers: 8 },
-  { id: "hairdressing", name: "Hairdressing", icon: Scissors, description: "Braiding, haircuts, styling", color: "from-pink-500 to-pink-600", providers: 15 },
-  { id: "errands", name: "Errands", icon: Truck, description: "Pickup, delivery, campus runs", color: "from-orange-500 to-orange-600", providers: 20 },
-  { id: "phone_repair", name: "Phone Repair", icon: Phone, description: "Screen replacement, fixes", color: "from-purple-500 to-purple-600", providers: 5 },
-  { id: "general_repair", name: "General Repairs", icon: Hammer, description: "Electronics, accessories repair", color: "from-gray-500 to-gray-600", providers: 7 },
-];
-
-// Sample service providers for demo
-const SAMPLE_PROVIDERS = [
-  { id: "1", name: "Ama Kowalski", service: "tutoring", rating: 4.9, reviews: 45, price: "GHS 30/hr", responseTime: "< 1 hour", verified: true, image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" },
-  { id: "2", name: "Kofi Mensah", service: "printing", rating: 4.7, reviews: 28, price: "GHS 0.50/page", responseTime: "< 2 hours", verified: true, image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop" },
-  { id: "3", name: "Abena Serwaa", service: "hairdressing", rating: 5.0, reviews: 62, price: "GHS 50+", responseTime: "< 3 hours", verified: true, image: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop" },
-  { id: "4", name: "Yaw Osei", service: "errands", rating: 4.8, reviews: 89, price: "GHS 10/task", responseTime: "< 30 min", verified: true, image: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop" },
-  { id: "5", name: "Nana Kofi", service: "phone_repair", rating: 4.6, reviews: 34, price: "GHS 80+", responseTime: "< 4 hours", verified: true, image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop" },
-  { id: "6", name: "Efua Brown", service: "tutoring", rating: 4.9, reviews: 51, price: "GHS 25/hr", responseTime: "< 2 hours", verified: true, image: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&h=150&fit=crop" },
+  { id: "tutoring", name: "Tutoring", icon: GraduationCap, color: "from-blue-500 to-blue-600" },
+  { id: "printing", name: "Printing & Copy", icon: Printer, color: "from-green-500 to-green-600" },
+  { id: "hairdressing", name: "Hairdressing", icon: Scissors, color: "from-pink-500 to-pink-600" },
+  { id: "errands", name: "Errands", icon: Truck, color: "from-orange-500 to-orange-600" },
+  { id: "phone_repair", name: "Phone Repair", icon: Phone, color: "from-purple-500 to-purple-600" },
+  { id: "general_repair", name: "General Repairs", icon: Hammer, color: "from-gray-500 to-gray-600" },
 ];
 
 // Sample categories data for when API is not available
-const SAMPLE_CATEGORIES: Category[] = [
-  { id: "1", name: "Clothing & Fashion", slug: "clothing", description: "Student fashion, uniforms, traditional wear", icon: "Shirt", sort_order: 1, is_active: true, product_count: 45 },
-  { id: "2", name: "Food & Snacks", slug: "food", description: "Homemade food, snacks, beverages", icon: "Utensils", sort_order: 2, is_active: true, product_count: 78 },
-  { id: "3", name: "Electronics & Gadgets", slug: "electronics", description: "Phones, laptops, accessories", icon: "Smartphone", sort_order: 3, is_active: true, product_count: 32 },
-  { id: "4", name: "Books & Notes", slug: "books", description: "Textbooks, lecture notes, past questions", icon: "BookOpen", sort_order: 4, is_active: true, product_count: 156 },
-  { id: "5", name: "Services", slug: "services", description: "Tutoring, printing, errands, repairs", icon: "Wrench", sort_order: 5, is_active: true, product_count: 23 },
-  { id: "6", name: "Beauty & Health", slug: "beauty", description: "Skincare, haircare, wellness products", icon: "Sparkles", sort_order: 6, is_active: true, product_count: 67 },
-  { id: "7", name: "Housing & Rooms", slug: "housing", description: "Hostel rooms, apartments, sublets", icon: "Home", sort_order: 7, is_active: true, product_count: 18 },
-  { id: "8", name: "Sports & Fitness", slug: "sports", description: "Gym equipment, sports gear", icon: "Dumbbell", sort_order: 8, is_active: true, product_count: 29 },
-  { id: "9", name: "Events & Tickets", slug: "events", description: "Event tickets, party supplies", icon: "Ticket", sort_order: 9, is_active: true, product_count: 41 },
-  { id: "10", name: "Other", slug: "other", description: "Miscellaneous items", icon: "Package", sort_order: 10, is_active: true, product_count: 12 },
-];
-
 const iconMap: Record<string, React.ReactNode> = {
   Shirt: <Shirt className="h-8 w-8" />,
   Utensils: <span className="text-2xl">🍔</span>,
@@ -66,8 +50,16 @@ export default function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [productsLoading, setProductsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [useSampleData, setUseSampleData] = useState(false);
   const [selectedService, setSelectedService] = useState<string | null>(null);
+  const [serviceListings, setServiceListings] = useState<Service[]>([]);
+  const [serviceTypeCounts, setServiceTypeCounts] = useState<Map<string, number>>(new Map());
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [serviceLoadError, setServiceLoadError] = useState<string | null>(null);
+  const [bookingService, setBookingService] = useState<Service | null>(null);
+  const [bookingDate, setBookingDate] = useState("");
+  const [bookingTime, setBookingTime] = useState("");
+  const [bookingNotes, setBookingNotes] = useState("");
+  const [bookingLoading, setBookingLoading] = useState(false);
 
   useEffect(() => {
     loadCategories();
@@ -79,6 +71,7 @@ export default function CategoriesPage() {
       if (category) {
         setSelectedCategory(category);
         loadCategoryProducts(category.id);
+        if (category.slug === "services") void loadServices();
       }
     } else if (!slug) {
       setSelectedCategory(null);
@@ -90,14 +83,8 @@ export default function CategoriesPage() {
     setLoading(true);
     const { data, error } = await categoriesApi.getAll();
     
-    if (error || !data || data.length === 0) {
-      // Use sample data if API fails
-      console.log("Using sample categories data");
-      setCategories(SAMPLE_CATEGORIES);
-      setUseSampleData(true);
-    } else {
-      setCategories(data || []);
-    }
+    if (error) toast.error(`Could not load categories: ${error}`);
+    setCategories(data ?? []);
     setLoading(false);
   };
 
@@ -137,11 +124,66 @@ export default function CategoriesPage() {
     setProductsLoading(false);
   };
 
+  const loadServices = async () => {
+    setServicesLoading(true);
+    setServiceLoadError(null);
+    const [listResult, typeResult] = await Promise.all([
+      servicesApi.getAll(undefined, 100, 0, "newest"),
+      servicesApi.getTypes(),
+    ]);
+    if (listResult.error || typeResult.error) {
+      const error = listResult.error || typeResult.error || "Could not load services.";
+      setServiceLoadError(error);
+      setServiceListings([]);
+      setServiceTypeCounts(new Map());
+    } else {
+      setServiceListings(listResult.data?.services ?? []);
+      setServiceTypeCounts(new Map((typeResult.data ?? []).map(({ id, count }) => [id, count ?? 0])));
+    }
+    setServicesLoading(false);
+  };
+
+  const submitBooking = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!bookingService) return;
+    setBookingLoading(true);
+    const { error } = await servicesApi.createBooking(bookingService.id, {
+      scheduled_date: bookingDate,
+      scheduled_time: bookingTime,
+      notes: bookingNotes.trim(),
+    });
+    setBookingLoading(false);
+    if (error) {
+      toast.error(error);
+      if (/sign in|authenticated|unauthorized/i.test(error)) {
+        navigate("/auth?role=user");
+      }
+      return;
+    }
+    toast.success("Service request sent");
+    setBookingService(null);
+    setBookingDate("");
+    setBookingTime("");
+    setBookingNotes("");
+  };
+
   // Special rendering for Services category
   if (selectedCategory?.slug === "services") {
-    const filteredProviders = selectedService 
-      ? SAMPLE_PROVIDERS.filter(p => p.service === selectedService)
-      : SAMPLE_PROVIDERS;
+    const filteredProviders = serviceListings.filter(
+      (service) => !selectedService || service.service_type === selectedService
+    );
+    const totalServiceCount = [...serviceTypeCounts.values()].reduce((total, count) => total + count, 0);
+    const averageServiceRating = serviceListings.length
+      ? serviceListings.reduce((total, service) => total + service.rating, 0) / serviceListings.length
+      : 0;
+    const dynamicServiceTypes = [...serviceTypeCounts.keys()]
+      .filter((id) => !SERVICE_TYPES.some((service) => service.id === id))
+      .map((id) => ({
+        id,
+        name: id.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase()),
+        icon: Package,
+        color: "from-gray-500 to-gray-600",
+      }));
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-purple-50 to-white">
@@ -164,11 +206,11 @@ export default function CategoriesPage() {
                 <div className="flex items-center gap-4 mt-4">
                   <div className="flex items-center gap-2">
                     <Users className="h-5 w-5" />
-                    <span className="text-purple-100">67 Active Providers</span>
+                    <span className="text-purple-100">{totalServiceCount} Active Services</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Star className="h-5 w-5 text-amber-400" />
-                    <span className="text-purple-100">4.8 Avg Rating</span>
+                    <span className="text-purple-100">{averageServiceRating.toFixed(1)} Avg Rating</span>
                   </div>
                 </div>
               </div>
@@ -186,7 +228,7 @@ export default function CategoriesPage() {
           <div className="mb-8">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Browse by Service Type</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {SERVICE_TYPES.map((service) => {
+              {[...SERVICE_TYPES, ...dynamicServiceTypes].map((service) => {
                 const Icon = service.icon;
                 const isSelected = selectedService === service.id;
                 return (
@@ -205,7 +247,7 @@ export default function CategoriesPage() {
                       <Icon className="h-5 w-5" />
                     </div>
                     <p className={`font-semibold text-sm ${isSelected ? 'text-white' : 'text-gray-800'}`}>{service.name}</p>
-                    <p className={`text-xs ${isSelected ? 'text-purple-100' : 'text-gray-500'}`}>{service.providers} providers</p>
+                    <p className={`text-xs ${isSelected ? 'text-purple-100' : 'text-gray-500'}`}>{serviceTypeCounts.get(service.id) ?? 0} services</p>
                   </button>
                 );
               })}
@@ -224,55 +266,71 @@ export default function CategoriesPage() {
               <p className="text-gray-500">{filteredProviders.length} results</p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredProviders.map((provider) => (
-                <Card key={provider.id} className="hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border-0">
-                  <CardContent className="p-5">
-                    <div className="flex items-start gap-4">
-                      <img 
-                        src={provider.image} 
-                        alt={provider.name}
-                        className="w-16 h-16 rounded-full object-cover border-2 border-purple-100"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-gray-900 truncate">{provider.name}</h3>
-                          {provider.verified && (
-                            <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+            {servicesLoading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-purple-600" /></div>
+            ) : serviceLoadError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center" role="alert">
+                <p className="mb-3 text-sm text-red-700">{serviceLoadError}</p>
+                <Button variant="outline" onClick={() => void loadServices()}>Retry</Button>
+              </div>
+            ) : filteredProviders.length === 0 ? (
+              <div className="rounded-xl border bg-white p-8 text-center">
+                <h3 className="font-semibold text-gray-800">No services listed yet</h3>
+                <p className="mt-1 text-sm text-gray-500">Try another service type or check back later.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredProviders.map((service) => {
+                  const providerName = service.provider?.full_name || "Student provider";
+                  const avatarUrl = service.provider?.avatar_url;
+                  return (
+                    <Card key={service.id} className="hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border-0">
+                      <CardContent className="p-5">
+                        <div className="flex items-start gap-4">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt={providerName} className="w-16 h-16 rounded-full object-cover border-2 border-purple-100" />
+                          ) : (
+                            <div className="w-16 h-16 rounded-full border-2 border-purple-100 bg-purple-50 flex items-center justify-center text-purple-700 font-semibold">
+                              {providerName.charAt(0).toUpperCase()}
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-gray-900 truncate">{service.title}</h3>
+                              {service.is_verified && <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" aria-label="Verified service" />}
+                            </div>
+                            <p className="text-sm text-gray-500 truncate">{providerName}</p>
+                            <p className="text-sm text-purple-600 font-medium">
+                              GHS {service.price.toFixed(2)}{service.price_type === "hourly" ? "/hr" : service.price_type === "starting_from" ? "+" : ""}
+                            </p>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <Star className="h-3 w-3 text-amber-400 fill-amber-400" />
+                                {service.rating.toFixed(1)} ({service.review_count})
+                              </span>
+                              {service.location && <span className="truncate">{service.location}</span>}
+                            </div>
+                          </div>
                         </div>
-                        <p className="text-sm text-purple-600 font-medium">{provider.price}</p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <Star className="h-3 w-3 text-amber-400 fill-amber-400" />
-                            {provider.rating} ({provider.reviews})
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {provider.responseTime}
-                          </span>
+                        {service.description && <p className="mt-3 text-sm text-gray-600 line-clamp-2">{service.description}</p>}
+                        <div className="mt-4 flex gap-2">
+                          <Button className="flex-1 bg-purple-600 hover:bg-purple-700" onClick={() => navigate(`/seller/${service.user_id}`)}>
+                            View Profile
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="flex-1 border-purple-200 text-purple-600 hover:bg-purple-50"
+                            onClick={() => setBookingService(service)}
+                          >
+                            Request Service
+                          </Button>
                         </div>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <Button 
-                        className="flex-1 bg-purple-600 hover:bg-purple-700"
-                        onClick={() => navigate(`/seller/${provider.id}`)}
-                      >
-                        View Profile
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        className="flex-1 border-purple-200 text-purple-600 hover:bg-purple-50"
-                        onClick={() => navigate('/messages')}
-                      >
-                        Message
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* CTA */}
@@ -283,15 +341,47 @@ export default function CategoriesPage() {
               <p className="text-gray-600 mb-4 max-w-lg mx-auto">
                 Have a skill to share? Join our network of student service providers and start earning today.
               </p>
-              <Button 
-                className="bg-amber-500 hover:bg-amber-600"
-                onClick={() => navigate("/profile-setup")}
-              >
+              <Button className="bg-amber-500 hover:bg-amber-600" onClick={() => navigate("/auth?tab=signup&role=seller")}>
                 Start Offering Services
               </Button>
             </div>
           </div>
         </div>
+        {bookingService && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setBookingService(null)}>
+            <form
+              className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="service-booking-title"
+              onClick={(event) => event.stopPropagation()}
+              onSubmit={submitBooking}
+            >
+              <div>
+                <h2 id="service-booking-title" className="text-lg font-bold text-gray-900">Request {bookingService.title}</h2>
+                <p className="mt-1 text-sm text-gray-500">Choose a time and send a request to the provider.</p>
+              </div>
+              <label className="block text-sm font-medium text-gray-700">
+                Date
+                <input type="date" required min={new Date().toISOString().slice(0, 10)} value={bookingDate} onChange={(event) => setBookingDate(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Time
+                <input type="time" required value={bookingTime} onChange={(event) => setBookingTime(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Notes
+                <textarea value={bookingNotes} onChange={(event) => setBookingNotes(event.target.value)} maxLength={1000} rows={3} className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setBookingService(null)} disabled={bookingLoading}>Cancel</Button>
+                <Button type="submit" className="bg-purple-600 hover:bg-purple-700" disabled={bookingLoading}>
+                  {bookingLoading ? "Sending..." : "Send Request"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     );
   }
@@ -420,12 +510,6 @@ export default function CategoriesPage() {
           </div>
         ) : (
           <>
-            {useSampleData && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 text-center text-amber-800 text-sm">
-                ⚠️ Database not connected - showing sample data
-              </div>
-            )}
-            
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {categories.map((category) => (
                 <Link key={category.id} to={`/categories/${category.slug}`}>
@@ -448,6 +532,11 @@ export default function CategoriesPage() {
                 </Link>
               ))}
             </div>
+            {categories.length === 0 && (
+              <div className="rounded-xl border bg-white p-8 text-center text-slate-600">
+                Categories are not available right now. Please try again shortly.
+              </div>
+            )}
 
             {/* Popular Categories Highlight */}
             <div className="mt-16">
