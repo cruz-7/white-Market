@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { isVerifiedStudent, requireProfile, requireUserId } from "../lib/auth";
 import { dayKey, monthKey, weekKey } from "../lib/ids";
 import {
   DEFAULT_PAYOUT_COOLDOWN_HOURS,
@@ -204,16 +204,16 @@ export const users = query({
   handler: async (ctx) => {
     await assertAdmin(ctx);
     const all = await ctx.db.query("users").collect();
-    return all
+    return Promise.all(all
       .sort((a, b) => (b.created_at ?? b._creationTime) - (a.created_at ?? a._creationTime))
-      .map((user) => ({
+      .map(async (user) => ({
         id: user._id,
         full_name: user.full_name ?? user.name ?? "",
         email: user.email ?? "",
         role: user.role ?? "user",
-        verified: user.verified ?? false,
+        verified: await isVerifiedStudent(ctx, user._id),
         created_at: toIso(user.created_at ?? user._creationTime),
-      }));
+      })));
   },
 });
 
@@ -538,6 +538,11 @@ export const userAnalytics = query({
   handler: async (ctx) => {
     await assertAdmin(ctx);
     const users = await ctx.db.query("users").collect();
+    const approvedVerifications = await ctx.db
+      .query("verifications")
+      .withIndex("by_status", (q) => q.eq("status", "approved"))
+      .collect();
+    const verifiedUserIds = new Set(approvedVerifications.map((verification) => verification.user_id));
 
     const byMonth = new Map<string, number>();
     const byRole = new Map<string, number>();
@@ -549,7 +554,7 @@ export const userAnalytics = query({
       byMonth.set(key, (byMonth.get(key) ?? 0) + 1);
       const role = user.role ?? "user";
       byRole.set(role, (byRole.get(role) ?? 0) + 1);
-      if (user.verified) verified += 1;
+      if (user.verified && verifiedUserIds.has(user._id)) verified += 1;
       else unverified += 1;
     }
 
@@ -621,7 +626,7 @@ export const bulkUsers = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await assertAdmin(ctx);
-    if (!["ban", "unban", "verify"].includes(args.action)) {
+    if (!["ban", "unban"].includes(args.action)) {
       throw new Error("Invalid action");
     }
 
@@ -633,9 +638,6 @@ export const bulkUsers = mutation({
         updated += 1;
       } else if (args.action === "unban") {
         await ctx.db.patch(id, { role: "user", updated_at: Date.now() });
-        updated += 1;
-      } else {
-        await ctx.db.patch(id, { verified: true, updated_at: Date.now() });
         updated += 1;
       }
     }
@@ -708,14 +710,14 @@ export const exportData = query({
     let rows: Record<string, unknown>[] = [];
     if (type === "users") {
       const users = await ctx.db.query("users").collect();
-      rows = users.map((user) => ({
+      rows = await Promise.all(users.map(async (user) => ({
         id: user._id,
         full_name: user.full_name ?? user.name ?? "",
         email: user.email ?? "",
         role: user.role ?? "user",
-        verified: user.verified ?? false,
+        verified: await isVerifiedStudent(ctx, user._id),
         created_at: toIso(user.created_at ?? user._creationTime),
-      }));
+      })));
     } else if (type === "orders") {
       const orders = await ctx.db.query("orders").collect();
       rows = orders.map((order) => ({

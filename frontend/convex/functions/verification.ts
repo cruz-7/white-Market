@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import { isVerifiedStudent, requireProfile, requireUserId } from "../lib/auth";
 import { toIso } from "../lib/shapes";
 
 const SCHOOL_DOMAINS = ["st.ug.edu.gh", "ug.edu.gh"];
@@ -22,11 +22,16 @@ export const status = query({
       .collect();
     const latest = verifications.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
     const schoolEmail = isSchoolEmail(user.email);
+    const verified = await isVerifiedStudent(ctx, userId);
+    const verificationStatus = verified
+      ? "approved"
+      : latest?.status === "approved" || (!latest && user.verification_status === "approved")
+        ? "none"
+        : latest?.status ?? user.verification_status ?? "none";
 
     return {
-      verified: (user.verified ?? false) || schoolEmail,
-      verification_status:
-        latest?.status ?? (schoolEmail ? "approved" : user.verification_status ?? "none"),
+      verified,
+      verification_status: verificationStatus,
       document_type: latest?.document_type,
       created_at: toIso(latest?.created_at),
       is_school_email: schoolEmail,
@@ -34,14 +39,15 @@ export const status = query({
   },
 });
 
-export const request = mutation({
+export const submitUploadedDocument = internalMutation({
   args: {
+    user_id: v.id("users"),
     document_type: v.string(),
-    document_url: v.optional(v.string()),
+    storage_id: v.id("_storage"),
+    content_type: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx);
-    const user = await requireProfile(ctx, userId);
+    const user = await requireProfile(ctx, args.user_id);
 
     if (!["student_id", "admission_letter"].includes(args.document_type)) {
       throw new Error("Unsupported document type");
@@ -49,42 +55,32 @@ export const request = mutation({
 
     const verifications = await ctx.db
       .query("verifications")
-      .withIndex("by_user", (q) => q.eq("user_id", userId))
+      .withIndex("by_user", (q) => q.eq("user_id", args.user_id))
       .collect();
 
     if (verifications.some((verification) => verification.status === "pending")) {
       throw new Error("You already have a verification request under review");
     }
-    if (user.verified) {
+    if (
+      user.verified &&
+      verifications.some((verification) => verification.status === "approved")
+    ) {
       throw new Error("You are already verified");
     }
 
     const now = Date.now();
-
-    // Students with a university email are verified automatically.
-    if (isSchoolEmail(user.email)) {
-      await ctx.db.patch(userId, {
-        verified: true,
-        verification_status: "approved",
-        updated_at: now,
-      });
-      return {
-        message: "Verification approved instantly for your student email",
-        status: "approved",
-        verified: true,
-      };
-    }
-
     const verificationId = await ctx.db.insert("verifications", {
-      user_id: userId,
+      user_id: args.user_id,
       document_type: args.document_type,
-      document_url: args.document_url,
+      document_storage_id: args.storage_id,
+      document_content_type: args.content_type,
       status: "pending",
       created_at: now,
       updated_at: now,
     });
 
-    await ctx.db.patch(userId, {
+    await ctx.db.patch(args.user_id, {
+      verified: false,
       verification_status: "pending",
       updated_at: now,
     });
@@ -96,6 +92,27 @@ export const request = mutation({
       verified: false,
     };
   },
+});
+
+export const documentContext = internalQuery({
+  args: { verification_id: v.string(), user_id: v.id("users") },
+  handler: async (ctx, args) => {
+    const admin = await ctx.db.get(args.user_id);
+    if (!admin || admin.role !== "admin") throw new Error("Admin access only");
+    const verificationId = ctx.db.normalizeId("verifications", args.verification_id);
+    if (!verificationId) throw new Error("Verification not found");
+    const verification = await ctx.db.get(verificationId);
+    if (!verification?.document_storage_id) throw new Error("Verification document not found");
+    return {
+      storage_id: verification.document_storage_id,
+      content_type: verification.document_content_type ?? "application/octet-stream",
+    };
+  },
+});
+
+export const userIdForSubject = internalQuery({
+  args: { subject: v.string() },
+  handler: async (ctx, args) => ctx.db.normalizeId("users", args.subject),
 });
 
 export const listPending = query({
@@ -118,7 +135,7 @@ export const listPending = query({
           id: verification._id,
           user_id: verification.user_id,
           document_type: verification.document_type,
-          document_url: verification.document_url,
+          has_document: Boolean(verification.document_storage_id),
           status: verification.status,
           rejection_reason: verification.rejection_reason,
           created_at: toIso(verification.created_at),
@@ -150,6 +167,9 @@ export const approve = mutation({
     if (!verification) throw new Error("Verification not found");
     if (verification.status !== "pending") {
       throw new Error(`Verification is already ${verification.status}`);
+    }
+    if (!verification.document_storage_id) {
+      throw new Error("This verification request has no uploaded student document");
     }
 
     const now = Date.now();

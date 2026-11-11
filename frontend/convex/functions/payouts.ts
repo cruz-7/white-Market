@@ -3,7 +3,7 @@ import { internal } from "../_generated/api";
 import { action, internalMutation, internalQuery, mutation, query } from "../_generated/server";
 import type { ActionCtx, MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import {
   COMMISSION_RATE,
   creditBalance,
@@ -21,7 +21,7 @@ export const request = mutation({
   args: { order_id: v.id("orders") },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     const order = await ctx.db.get(args.order_id);
     if (!order) throw new Error("Order not found");

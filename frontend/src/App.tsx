@@ -61,6 +61,8 @@ import {
   sellerApi,
   authApi,
   referralsApi,
+  verificationApi,
+  deliveryApi,
   type AdminUser,
   type AdminProduct,
   type AdminOrder,
@@ -91,6 +93,7 @@ import ReferralsPage from "./ReferralsPage";
 import LeaderboardPage from "./LeaderboardPage";
 import SellerDashboard from "./SellerDashboard";
 import AdminDashboardView from "./AdminDashboardView";
+import RiderDashboard from "./RiderDashboard";
 
 declare global {
   interface Window {
@@ -236,6 +239,9 @@ function toLocalOrder(
     sellerId: order.seller_id,
     sellerName,
     amount: Number(order.amount || 0),
+    itemAmount: Number(order.item_amount ?? order.amount ?? 0),
+    deliveryFee: Number(order.delivery_fee ?? 0),
+    deliveryMethod: order.delivery_method === "delivery" ? "delivery" : "campus_pickup",
     status: order.status,
     created_at: order.created_at || new Date().toISOString(),
   } as Order;
@@ -459,6 +465,7 @@ function AppContent() {
       <Route path={appRoutes.paymentCallback} element={<PaymentCallbackPage />} />
       <Route path="/messages" element={<MessagesPage />} />
       <Route path="/orders" element={<ProfessionalOrdersPage user={currentUser} />} />
+      <Route path="/rider" element={<AppScaffold><RiderDashboard user={currentUser} /></AppScaffold>} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/signup" element={<SignupRedirect />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -544,6 +551,7 @@ async function handleLogin(email: string, password: string, navigate: ReturnType
     full_name: signedInUser.full_name || normalizedEmail.split("@")[0],
     role: (signedInUser.role as LocalUser["role"]) || "user",
     avatar_url: signedInUser.avatar_url ?? undefined,
+    verified: signedInUser.verified ?? false,
   };
 
   upsertUser(sessionUser);
@@ -553,7 +561,16 @@ async function handleLogin(email: string, password: string, navigate: ReturnType
   navigate(sessionUser.role === "admin" ? "/admin" : "/dashboard");
 }
 
-async function handleSignup(fullName: string, email: string, password: string, role: "user" | "seller", navigate: ReturnType<typeof useNavigate>, setTab: (tab: "login" | "signup") => void, referralCode?: string) {
+async function handleSignup(
+  fullName: string,
+  email: string,
+  password: string,
+  role: "user" | "seller",
+  documentType: "student_id" | "admission_letter",
+  documentFile: File,
+  navigate: ReturnType<typeof useNavigate>,
+  referralCode?: string
+) {
   if (!fullName.trim() || !email.trim()) return;
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -571,8 +588,7 @@ async function handleSignup(fullName: string, email: string, password: string, r
 
   const createdUser = data?.user;
   if (!createdUser) {
-    toast.success("Check your email to confirm your account, then log in.");
-    setTab("login");
+    toast.error("Your account was created, but its profile could not be loaded. Please sign in to continue.");
     return;
   }
 
@@ -581,7 +597,10 @@ async function handleSignup(fullName: string, email: string, password: string, r
     full_name: createdUser.full_name || fullName.trim(),
     email: createdUser.email || normalizedEmail,
     role: (createdUser.role as LocalUser["role"]) || "user",
+    verified: createdUser.verified ?? false,
   };
+
+  const verificationResult = await verificationApi.submitDocument(documentFile, documentType);
 
   if (referralCode) {
     const referralResult = await referralsApi.claimForNewUser(referralCode);
@@ -592,12 +611,16 @@ async function handleSignup(fullName: string, email: string, password: string, r
     }
   }
 
-  toast.success("Account created successfully");
+  if (verificationResult.error) {
+    toast.error(`Account created, but the verification document was not submitted: ${verificationResult.error}`);
+  } else {
+    toast.success("Account created. You can browse while an admin reviews your student document.");
+  }
 
   upsertUser(sessionUser);
   localStorage.setItem("wm_user", JSON.stringify(sessionUser));
   window.dispatchEvent(new Event("wm-auth-change"));
-  navigate("/dashboard");
+  navigate(verificationResult.error ? "/verify" : "/dashboard");
 }
 
 function AuthPage() {
@@ -609,6 +632,8 @@ function AuthPage() {
   const [role, setRole] = useState<"user" | "seller">(params.get("role") === "seller" ? "seller" : "user");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [documentType, setDocumentType] = useState<"student_id" | "admission_letter">("student_id");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -623,7 +648,7 @@ function AuthPage() {
   const normalizedEmail = email.trim().toLowerCase();
   const allowedDomain = normalizedEmail.endsWith("@st.ug.edu.gh") || normalizedEmail.endsWith("@ug.edu.gh");
   const canSubmitLogin = Boolean(email.trim() && password.trim());
-  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && pwdStrength.hasLength && pwdStrength.hasUpper && pwdStrength.hasLower && pwdStrength.hasNumber && passwordsMatch);
+  const canSubmitSignup = Boolean(fullName.trim() && email.trim() && allowedDomain && pwdStrength.hasLength && pwdStrength.hasUpper && pwdStrength.hasLower && pwdStrength.hasNumber && passwordsMatch && documentFile);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -631,7 +656,20 @@ function AuthPage() {
       await handleLogin(email, password, navigate);
       return;
     }
-    await handleSignup(fullName, email, password, role, navigate, setTab, params.get("ref") || undefined);
+    if (!documentFile) {
+      toast.error("Upload your University of Ghana student ID or admission letter to register.");
+      return;
+    }
+    await handleSignup(
+      fullName,
+      email,
+      password,
+      role,
+      documentType,
+      documentFile,
+      navigate,
+      params.get("ref") || undefined
+    );
   };
 
   return (
@@ -656,7 +694,7 @@ function AuthPage() {
                 One campus platform for safe transactions, wallet payments, and real-time messaging.
               </p>
               <div className="mt-8 space-y-3 text-sm">
-                <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> University email verified accounts</p>
+                <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Manual student document review</p>
                 <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Secure wallet checkout and refunds</p>
                 <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Buyer protection on eligible orders</p>
               </div>
@@ -698,6 +736,39 @@ function AuthPage() {
                     <div>
                       <label htmlFor="full-name" className="mb-1 block text-sm font-semibold text-slate-900">Full Name</label>
                       <Input id="full-name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Ama Mensah" className="h-11 rounded-lg" />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="verification-document-type" className="block text-sm font-semibold text-slate-900">
+                        Student verification document
+                      </label>
+                      <select
+                        id="verification-document-type"
+                        value={documentType}
+                        onChange={(event) => setDocumentType(event.target.value as "student_id" | "admission_letter")}
+                        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                      >
+                        <option value="student_id">University of Ghana student ID</option>
+                        <option value="admission_letter">University of Ghana admission letter</option>
+                      </select>
+                      <Input
+                        id="verification-document"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] ?? null;
+                          if (file && file.size > 5 * 1024 * 1024) {
+                            toast.error("Verification documents must be 5MB or smaller.");
+                            event.target.value = "";
+                            setDocumentFile(null);
+                            return;
+                          }
+                          setDocumentFile(file);
+                        }}
+                        className="h-auto min-h-11 rounded-lg py-2"
+                      />
+                      <p className="text-xs text-slate-500">
+                        Upload a PDF, JPEG, PNG, or WebP file (maximum 5MB). Your account is available immediately, but buying and selling unlock after admin approval.
+                      </p>
                     </div>
                   </>
                 )}
@@ -1085,7 +1156,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                   <div className="flex flex-col gap-2">
                     {p.verified_seller && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
-                        <ShieldCheck className="h-3 w-3" /> Verified Seller
+                        <ShieldCheck className="h-3 w-3" /> Verified Student
                       </span>
                     )}
                     {p.stock_status === "limited" && (
@@ -1250,7 +1321,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
             <CardContent className="p-6">
               <h2 className="section-title">How Verification Works</h2>
               <p className="mt-2 text-sm text-slate-600">
-                A Verified Student seller has completed account checks, uploaded a valid student ID, and passed manual review. Verified sellers show stronger trust history and are prioritized in dispute resolution.
+                A Verified Student has submitted a University of Ghana student ID or admission letter and passed manual administrator review.
               </p>
               <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
                 <li>Identity and student status confirmed</li>
@@ -1862,13 +1933,36 @@ function CheckoutPage() {
   const { orderId } = useParams();
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<Order | null>(() => getOrders().find((item) => item.id === orderId) || null);
-  if (!user) return <Navigate to="/auth" replace />;
+  const [deliveryOptions, setDeliveryOptions] = useState<{
+    delivery_enabled: boolean;
+    locations: { id: string; name: string; category: string }[];
+    zones: { id: string; name: string; fee: number; configured: boolean }[];
+  } | null>(null);
+  const [deliveryMethod, setDeliveryMethod] = useState<"campus_pickup" | "delivery">("campus_pickup");
+  const [destinationId, setDestinationId] = useState("");
+  const [zoneId, setZoneId] = useState("");
+  const [meetingPoint, setMeetingPoint] = useState("");
+  const [savingDelivery, setSavingDelivery] = useState(false);
+  const [deliveryChoiceDirty, setDeliveryChoiceDirty] = useState(false);
   useEffect(() => {
-    if (!orderId) return;
+    if (!user) return;
+    let cancelled = false;
+    void deliveryApi.publicOptions().then((result) => {
+      if (cancelled) return;
+      if (result.data) {
+        setDeliveryOptions(result.data);
+      } else if (result.error) {
+        console.error("[checkout] Failed to load delivery options:", result.error);
+        toast.error("Delivery options could not be loaded. Campus pickup is still available.");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+  useEffect(() => {
+    if (!user || !orderId) return;
     const existing = getOrders().find((item) => item.id === orderId) || null;
     if (existing) {
       setOrder(existing);
-      return;
     }
 
     let cancelled = false;
@@ -1878,17 +1972,71 @@ function CheckoutPage() {
         const localOrder = toLocalOrder(result.data as any, user);
         setOrder(localOrder);
         saveOrders([localOrder, ...getOrders().filter((item) => item.id !== localOrder.id)]);
+      } else if (!cancelled && result.error) {
+        console.error("[checkout] Failed to refresh order:", result.error);
       }
     };
     fetchOrder();
     return () => {
       cancelled = true;
     };
-  }, [orderId, user.id]);
+  }, [orderId, user?.id]);
+  useEffect(() => {
+    if (!order || order.deliveryMethod !== "delivery") return;
+    let cancelled = false;
+    void deliveryApi.buyerDeliveryOption(order.id).then((result) => {
+      if (cancelled) return;
+      if (result.data) {
+        setDeliveryMethod("delivery");
+        setDestinationId(result.data.destination_id ?? "");
+        setZoneId(result.data.zone_id ?? "");
+        setMeetingPoint(result.data.meeting_point ?? "");
+      } else if (result.error) {
+        console.error("[checkout] Failed to load saved delivery selection:", result.error);
+        toast.error("Saved delivery details could not be loaded.");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [order?.id, order?.deliveryMethod]);
 
+  if (!user) return <Navigate to="/auth" replace />;
   if (!order) return <Navigate to="/orders" replace />;
   const wallet = getWallet(user.id);
   const shortfall = Math.max(0, order.amount - wallet.balance);
+  const itemAmount = order.itemAmount ?? order.amount - (order.deliveryFee ?? 0);
+  const deliveryChoiceUnsaved = deliveryChoiceDirty;
+
+  const saveDeliveryChoice = async () => {
+    if (!orderId || !order) return;
+    if (deliveryMethod === "delivery" && (!destinationId || !zoneId)) {
+      toast.error("Select a delivery destination and zone.");
+      return;
+    }
+    setSavingDelivery(true);
+    const result = await deliveryApi.setDeliveryOption({
+      order_id: order.id,
+      method: deliveryMethod,
+      destination_id: deliveryMethod === "delivery" ? destinationId : undefined,
+      zone_id: deliveryMethod === "delivery" ? zoneId : undefined,
+      meeting_point: deliveryMethod === "delivery" ? meetingPoint : undefined,
+    });
+    setSavingDelivery(false);
+    if (result.error || !result.data) {
+      toast.error(result.error || "Could not save your delivery choice.");
+      return;
+    }
+    const nextOrder = {
+      ...order,
+      amount: Number(result.data.amount),
+      itemAmount,
+      deliveryFee: Number(result.data.delivery_fee ?? 0),
+      deliveryMethod,
+    };
+    setOrder(nextOrder);
+    saveOrders(getOrders().map((item) => item.id === order.id ? nextOrder : item));
+    setDeliveryChoiceDirty(false);
+    toast.success(deliveryMethod === "delivery" ? "Delivery choice saved." : "Campus pickup selected.");
+  };
 
   const payNow = async () => {
     setLoading(true);
@@ -1957,8 +2105,29 @@ function CheckoutPage() {
           <p className="body-text">Confirm payment securely with wallet balance and transparent order totals.</p>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Order Summary</p><p className="section-title">{order.productTitle}</p><p className="mt-3 text-2xl font-bold text-primary">GHS {order.amount.toFixed(2)}</p><p className="mt-2 text-sm text-slate-500">Seller: {order.sellerName}</p></CardContent></Card>
-          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}<Button variant="outline" className="mt-3 w-full" onClick={payWithPaystack} disabled={loading}>{loading ? "Opening secure checkout..." : "Pay by Card or Mobile Money"}</Button></CardContent></Card>
+          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Order Summary</p><p className="section-title">{order.productTitle}</p><p className="mt-3 text-sm text-slate-600">Merchandise: GHS {itemAmount.toFixed(2)}</p><p className="text-sm text-slate-600">Delivery: GHS {(order.deliveryFee ?? 0).toFixed(2)}{order.deliveryMethod === "campus_pickup" || !order.deliveryMethod ? " (campus pickup)" : ""}</p><p className="mt-1 text-2xl font-bold text-primary">Total: GHS {order.amount.toFixed(2)}</p><p className="mt-2 text-sm text-slate-500">Seller: {order.sellerName}</p></CardContent></Card>
+          <Card className="shadow-sm"><CardContent className="space-y-4 p-6">
+            <p className="label-text">Delivery choice</p>
+            <label className="flex items-center gap-2 text-sm"><input type="radio" name="delivery-method" checked={deliveryMethod === "campus_pickup"} onChange={() => { setDeliveryMethod("campus_pickup"); setDeliveryChoiceDirty(true); }} /> Campus pickup (free)</label>
+            {deliveryOptions?.delivery_enabled ? (
+              <>
+                <label className="flex items-center gap-2 text-sm"><input type="radio" name="delivery-method" checked={deliveryMethod === "delivery"} onChange={() => { setDeliveryMethod("delivery"); setDeliveryChoiceDirty(true); }} /> Request campus delivery</label>
+                {deliveryMethod === "delivery" && <>
+                  <select className="w-full rounded-md border bg-background p-2 text-sm" value={destinationId} onChange={(event) => { setDestinationId(event.target.value); setDeliveryChoiceDirty(true); }} aria-label="Delivery destination">
+                    <option value="">Select destination</option>
+                    {deliveryOptions.locations.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.category}</option>)}
+                  </select>
+                  <select className="w-full rounded-md border bg-background p-2 text-sm" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setDeliveryChoiceDirty(true); }} aria-label="Delivery zone">
+                    <option value="">Select delivery zone</option>
+                    {deliveryOptions.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name} · GHS {zone.fee.toFixed(2)}</option>)}
+                  </select>
+                  <Input value={meetingPoint} onChange={(event) => { setMeetingPoint(event.target.value); setDeliveryChoiceDirty(true); }} placeholder="Public meeting point instructions (no room number)" maxLength={180} />
+                </>}
+              </>
+            ) : <p className="text-xs text-muted-foreground">Campus delivery is not available yet. Administrators will enable it after all three test-based zone fees are configured.</p>}
+            <Button className="w-full" variant="outline" onClick={saveDeliveryChoice} disabled={savingDelivery || (deliveryMethod === "delivery" && !deliveryOptions?.delivery_enabled)}>{savingDelivery ? "Saving..." : "Save delivery choice"}</Button>
+          </CardContent></Card>
+          <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{deliveryChoiceUnsaved && <p className="mt-2 text-sm text-amber-700">Save your delivery choice before paying.</p>}{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading || deliveryChoiceUnsaved}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}<Button variant="outline" className="mt-3 w-full" onClick={payWithPaystack} disabled={loading || deliveryChoiceUnsaved}>{loading ? "Opening secure checkout..." : "Pay by Card or Mobile Money"}</Button></CardContent></Card>
         </div>
       </section>
     </AppScaffold>

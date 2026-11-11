@@ -319,7 +319,7 @@ const Index = () => {
                     )}
                   </div>
                   <Badge variant="outline" className="mb-2 border-primary/30 text-primary">
-                    <CheckCircle className="mr-1 h-3 w-3" /> Verified Seller
+                    <CheckCircle className="mr-1 h-3 w-3" /> Verified Student
                   </Badge>
                   <h3 className="font-display font-semibold">{h.seller_display_name || h.full_name}</h3>
                   <p className="text-sm text-muted-foreground">{h.products_count || 0} products</p>

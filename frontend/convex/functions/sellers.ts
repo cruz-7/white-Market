@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { isVerifiedStudent, requireProfile, requireUserId } from "../lib/auth";
 import { round2 } from "../lib/money";
 import { toIso } from "../lib/shapes";
 
@@ -108,7 +108,7 @@ export const me = query({
         seller_display_name: seller.seller_display_name ?? null,
         seller_profile_image_url: seller.seller_profile_image_url ?? null,
         avatar_url: seller.avatar_url ?? seller.image ?? null,
-        verified: seller.verified ?? false,
+        verified: await isVerifiedStudent(ctx, userId),
         campus: seller.campus ?? null,
         created_at: toIso(seller.created_at),
       },
@@ -175,7 +175,7 @@ export const byId = query({
         seller_display_name: seller.seller_display_name ?? null,
         seller_profile_image_url: seller.seller_profile_image_url ?? null,
         avatar_url: seller.avatar_url ?? seller.image ?? null,
-        verified: seller.verified ?? false,
+        verified: await isVerifiedStudent(ctx, args.id),
         created_at: toIso(seller.created_at),
       },
       stats: {

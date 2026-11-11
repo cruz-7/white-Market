@@ -179,6 +179,197 @@ const reportFileCorsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
 };
+const verificationCorsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+};
+
+http.route({
+  path: "/verification-upload",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: verificationCorsHeaders })),
+});
+
+http.route({
+  path: "/verification-upload",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity
+      ? await ctx.runQuery(internal.functions.verification.userIdForSubject, { subject: identity.subject })
+      : null;
+    if (!userId) {
+      return Response.json({ error: "Sign in before submitting a verification document" }, {
+        status: 401,
+        headers: verificationCorsHeaders,
+      });
+    }
+
+    const formData = await request.formData();
+    const file = formData.get("file");
+    const documentType = formData.get("document_type");
+    if (!(file instanceof File)) {
+      return Response.json({ error: "Choose a student ID or admission letter to upload" }, {
+        status: 400,
+        headers: verificationCorsHeaders,
+      });
+    }
+    if (!["student_id", "admission_letter"].includes(String(documentType))) {
+      return Response.json({ error: "Unsupported document type" }, {
+        status: 400,
+        headers: verificationCorsHeaders,
+      });
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return Response.json({ error: "File is larger than 5MB" }, {
+        status: 413,
+        headers: verificationCorsHeaders,
+      });
+    }
+    if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) {
+      return Response.json({ error: "Upload a PDF, JPEG, PNG, or WebP document" }, {
+        status: 415,
+        headers: verificationCorsHeaders,
+      });
+    }
+
+    const storageId = await ctx.storage.store(file);
+    try {
+      const result = await ctx.runMutation(internal.functions.verification.submitUploadedDocument, {
+        user_id: userId,
+        document_type: String(documentType),
+        storage_id: storageId,
+        content_type: file.type,
+      });
+      return Response.json(result, { headers: verificationCorsHeaders });
+    } catch (error) {
+      await ctx.storage.delete(storageId);
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Verification request could not be submitted" },
+        { status: 400, headers: verificationCorsHeaders }
+      );
+    }
+  }),
+});
+
+http.route({
+  path: "/verification-document/:verificationId",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: verificationCorsHeaders })),
+});
+
+http.route({
+  path: "/rider-application-upload",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: verificationCorsHeaders })),
+});
+
+http.route({
+  path: "/rider-application-upload",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity
+      ? await ctx.runQuery(internal.functions.delivery.userIdForSubject, { subject: identity.subject })
+      : null;
+    if (!userId) return Response.json({ error: "Sign in before applying to become a rider" }, { status: 401, headers: verificationCorsHeaders });
+    const formData = await request.formData();
+    const file = formData.get("document");
+    const legalName = String(formData.get("legal_name") ?? "");
+    const phone = String(formData.get("phone") ?? "");
+    const studentIdNumber = String(formData.get("student_id_number") ?? "");
+    if (!(file instanceof File)) return Response.json({ error: "Upload your student identification document" }, { status: 400, headers: verificationCorsHeaders });
+    if (file.size > MAX_UPLOAD_BYTES) return Response.json({ error: "File is larger than 5MB" }, { status: 413, headers: verificationCorsHeaders });
+    if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) {
+      return Response.json({ error: "Upload a PDF, JPEG, PNG, or WebP document" }, { status: 415, headers: verificationCorsHeaders });
+    }
+
+    const storageId = await ctx.storage.store(file);
+    try {
+      const result = await ctx.runMutation(internal.functions.delivery.submitApplicationDocument, {
+        user_id: userId, legal_name: legalName, phone, student_id_number: studentIdNumber,
+        storage_id: storageId, content_type: file.type,
+      });
+      return Response.json(result, { headers: verificationCorsHeaders });
+    } catch (error) {
+      await ctx.storage.delete(storageId);
+      return Response.json({ error: error instanceof Error ? error.message : "Rider application could not be submitted" }, { status: 400, headers: verificationCorsHeaders });
+    }
+  }),
+});
+
+http.route({
+  path: "/rider-application-document/:applicationId",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: verificationCorsHeaders })),
+});
+
+http.route({
+  path: "/rider-application-document/:applicationId",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const adminId = identity
+      ? await ctx.runQuery(internal.functions.delivery.userIdForSubject, { subject: identity.subject })
+      : null;
+    if (!adminId) return new Response("Unauthorized", { status: 401, headers: verificationCorsHeaders });
+    const applicationId = new URL(request.url).pathname.split("/").pop();
+    if (!applicationId) return new Response("Not found", { status: 404, headers: verificationCorsHeaders });
+    try {
+      const document = await ctx.runQuery(internal.functions.delivery.riderDocumentContext, {
+        application_id: applicationId, admin_id: adminId,
+      });
+      const file = await ctx.storage.get(document.storage_id);
+      if (!file) return new Response("Not found", { status: 404, headers: verificationCorsHeaders });
+      return new Response(file, {
+        headers: {
+          ...verificationCorsHeaders, "Content-Type": document.content_type,
+          "Cache-Control": "private, no-store", "Content-Disposition": "inline",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load rider document";
+      return new Response(message, { status: message === "Admin access only" ? 403 : 404, headers: verificationCorsHeaders });
+    }
+  }),
+});
+
+http.route({
+  path: "/verification-document/:verificationId",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = identity
+      ? await ctx.runQuery(internal.functions.verification.userIdForSubject, { subject: identity.subject })
+      : null;
+    if (!userId) return new Response("Unauthorized", { status: 401, headers: verificationCorsHeaders });
+
+    const verificationId = new URL(request.url).pathname.split("/").pop();
+    if (!verificationId) return new Response("Not found", { status: 404, headers: verificationCorsHeaders });
+
+    try {
+      const document = await ctx.runQuery(internal.functions.verification.documentContext, {
+        verification_id: verificationId,
+        user_id: userId,
+      });
+      const file = await ctx.storage.get(document.storage_id);
+      if (!file) return new Response("Not found", { status: 404, headers: verificationCorsHeaders });
+      return new Response(file, {
+        headers: {
+          ...verificationCorsHeaders,
+          "Content-Type": document.content_type,
+          "Cache-Control": "private, no-store",
+          "Content-Disposition": "inline",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load verification document";
+      const status = message === "Admin access only" ? 403 : 404;
+      return new Response(message, { status, headers: verificationCorsHeaders });
+    }
+  }),
+});
 
 http.route({
   path: "/upload",

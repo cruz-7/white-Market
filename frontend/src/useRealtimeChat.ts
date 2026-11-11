@@ -25,7 +25,7 @@ export function useRealtimeChat({ currentUserId, otherUserId }: UseRealtimeChatO
 
   // The frontend uses the conversations/messages API surface now; this hook
   // remains for backward compatibility but delegates to Convex data.
-  const conversations = useQuery((convexApi as any).messages.conversations);
+  const conversations = useQuery((convexApi as any).functions.messages.conversations);
   const conversation = conversations?.conversations?.find(
     (c: any) =>
       (c.buyer_id === currentUserId && c.seller_id === otherUserId) ||
@@ -33,13 +33,13 @@ export function useRealtimeChat({ currentUserId, otherUserId }: UseRealtimeChatO
   );
 
   const messagesQuery = useQuery(
-    (convexApi as any).messages.messages,
+    (convexApi as any).functions.messages.messages,
     conversation?.id ? { conversationId: conversation.id } : "skip"
   );
 
-  const sendMessageMutation = useMutation((convexApi as any).messages.send);
-  const upsertConversation = useMutation((convexApi as any).messages.upsert);
-  const markReadMutation = useMutation((convexApi as any).messages.markRead);
+  const sendMessageMutation = useMutation((convexApi as any).functions.messages.send);
+  const upsertConversation = useMutation((convexApi as any).functions.messages.upsert);
+  const markReadMutation = useMutation((convexApi as any).functions.messages.markRead);
 
   const messages: DirectMessage[] = (messagesQuery?.messages ?? []).map((m: any) => ({
     id: m.id,
@@ -119,7 +119,7 @@ export function useRealtimeChat({ currentUserId, otherUserId }: UseRealtimeChatO
  * Useful for showing notifications or unread badges
  */
 export function useMessageNotifications(currentUserId: string | null) {
-  const conversations = useQuery((convexApi as any).messages.conversations);
+  const conversations = useQuery((convexApi as any).functions.messages.conversations);
   const unreadCount =
     conversations?.conversations?.reduce(
       (total: number, conv: any) => total + (conv.unread_count || 0),

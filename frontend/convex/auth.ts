@@ -4,7 +4,7 @@ import type { EmailConfig } from "@convex-dev/auth/server";
 import { generateReferralCode } from "./lib/ids";
 
 /**
- * Transactional email for password resets and email verification codes.
+ * Transactional email used by password reset.
  *
  * With `RESEND_API_KEY` set the email is delivered by Resend. Without it the
  * verification link is written to the Convex function log instead, which keeps
@@ -14,7 +14,7 @@ const emailProvider = {
   id: "resend",
   type: "email" as const,
   name: "Email",
-  from: process.env.AUTH_EMAIL_FROM ?? "White Market <noreply@whitemarket.gh>",
+  from: process.env.AUTH_EMAIL_FROM,
   maxAge: 10 * 60,
   async sendVerificationRequest({
     identifier,
@@ -35,6 +35,9 @@ const emailProvider = {
       console.log(`[auth] verification link for ${identifier}: ${url}`);
       return;
     }
+    if (!process.env.AUTH_EMAIL_FROM) {
+      throw new Error("AUTH_EMAIL_FROM must be configured with a verified sender domain before password reset emails can be sent");
+    }
 
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -42,7 +45,7 @@ const emailProvider = {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: process.env.AUTH_EMAIL_FROM ?? "White Market <noreply@whitemarket.gh>",
+        from: process.env.AUTH_EMAIL_FROM,
         to: [identifier],
         subject: "Your White Market verification link",
         html: `<p>Use the link below to continue. It expires in 10 minutes.</p><p><a href="${url}">Continue</a></p>`,
@@ -107,10 +110,9 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       },
 
       /**
-       * Enables the password-reset flow. Email verification on sign-up is
-       * intentionally left off so campus users can sign up and trade
-       * immediately; verification is instead handled by the student
-       * verification flow (see `convex/functions/verification.ts`).
+       * Enables password resets without making email verification a
+       * requirement for account creation or sign-in. Student verification
+       * is handled separately (see `convex/functions/verification.ts`).
        */
       reset: emailProvider,
     }),

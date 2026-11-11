@@ -68,6 +68,35 @@ async function uploadImage(
   }
 }
 
+async function uploadRiderApplication(data: {
+  legal_name: string;
+  phone: string;
+  student_id_number: string;
+  document: File;
+}): Promise<ApiResponse<{ id: string; status: string }>> {
+  const token = convexAccessToken();
+  if (!token) return { error: "You must be signed in to apply" };
+  if (!CONVEX_SITE_URL) return { error: "VITE_CONVEX_SITE_URL is not configured" };
+  try {
+    const formData = new FormData();
+    formData.append("legal_name", data.legal_name);
+    formData.append("phone", data.phone);
+    formData.append("student_id_number", data.student_id_number);
+    formData.append("document", data.document);
+    const response = await fetch(`${CONVEX_SITE_URL}/rider-application-upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const result = await response.json().catch(() => ({})) as { id?: string; status?: string; error?: string };
+    if (!response.ok) return { error: result.error || "Rider application upload failed" };
+    if (!result.id || !result.status) return { error: "Rider application response was incomplete" };
+    return { data: { id: result.id, status: result.status } };
+  } catch (error) {
+    return { error: toMessage(error) };
+  }
+}
+
 // ==================== AUTH API ====================
 
 export interface AuthSignupParams {
@@ -377,6 +406,10 @@ export interface Order {
   buyer_id: string;
   seller_id: string;
   amount: number;
+  item_amount?: number;
+  delivery_fee?: number;
+  delivery_method?: string;
+  delivery_status?: string;
   status: "pending" | "paid" | "cancelled" | "completed" | "disputed";
   created_at: string;
   paid_at?: string;
@@ -433,6 +466,107 @@ export const ordersApi = {
 
   getDispute: (id: string) =>
     run(() => convex.query(api.orders.getDispute, { id: id as any })),
+};
+
+export interface DeliveryLocation {
+  id: string;
+  name: string;
+  category: string;
+}
+
+export interface DeliveryZone {
+  id: string;
+  name: string;
+  fee: number;
+  configured: boolean;
+}
+
+export interface DeliveryJob {
+  id: string;
+  order_id: string;
+  destination_name: string;
+  zone_name: string;
+  meeting_point: string;
+  delivery_fee: number;
+  item_name: string;
+}
+
+export interface DeliveryRecord {
+  id: string;
+  order_id: string;
+  buyer_id: string;
+  seller_id: string;
+  rider_id?: string;
+  destination_name?: string;
+  zone_name?: string;
+  meeting_point?: string;
+  delivery_fee: number;
+  status: string;
+  product_name: string;
+  events: { event: string; note?: string; at?: string }[];
+}
+
+export const deliveryApi = {
+  publicOptions: () =>
+    run(() => convex.query(api.delivery.publicOptions, {})),
+  setDeliveryOption: (params: {
+    order_id: string;
+    method: "campus_pickup" | "delivery";
+    destination_id?: string;
+    zone_id?: string;
+    meeting_point?: string;
+  }) => run(() => convex.mutation(api.delivery.setDeliveryOption, {
+    order_id: params.order_id as any,
+    method: params.method,
+    destination_id: params.destination_id as any,
+    zone_id: params.zone_id as any,
+    meeting_point: params.meeting_point,
+  })),
+  buyerDeliveryOption: (orderId: string) =>
+    run(() => convex.query(api.delivery.buyerDeliveryOption, { order_id: orderId as any })),
+  submitRiderApplication: uploadRiderApplication,
+  myRiderApplication: () => run(() => convex.query(api.delivery.myRiderApplication, {})),
+  availableJobs: () => run(() => convex.query(api.delivery.availableJobs, {})),
+  myDeliveries: () => run(() => convex.query(api.delivery.myDeliveries, {})),
+  acceptJob: (id: string) => run(() => convex.mutation(api.delivery.acceptJob, { id: id as any })),
+  confirmPickup: (id: string) => run(() => convex.mutation(api.delivery.confirmPickup, { id: id as any })),
+  updateJobStatus: (id: string, status: string, note?: string) =>
+    run(() => convex.mutation(api.delivery.updateJobStatus, { id: id as any, status, note })),
+  confirmReceipt: (id: string) => run(() => convex.mutation(api.delivery.confirmReceipt, { id: id as any })),
+  createComplaint: (id: string, reason: string, details: string) =>
+    run(() => convex.mutation(api.delivery.createComplaint, { id: id as any, reason, details })),
+  initializeAdminDefaults: () => run(() => convex.mutation(api.delivery.ensureDefaults, {})),
+  adminConfiguration: () => run(() => convex.query(api.delivery.adminConfiguration, {})),
+  adminRiderApplications: (status = "pending") =>
+    run(() => convex.query(api.delivery.adminRiderApplications, { status })),
+  reviewRiderApplication: (id: string, action: string, reason?: string) =>
+    run(() => convex.mutation(api.delivery.reviewRiderApplication, { id: id as any, action, reason })),
+  setZoneFee: (
+    id: string, fee: number, rider_compensation: number, transport_cost: number,
+    confirmed_tested: boolean, is_active?: boolean,
+  ) => run(() => convex.mutation(api.delivery.setZoneFee, {
+    id: id as any, fee, rider_compensation, transport_cost, confirmed_tested, is_active,
+  })),
+  setLocation: (params: { id?: string; name: string; category: string; is_active: boolean }) =>
+    run(() => convex.mutation(api.delivery.setLocation, { ...params, id: params.id as any })),
+  adminDeliveries: () => run(() => convex.query(api.delivery.adminDeliveries, {})),
+  adminComplaints: () => run(() => convex.query(api.delivery.adminComplaints, {})),
+  resolveComplaint: (id: string, resolution: string, suspend_rider?: boolean) =>
+    run(() => convex.mutation(api.delivery.resolveComplaint, { id: id as any, resolution, suspend_rider })),
+  downloadRiderDocument: async (id: string): Promise<ApiResponse<Blob>> => {
+    const token = convexAccessToken();
+    if (!token) return { error: "Sign in before reviewing rider documents" };
+    if (!CONVEX_SITE_URL) return { error: "VITE_CONVEX_SITE_URL is not configured" };
+    try {
+      const response = await fetch(`${CONVEX_SITE_URL}/rider-application-document/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return { error: await response.text() || "Could not load rider document" };
+      return { data: await response.blob() };
+    } catch (error) {
+      return { error: toMessage(error) };
+    }
+  },
 };
 
 // ==================== PAYMENTS API ====================
@@ -623,13 +757,13 @@ export interface VerificationStatus {
 
 export interface VerificationRequest {
   document_type: "student_id" | "admission_letter";
-  document_url?: string;
 }
 
 export interface Verification {
   id: string;
   user_id: string;
   document_url?: string | null;
+  has_document?: boolean;
   document_type: string;
   status: "pending" | "approved" | "rejected";
   reviewed_by?: string | null;
@@ -645,13 +779,60 @@ export const verificationApi = {
   getStatus: () =>
     run(() => convex.query(api.verification.status)) as Promise<ApiResponse<VerificationStatus>>,
 
-  submitRequest: (params: VerificationRequest) =>
-    run(() =>
-      convex.mutation(api.verification.request, {
-        document_type: params.document_type,
-        document_url: params.document_url,
-      })
-    ),
+  submitDocument: async (
+    file: File,
+    documentType: VerificationRequest["document_type"]
+  ): Promise<ApiResponse<{ message: string; verification_id: string; status: string }>> => {
+    const token = convexAccessToken();
+    if (!token) return { error: "Sign in before submitting a verification document" };
+    if (!CONVEX_SITE_URL) return { error: "VITE_CONVEX_SITE_URL is not configured" };
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("document_type", documentType);
+      const response = await fetch(`${CONVEX_SITE_URL}/verification-upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({})) as {
+        error?: string;
+        message?: string;
+        verification_id?: string;
+        status?: string;
+      };
+      if (!response.ok) return { error: result.error || "Verification document upload failed" };
+      return {
+        data: {
+          message: result.message ?? "Verification request submitted for review",
+          verification_id: result.verification_id ?? "",
+          status: result.status ?? "pending",
+        },
+      };
+    } catch (error) {
+      return { error: toMessage(error) };
+    }
+  },
+
+  downloadDocument: async (id: string): Promise<ApiResponse<Blob>> => {
+    const token = convexAccessToken();
+    if (!token) return { error: "Sign in before viewing verification documents" };
+    if (!CONVEX_SITE_URL) return { error: "VITE_CONVEX_SITE_URL is not configured" };
+
+    try {
+      const response = await fetch(
+        `${CONVEX_SITE_URL}/verification-document/${encodeURIComponent(id)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) {
+        return { error: (await response.text()) || "Could not load verification document" };
+      }
+      return { data: await response.blob() };
+    } catch (error) {
+      return { error: toMessage(error) };
+    }
+  },
 
   // Admin endpoints
   getAllPending: (status?: string) =>
@@ -774,7 +955,7 @@ export const adminApi = {
   unbanUser: (userId: string) =>
     run(() => convex.mutation(api.admin.unbanUser, { id: userId as any })),
 
-  bulkUsers: (userIds: string[], action: "ban" | "unban" | "verify") =>
+  bulkUsers: (userIds: string[], action: "ban" | "unban") =>
     run(() =>
       convex.mutation(api.admin.bulkUsers, {
         userIds: userIds as any,

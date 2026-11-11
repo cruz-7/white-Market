@@ -133,6 +133,9 @@ export default defineSchema({
     momo_network: v.optional(v.string()),
     momo_number: v.optional(v.string()),
     delivery_status: v.optional(v.string()),
+    item_amount: v.optional(v.number()),
+    delivery_fee: v.optional(v.number()),
+    delivery_method: v.optional(v.string()),
     credit_used: v.optional(v.number()),
     payout_status: v.optional(v.string()),
     is_rated: v.optional(v.boolean()),
@@ -194,6 +197,12 @@ export default defineSchema({
     buyer_id: v.id("users"),
     seller_id: v.id("users"),
     amount: v.number(),
+    item_amount: v.optional(v.number()),
+    delivery_fee: v.optional(v.number()),
+    rider_compensation: v.optional(v.number()),
+    transport_cost: v.optional(v.number()),
+    delivery_margin: v.optional(v.number()),
+    rider_compensation_paid_at: v.optional(v.number()),
     commission: v.optional(v.number()),
     seller_earning: v.optional(v.number()),
     status: v.string(),
@@ -201,7 +210,8 @@ export default defineSchema({
     created_at: v.optional(v.number()),
   })
     .index("by_seller", ["seller_id"])
-    .index("by_buyer", ["buyer_id"]),
+    .index("by_buyer", ["buyer_id"])
+    .index("by_order", ["order_id"]),
 
   conversations: defineTable({
     product_id: v.optional(v.id("products")),
@@ -229,10 +239,105 @@ export default defineSchema({
     .index("by_conversation_created", ["conversation_id", "created_at"])
     .index("by_receiver", ["receiver_id"]),
 
+  rider_applications: defineTable({
+    user_id: v.id("users"),
+    legal_name: v.string(),
+    phone: v.string(),
+    student_id_number: v.string(),
+    document_storage_id: v.optional(v.id("_storage")),
+    document_content_type: v.optional(v.string()),
+    status: v.string(),
+    rejection_reason: v.optional(v.string()),
+    reviewed_by: v.optional(v.id("users")),
+    reviewed_at: v.optional(v.number()),
+    created_at: v.number(),
+    updated_at: v.number(),
+  })
+    .index("by_user", ["user_id"])
+    .index("by_status", ["status"]),
+
+  delivery_locations: defineTable({
+    name: v.string(),
+    category: v.string(),
+    is_active: v.boolean(),
+    created_at: v.number(),
+    updated_at: v.number(),
+  }).index("by_active", ["is_active"]),
+
+  delivery_zones: defineTable({
+    name: v.string(),
+    fee: v.number(),
+    rider_compensation: v.optional(v.number()),
+    transport_cost: v.optional(v.number()),
+    is_configured: v.boolean(),
+    is_active: v.boolean(),
+    updated_by: v.id("users"),
+    updated_at: v.number(),
+  }).index("by_active", ["is_active"]),
+
+  deliveries: defineTable({
+    order_id: v.id("orders"),
+    buyer_id: v.id("users"),
+    seller_id: v.id("users"),
+    rider_id: v.optional(v.id("users")),
+    rider_name_snapshot: v.optional(v.string()),
+    rider_phone_snapshot: v.optional(v.string()),
+    destination_id: v.optional(v.id("delivery_locations")),
+    destination_name: v.optional(v.string()),
+    zone_id: v.optional(v.id("delivery_zones")),
+    zone_name: v.optional(v.string()),
+    meeting_point: v.optional(v.string()),
+    delivery_fee: v.number(),
+    rider_compensation: v.optional(v.number()),
+    transport_cost: v.optional(v.number()),
+    delivery_margin: v.optional(v.number()),
+    status: v.string(),
+    assigned_at: v.optional(v.number()),
+    picked_up_at: v.optional(v.number()),
+    delivered_at: v.optional(v.number()),
+    completed_at: v.optional(v.number()),
+    created_at: v.number(),
+    updated_at: v.number(),
+  })
+    .index("by_order", ["order_id"])
+    .index("by_rider", ["rider_id"])
+    .index("by_status", ["status"])
+    .index("by_buyer", ["buyer_id"])
+    .index("by_seller", ["seller_id"]),
+
+  delivery_events: defineTable({
+    delivery_id: v.id("deliveries"),
+    order_id: v.id("orders"),
+    actor_id: v.id("users"),
+    actor_role: v.string(),
+    event: v.string(),
+    note: v.optional(v.string()),
+    created_at: v.number(),
+  })
+    .index("by_delivery", ["delivery_id"])
+    .index("by_order", ["order_id"]),
+
+  delivery_complaints: defineTable({
+    delivery_id: v.id("deliveries"),
+    order_id: v.id("orders"),
+    raised_by: v.id("users"),
+    reason: v.string(),
+    details: v.string(),
+    status: v.string(),
+    resolution: v.optional(v.string()),
+    resolved_by: v.optional(v.id("users")),
+    created_at: v.number(),
+    updated_at: v.number(),
+  })
+    .index("by_delivery", ["delivery_id"])
+    .index("by_status", ["status"]),
+
   verifications: defineTable({
     user_id: v.id("users"),
     document_type: v.string(),
     document_url: v.optional(v.string()),
+    document_storage_id: v.optional(v.id("_storage")),
+    document_content_type: v.optional(v.string()),
     status: v.string(),
     reviewed_by: v.optional(v.id("users")),
     rejection_reason: v.optional(v.string()),

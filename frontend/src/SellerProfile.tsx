@@ -32,7 +32,7 @@ import { Button } from "./button";
 import { Card, CardContent } from "./card";
 import { Badge } from "./badge";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
-import { productsApi, sellerApi, ratingsApi, type Product } from "./api";
+import { messagesApi, productsApi, sellerApi, ratingsApi, type Product } from "./api";
 import { PRODUCTS_REFRESH_EVENT } from "./data";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { SellerRatingStats } from "./SellerRatingStats";
@@ -247,6 +247,31 @@ function SellerProfile() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleMessageSeller = async () => {
+    if (!currentUserId) {
+      navigate("/auth?role=user");
+      return;
+    }
+    if (isOwnProfile) {
+      toast.info("You cannot message yourself");
+      return;
+    }
+    const listing = products[0];
+    if (!listing) {
+      toast.error("This seller has no active listing to start a conversation");
+      return;
+    }
+
+    const response = await messagesApi.upsertConversation({ product_id: listing.id });
+    if (response.error || !response.data?.conversation?.id) {
+      toast.error(response.error || "Failed to open conversation");
+      return;
+    }
+    navigate(
+      `/messages?conversation=${response.data.conversation.id}&prefill=${encodeURIComponent("Hi, I have a question about your listings.")}`
+    );
   };
 
   const canChangeName = sellerProfile?.can_change_name ?? true;
@@ -568,9 +593,7 @@ function SellerProfile() {
               <Button 
                 size="lg"
                 className="bg-white text-primary hover:bg-white/90 shadow-lg"
-                onClick={() => {
-                  toast.info("Start a conversation from a product page");
-                }}
+                onClick={handleMessageSeller}
               >
                 <MessageCircle className="mr-2 h-5 w-5" /> Message Seller
               </Button>

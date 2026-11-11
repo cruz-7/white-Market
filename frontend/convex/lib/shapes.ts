@@ -46,7 +46,8 @@ export interface ProductShape {
 export function productShape(
   product: ProductDoc,
   seller?: Doc<"users"> | null,
-  category?: Doc<"categories"> | null
+  category?: Doc<"categories"> | null,
+  sellerVerified = false
 ): ProductShape {
   return {
     id: product._id,
@@ -71,7 +72,7 @@ export function productShape(
       ? {
           full_name: seller.full_name ?? seller.name ?? "",
           email: seller.email ?? "",
-          verified: seller.verified ?? false,
+          verified: sellerVerified,
           seller_display_name: seller.seller_display_name ?? undefined,
           seller_profile_image_url: seller.seller_profile_image_url ?? undefined,
           avatar_url: seller.avatar_url ?? seller.image ?? undefined,
@@ -93,6 +94,9 @@ export function orderShape(
     buyer_id: order.buyer_id,
     seller_id: order.seller_id,
     amount: order.amount,
+    item_amount: order.item_amount ?? order.amount - (order.delivery_fee ?? 0),
+    delivery_fee: order.delivery_fee ?? 0,
+    delivery_method: order.delivery_method ?? "campus_pickup",
     commission: order.commission,
     seller_earning: order.seller_earning,
     status: order.status,

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { MessageCircle, Send, Loader2, ArrowLeft, Image, Check, CheckCheck, MoreVertical, Phone, Video } from "lucide-react";
+import { MessageCircle, Send, Loader2, ArrowLeft, Check, CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useMutation } from "convex/react";
 import { api as convexApi } from "../convex/_generated/api";
@@ -57,7 +57,9 @@ export default function MessagesPage() {
       setNewMessage("");
       setTimeout(scrollToBottom, 50);
     } catch (error) {
-      console.error(error instanceof Error ? error.message : "Message could not be sent");
+      const message = error instanceof Error ? error.message : "Message could not be sent";
+      console.error("[messages] Failed to send message:", error);
+      toast.error(message);
     } finally {
       setSending(false);
     }
@@ -194,16 +196,6 @@ export default function MessagesPage() {
                 {activeConversation ? getOtherUserName(activeConversation) : "Messages"}
               </CardTitle>
             </div>
-            {activeConversation && (
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon">
-                  <Phone className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="icon">
-                  <MoreVertical className="w-4 h-4" />
-                </Button>
-              </div>
-            )}
           </div>
         </CardHeader>
 
@@ -365,9 +357,6 @@ export default function MessagesPage() {
 
                     {/* Message Input */}
                     <form onSubmit={handleSendMessage} className="p-3 border-t flex items-center gap-2 flex-shrink-0">
-                      <Button type="button" variant="ghost" size="icon">
-                        <Image className="w-5 h-5" />
-                      </Button>
                       <Input
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}

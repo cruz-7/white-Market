@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { action, internalQuery, mutation, query } from "../_generated/server";
 import { modifyAccountCredentials } from "@convex-dev/auth/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { isVerifiedStudent, requireProfile, requireUserId } from "../lib/auth";
 import type { Id } from "../_generated/dataModel";
 
 export const passwordContext = internalQuery({
@@ -95,7 +95,7 @@ export const me = query({
         email: user.email ?? "",
         role: user.role ?? "user",
         full_name: user.full_name ?? user.name ?? "",
-        verified: user.verified ?? false,
+        verified: await isVerifiedStudent(ctx, userId),
         avatar_url: user.avatar_url ?? user.image ?? null,
       },
     };

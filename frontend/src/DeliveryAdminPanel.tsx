@@ -1,0 +1,240 @@
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { deliveryApi } from "./api";
+import { Button } from "./button";
+import { Card, CardContent, CardHeader, CardTitle } from "./card";
+import { Input } from "./input";
+
+type AdminLocation = { _id: string; name: string; category: string; is_active: boolean };
+type AdminZone = {
+  _id: string; name: string; fee: number; rider_compensation?: number;
+  transport_cost?: number; is_configured: boolean; is_active: boolean;
+};
+type RiderApplication = {
+  id: string; email: string; legal_name: string; phone: string; student_id_number: string;
+  status: string; rejection_reason?: string; has_document: boolean; created_at?: string;
+};
+type AdminDelivery = {
+  id: string; order_id: string; status: string; buyer_id: string; seller_id: string;
+  rider_id?: string; rider_name?: string; rider_phone?: string; destination?: string;
+  zone?: string; meeting_point?: string;   delivery_fee: number; rider_compensation: number; transport_cost: number; delivery_margin: number;
+  events: { event: string; actor_id: string; note?: string; at?: string }[];
+};
+type AdminComplaint = {
+  _id: string; delivery_id: string; order_id: string; raised_by: string;
+  reason: string; details: string; status: string; created_at: number;
+};
+
+export default function DeliveryAdminPanel() {
+  const [locations, setLocations] = useState<AdminLocation[]>([]);
+  const [zones, setZones] = useState<AdminZone[]>([]);
+  const [applications, setApplications] = useState<RiderApplication[]>([]);
+  const [deliveries, setDeliveries] = useState<AdminDelivery[]>([]);
+  const [complaints, setComplaints] = useState<AdminComplaint[]>([]);
+  const [applicationStatus, setApplicationStatus] = useState("pending");
+  const [locationName, setLocationName] = useState("");
+  const [locationCategory, setLocationCategory] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    const [configuration, riders, deliveryRows, complaintRows] = await Promise.all([
+      deliveryApi.adminConfiguration(),
+      deliveryApi.adminRiderApplications(applicationStatus),
+      deliveryApi.adminDeliveries(),
+      deliveryApi.adminComplaints(),
+    ]);
+    setLoading(false);
+    if (configuration.error || riders.error || deliveryRows.error || complaintRows.error) {
+      const error = configuration.error || riders.error || deliveryRows.error || complaintRows.error;
+      toast.error(error || "Could not load delivery administration data.");
+      return;
+    }
+    setLocations(configuration.data?.locations ?? []);
+    setZones(configuration.data?.zones ?? []);
+    setApplications(riders.data ?? []);
+    setDeliveries(deliveryRows.data ?? []);
+    setComplaints(complaintRows.data ?? []);
+  };
+
+  useEffect(() => {
+    let active = true;
+    void deliveryApi.initializeAdminDefaults().then((result) => {
+      if (!active) return;
+      if (result.error) {
+        toast.error(result.error);
+        setLoading(false);
+      } else {
+        void load();
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [applicationStatus]);
+
+  const saveZoneFee = async (
+    zone: AdminZone, feeText: string, compensationText: string, transportText: string, tested: boolean,
+  ) => {
+    if (!tested) return toast.error("Confirm the amount was calculated from test deliveries before saving.");
+    const fee = Number(feeText);
+    const compensation = Number(compensationText);
+    const transport = Number(transportText);
+    if (!Number.isFinite(fee) || fee <= 0 || fee > 1000) return toast.error("Enter a valid delivery fee greater than zero.");
+    if (!Number.isFinite(compensation) || compensation <= 0 || !Number.isFinite(transport) || transport < 0 || compensation + transport > fee) {
+      return toast.error("Rider compensation and transport costs must be valid and cannot exceed the delivery fee.");
+    }
+    const result = await deliveryApi.setZoneFee(zone._id, fee, compensation, transport, true, true);
+    if (result.error) toast.error(result.error);
+    else { toast.success(`${zone.name} fee configured.`); void load(); }
+  };
+
+  const review = async (application: RiderApplication, action: "approved" | "rejected" | "suspended" | "deactivated") => {
+    const reason = action === "rejected" || action === "suspended"
+      ? window.prompt(`Reason for ${action}:`)?.trim()
+      : undefined;
+    if ((action === "rejected" || action === "suspended") && !reason) return;
+    const result = await deliveryApi.reviewRiderApplication(application.id, action, reason);
+    if (result.error) toast.error(result.error);
+    else { toast.success(`Rider application ${action}.`); void load(); }
+  };
+
+  const openDocument = async (application: RiderApplication) => {
+    const result = await deliveryApi.downloadRiderDocument(application.id);
+    if (result.error || !result.data) return toast.error(result.error || "Could not load the private document.");
+    const url = URL.createObjectURL(result.data);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) toast.error("Allow pop-ups to view the private document.");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const addLocation = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = await deliveryApi.setLocation({ name: locationName, category: locationCategory, is_active: true });
+    if (result.error) toast.error(result.error);
+    else { setLocationName(""); setLocationCategory(""); toast.success("Destination added."); void load(); }
+  };
+
+  const toggleLocation = async (location: AdminLocation) => {
+    const result = await deliveryApi.setLocation({
+      id: location._id, name: location.name, category: location.category, is_active: !location.is_active,
+    });
+    if (result.error) toast.error(result.error);
+    else void load();
+  };
+
+  const resolve = async (complaint: AdminComplaint) => {
+    const resolution = window.prompt("Record the investigation outcome and action taken:")?.trim();
+    if (!resolution) return;
+    const suspend = window.confirm("Also suspend the assigned rider?");
+    const result = await deliveryApi.resolveComplaint(complaint._id, resolution, suspend);
+    if (result.error) toast.error(result.error);
+    else { toast.success("Complaint resolved and recorded."); void load(); }
+  };
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <CardHeader><CardTitle>Delivery availability and tested zone fees</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Delivery remains disabled until all three zone fees have been measured through test deliveries and explicitly confirmed here. Do not enter estimates.</p>
+          <div className="grid gap-3 md:grid-cols-3">
+            {zones.map((zone) => <ZoneFeeEditor key={zone._id} zone={zone} onSave={saveZoneFee} />)}
+          </div>
+          <div className={`rounded-md p-3 text-sm ${zones.length === 3 && zones.every((zone) => zone.is_configured && zone.is_active) ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>
+            {zones.length === 3 && zones.every((zone) => zone.is_configured && zone.is_active)
+              ? "All three zone fees are configured. Campus delivery is enabled."
+              : "Campus delivery is disabled until all three active zones are configured."}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Delivery destinations</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <form onSubmit={addLocation} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <Input value={locationName} onChange={(event) => setLocationName(event.target.value)} placeholder="Public destination name" required maxLength={100} />
+            <Input value={locationCategory} onChange={(event) => setLocationCategory(event.target.value)} placeholder="Category, e.g. Hall" required maxLength={60} />
+            <Button type="submit">Add destination</Button>
+          </form>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {locations.map((location) => <div key={location._id} className="flex items-center justify-between gap-2 rounded border p-3 text-sm">
+              <span>{location.name} · {location.category} {location.is_active ? "" : "(inactive)"}</span>
+              <Button variant="outline" size="sm" onClick={() => toggleLocation(location)}>{location.is_active ? "Disable" : "Enable"}</Button>
+            </div>)}
+            {locations.length === 0 && <p className="text-sm text-muted-foreground">No destinations configured.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Rider applications and approvals</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <select className="rounded-md border bg-background p-2 text-sm" value={applicationStatus} onChange={(event) => setApplicationStatus(event.target.value)}>
+            {["pending", "approved", "rejected", "suspended", "deactivated"].map((status) => <option key={status} value={status}>{status}</option>)}
+          </select>
+          {applications.map((application) => <div key={application.id} className="space-y-2 rounded-lg border p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><p className="font-semibold">{application.legal_name} · <span className="capitalize">{application.status}</span></p><p className="text-sm">{application.email} · {application.phone}</p><p className="text-sm text-muted-foreground">Student ID: {application.student_id_number} · Submitted {application.created_at ? new Date(application.created_at).toLocaleString() : "—"}</p>{application.rejection_reason && <p className="text-sm text-destructive">{application.rejection_reason}</p>}</div>
+              <div className="flex flex-wrap gap-2">
+                {application.has_document && <Button variant="outline" onClick={() => openDocument(application)}>View private ID</Button>}
+                {application.status === "pending" && <><Button onClick={() => review(application, "approved")}>Approve rider</Button><Button variant="destructive" onClick={() => review(application, "rejected")}>Reject</Button></>}
+                {application.status === "approved" && <Button variant="destructive" onClick={() => review(application, "suspended")}>Suspend</Button>}
+                {application.status === "suspended" && <Button onClick={() => review(application, "approved")}>Reinstate</Button>}
+              </div>
+            </div>
+          </div>)}
+          {!loading && applications.length === 0 && <p className="text-sm text-muted-foreground">No {applicationStatus} rider applications.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Open delivery complaints</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {complaints.map((complaint) => <div key={complaint._id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4">
+            <div><p className="font-semibold">{complaint.reason} · Order {complaint.order_id}</p><p className="text-sm">{complaint.details}</p><p className="text-xs text-muted-foreground">Reported by {complaint.raised_by} · {new Date(complaint.created_at).toLocaleString()}</p></div>
+            <Button onClick={() => resolve(complaint)}>Record resolution</Button>
+          </div>)}
+          {!loading && complaints.length === 0 && <p className="text-sm text-muted-foreground">No open delivery complaints.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Delivery assignment history</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {deliveries.map((delivery) => <div key={delivery.id} className="rounded-lg border p-4">
+            <p className="font-semibold">Order {delivery.order_id} · <span className="capitalize">{delivery.status.replace(/_/g, " ")}</span></p>
+            <p className="text-sm">{delivery.destination} · {delivery.zone} · Total delivery fee GHS {delivery.delivery_fee.toFixed(2)}</p>
+            <p className="text-sm text-muted-foreground">Rider compensation GHS {delivery.rider_compensation.toFixed(2)} · Transport costs GHS {delivery.transport_cost.toFixed(2)} · White Market margin GHS {delivery.delivery_margin.toFixed(2)}</p>
+            <p className="text-sm">Buyer: {delivery.buyer_id} · Seller: {delivery.seller_id} · Rider: {delivery.rider_name || "Unassigned"}{delivery.rider_phone ? ` (${delivery.rider_phone})` : ""}</p>
+            {delivery.meeting_point && <p className="text-sm">Meeting point: {delivery.meeting_point}</p>}
+            <ol className="mt-2 space-y-1 text-xs text-muted-foreground">{delivery.events.map((event, index) => <li key={`${event.event}-${index}`}>{event.at ? new Date(event.at).toLocaleString() : ""} · {event.event.replace(/_/g, " ")} · {event.actor_id}{event.note ? ` — ${event.note}` : ""}</li>)}</ol>
+          </div>)}
+          {!loading && deliveries.length === 0 && <p className="text-sm text-muted-foreground">No delivery assignments have been recorded.</p>}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ZoneFeeEditor({ zone, onSave }: {
+  zone: AdminZone;
+  onSave: (zone: AdminZone, fee: string, compensation: string, transport: string, tested: boolean) => void;
+}) {
+  const [fee, setFee] = useState(zone.is_configured ? String(zone.fee) : "");
+  const [compensation, setCompensation] = useState(zone.is_configured ? String(zone.rider_compensation ?? "") : "");
+  const [transport, setTransport] = useState(zone.is_configured ? String(zone.transport_cost ?? "") : "");
+  const [tested, setTested] = useState(false);
+  return <div className="space-y-2 rounded-lg border p-3">
+    <p className="font-semibold">{zone.name}</p>
+    <p className="text-xs text-muted-foreground">{zone.is_configured ? `Current fee: GHS ${zone.fee.toFixed(2)}` : "Not configured"} · {zone.is_active ? "Active" : "Inactive"}</p>
+    <Input type="number" min="0.01" max="1000" step="0.01" value={fee} onChange={(event) => setFee(event.target.value)} placeholder="Tested delivery fee (GHS)" aria-label={`${zone.name} delivery fee`} />
+    <Input type="number" min="0.01" step="0.01" value={compensation} onChange={(event) => setCompensation(event.target.value)} placeholder="Rider compensation (GHS)" aria-label={`${zone.name} rider compensation`} />
+    <Input type="number" min="0" step="0.01" value={transport} onChange={(event) => setTransport(event.target.value)} placeholder="Transport costs (GHS)" aria-label={`${zone.name} transport costs`} />
+    <p className="text-xs text-muted-foreground">White Market margin: GHS {Math.max(0, Number(fee || 0) - Number(compensation || 0) - Number(transport || 0)).toFixed(2)}</p>
+    <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={tested} onChange={(event) => setTested(event.target.checked)} /> I confirm the fee, rider compensation, and transport costs are based on completed test deliveries.</label>
+    <Button className="w-full" disabled={!tested} onClick={() => onSave(zone, fee, compensation, transport, tested)}>Save tested breakdown</Button>
+  </div>;
+}

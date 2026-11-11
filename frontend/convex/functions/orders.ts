@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { orderShape } from "../lib/shapes";
 import { computeCommission, round2 } from "../lib/money";
 import { processBuyerReferralQualification } from "./referrals";
@@ -14,7 +14,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!!args.product_id === !!args.fashion_id) {
       throw new Error("An order must contain exactly one marketplace listing");
@@ -41,6 +41,10 @@ export const create = mutation({
       buyer_id: userId,
       seller_id: listing.seller_id,
       amount: listing.price,
+      item_amount: listing.price,
+      delivery_fee: 0,
+      delivery_method: "campus_pickup",
+      delivery_status: "campus_pickup",
       status: "pending",
       created_at: now,
       updated_at: now,
@@ -157,6 +161,20 @@ export const updateStatus = mutation({
       updated_at: Date.now(),
     });
 
+    const delivery = await ctx.db.query("deliveries").withIndex("by_order", (q) => q.eq("order_id", args.id)).first();
+    if (delivery && delivery.status === "awaiting_rider") {
+      const now = Date.now();
+      await ctx.db.patch(delivery._id, { status: "cancelled", updated_at: now });
+      await ctx.db.insert("delivery_events", {
+        delivery_id: delivery._id,
+        order_id: order._id,
+        actor_id: userId,
+        actor_role: order.buyer_id === userId ? "buyer" : "seller",
+        event: "delivery_cancelled",
+        created_at: now,
+      });
+    }
+
     const updated = await ctx.db.get(args.id);
     const product = updated?.product_id ? await ctx.db.get(updated.product_id) : null;
     const fashion = updated?.fashion_id ? await ctx.db.get(updated.fashion_id) : null;
@@ -176,75 +194,62 @@ export const complete = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     await requireProfile(ctx, userId);
-
-    const order = await ctx.db.get(args.id);
-    if (!order) throw new Error("Order not found");
-    if (order.buyer_id !== userId) {
-      throw new Error("Only the buyer can complete an order");
-    }
-    if (order.status !== "paid") {
-      throw new Error("Only a paid order can be completed");
-    }
-
-    const now = Date.now();
-    const defaultCommission = await computeCommission(ctx, order.amount);
-    const commission = order.commission ?? defaultCommission.commission;
-    const sellerEarning = order.seller_earning ?? defaultCommission.sellerEarning;
-
-    await ctx.db.patch(args.id, {
-      status: "completed",
-      completed_at: now,
-      updated_at: now,
-      commission,
-      seller_earning: sellerEarning,
-    });
-
-    // Move the seller's pending earnings into their available balance.
-    const wallet = await ctx.db
-      .query("wallets")
-      .withIndex("by_user", (q) => q.eq("user_id", order.seller_id))
-      .unique();
-    if (wallet) {
-      const balance = (wallet.balance ?? 0) + sellerEarning;
-      await ctx.db.patch(wallet._id, { balance, updated_at: now });
-      await ctx.db.insert("wallet_transactions", {
-        user_id: order.seller_id,
-        type: "credit",
-        amount: sellerEarning,
-        description: `Order completed - GHS ${sellerEarning} (${round2((commission / order.amount) * 100)}% commission applied)`,
-        reference_id: order._id,
-        reference_type: "order",
-        balance_after: balance,
-        created_at: now,
-      });
-    }
-
-    const seller = await ctx.db.get(order.seller_id);
-    if (seller) {
-      await ctx.db.patch(seller._id, {
-        total_sales: (seller.total_sales ?? 0) + 1,
-        successful_transactions: (seller.successful_transactions ?? 0) + 1,
-        last_sale_at: now,
-      });
-      await ctx.db.insert("notifications", {
-        user_id: order.seller_id,
-        type: "order_completed",
-        title: "Order completed",
-        body: `Your sale of GHS ${order.amount} is complete. GHS ${sellerEarning} is now available to withdraw.`,
-        data: { order_id: order._id },
-        read: false,
-        created_at: now,
-      });
-    }
-
-    const updated = await ctx.db.get(args.id);
-    return {
-      message: "Order completed",
-      order: updated ? orderShape(updated) : null,
-      seller_amount: sellerEarning,
-      commission,
-    };
+    const delivery = await ctx.db.query("deliveries").withIndex("by_order", (q) => q.eq("order_id", args.id)).first();
+    if (delivery) throw new Error("Confirm delivery receipt from the delivery tracker");
+    return completePaidOrder(ctx, args.id, userId);
   },
+});
+
+export async function completePaidOrder(
+  ctx: MutationCtx,
+  orderId: Id<"orders">,
+  buyerId: Id<"users">
+) {
+  const order = await ctx.db.get(orderId);
+  if (!order) throw new Error("Order not found");
+  if (order.buyer_id !== buyerId) throw new Error("Only the buyer can complete this order");
+  if (order.status !== "paid") throw new Error("Only a paid order can be completed");
+
+  const now = Date.now();
+  const commissionBase = order.item_amount ?? Math.max(0, order.amount - (order.delivery_fee ?? 0));
+  const defaultCommission = await computeCommission(ctx, commissionBase);
+  const commission = order.commission ?? defaultCommission.commission;
+  const sellerEarning = order.seller_earning ?? defaultCommission.sellerEarning;
+  await ctx.db.patch(orderId, {
+    status: "completed", completed_at: now, updated_at: now, commission, seller_earning: sellerEarning,
+  });
+
+  const wallet = await ctx.db.query("wallets").withIndex("by_user", (q) => q.eq("user_id", order.seller_id)).unique();
+  if (wallet) {
+    const balance = (wallet.balance ?? 0) + sellerEarning;
+    await ctx.db.patch(wallet._id, { balance, updated_at: now });
+    await ctx.db.insert("wallet_transactions", {
+      user_id: order.seller_id, type: "credit", amount: sellerEarning,
+      description: `Order completed - GHS ${sellerEarning} (${round2((commission / Math.max(commissionBase, 0.01)) * 100)}% commission applied)`,
+      reference_id: order._id, reference_type: "order", balance_after: balance, created_at: now,
+    });
+  }
+
+  const seller = await ctx.db.get(order.seller_id);
+  if (seller) {
+    await ctx.db.patch(seller._id, {
+      total_sales: (seller.total_sales ?? 0) + 1,
+      successful_transactions: (seller.successful_transactions ?? 0) + 1,
+      last_sale_at: now,
+    });
+    await ctx.db.insert("notifications", {
+      user_id: order.seller_id, type: "order_completed", title: "Order completed",
+      body: `Your sale of GHS ${commissionBase} is complete. GHS ${sellerEarning} is now available to withdraw.`,
+      data: { order_id: order._id }, read: false, created_at: now,
+    });
+  }
+  const updated = await ctx.db.get(orderId);
+  return { message: "Order completed", order: updated ? orderShape(updated) : null, seller_amount: sellerEarning, commission };
+}
+
+export const completeForDelivery = internalMutation({
+  args: { order_id: v.id("orders"), buyer_id: v.id("users") },
+  handler: async (ctx, args) => completePaidOrder(ctx, args.order_id, args.buyer_id),
 });
 
 export const createDispute = mutation({
@@ -281,6 +286,15 @@ export const createDispute = mutation({
     });
 
     await ctx.db.patch(args.id, { status: "disputed", updated_at: now });
+    const delivery = await ctx.db.query("deliveries").withIndex("by_order", (q) => q.eq("order_id", args.id)).first();
+    if (delivery && !["completed", "cancelled"].includes(delivery.status)) {
+      await ctx.db.patch(delivery._id, { status: "disputed", updated_at: now });
+      await ctx.db.insert("delivery_events", {
+        delivery_id: delivery._id, order_id: order._id, actor_id: userId,
+        actor_role: order.buyer_id === userId ? "buyer" : "seller",
+        event: "order_disputed", note: args.reason, created_at: now,
+      });
+    }
 
     for (const participant of [order.buyer_id, order.seller_id]) {
       await ctx.db.insert("notifications", {
@@ -348,7 +362,8 @@ export async function applyOrderPayment(
   }
 
   const now = Date.now();
-  const { commission, sellerEarning } = await computeCommission(ctx, order.amount);
+  const commissionBase = order.item_amount ?? Math.max(0, order.amount - (order.delivery_fee ?? 0));
+  const { commission, sellerEarning } = await computeCommission(ctx, commissionBase);
 
   await ctx.db.patch(orderId, {
     status: "paid",
@@ -379,11 +394,22 @@ export async function applyOrderPayment(
     });
   }
 
+  const delivery = await ctx.db.query("deliveries")
+    .withIndex("by_order", (q) => q.eq("order_id", order._id)).first();
+  const itemAmount = order.item_amount ?? Math.max(0, order.amount - (order.delivery_fee ?? 0));
+  const deliveryFee = order.delivery_fee ?? 0;
+  const riderCompensation = delivery?.rider_compensation ?? 0;
+  const transportCost = delivery?.transport_cost ?? 0;
   await ctx.db.insert("transactions", {
     order_id: order._id,
     buyer_id: order.buyer_id,
     seller_id: order.seller_id,
     amount: order.amount,
+    item_amount: itemAmount,
+    delivery_fee: deliveryFee,
+    rider_compensation: riderCompensation,
+    transport_cost: transportCost,
+    delivery_margin: round2(Math.max(0, deliveryFee - riderCompensation - transportCost)),
     commission,
     seller_earning: sellerEarning,
     status: "paid",

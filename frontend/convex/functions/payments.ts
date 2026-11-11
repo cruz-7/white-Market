@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { action, internalMutation, internalQuery, mutation } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { generatePaymentReference } from "../lib/ids";
 import { computeCommission, creditBalance, ensureWallet, round2 } from "../lib/money";
 import { initializeTransaction, verifyTransaction } from "../lib/paystack";
@@ -33,6 +33,7 @@ export const orderContext = internalQuery({
     const profile = await ctx.db.get(args.user_id);
     if (!order || !profile) throw new Error("Order or user profile not found");
     if (order.buyer_id !== args.user_id) throw new Error("You can only pay for your own orders");
+    await requireVerifiedStudent(ctx, args.user_id);
     return { order, email: profile.email ?? "" };
   },
 });
@@ -179,7 +180,7 @@ export const walletPay = mutation({
   args: { order_id: v.id("orders") },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     const order = await ctx.db.get(args.order_id);
     if (!order) throw new Error("Order not found");
@@ -213,7 +214,8 @@ export const walletPay = mutation({
     }
 
     const now = Date.now();
-    const { commission, sellerEarning } = await computeCommission(ctx, order.amount);
+    const commissionBase = order.item_amount ?? Math.max(0, order.amount - (order.delivery_fee ?? 0));
+    const { commission, sellerEarning } = await computeCommission(ctx, commissionBase);
     const nextBalance = round2(balance - order.amount);
 
     await ctx.db.patch(wallet._id, { balance: nextBalance, updated_at: now });
@@ -256,7 +258,7 @@ export const walletPay = mutation({
         user_id: order.seller_id,
         type: "pending",
         amount: sellerEarning,
-        description: `Order payment - GHS ${order.amount} (${round2((commission / order.amount) * 100)}% commission applied)`,
+        description: `Order payment - GHS ${commissionBase} merchandise (${round2((commission / Math.max(commissionBase, 0.01)) * 100)}% commission applied)`,
         reference_id: order._id,
         reference_type: "order",
         balance_after: pending,
@@ -264,11 +266,22 @@ export const walletPay = mutation({
       });
     }
 
+    const delivery = await ctx.db.query("deliveries")
+      .withIndex("by_order", (q) => q.eq("order_id", order._id)).first();
+    const itemAmount = order.item_amount ?? Math.max(0, order.amount - (order.delivery_fee ?? 0));
+    const deliveryFee = order.delivery_fee ?? 0;
+    const riderCompensation = delivery?.rider_compensation ?? 0;
+    const transportCost = delivery?.transport_cost ?? 0;
     await ctx.db.insert("transactions", {
       order_id: order._id,
       buyer_id: order.buyer_id,
       seller_id: order.seller_id,
       amount: order.amount,
+      item_amount: itemAmount,
+      delivery_fee: deliveryFee,
+      rider_compensation: riderCompensation,
+      transport_cost: transportCost,
+      delivery_margin: round2(Math.max(0, deliveryFee - riderCompensation - transportCost)),
       commission,
       seller_earning: sellerEarning,
       status: "paid",
@@ -279,7 +292,7 @@ export const walletPay = mutation({
       user_id: order.seller_id,
       type: "order_paid",
       title: "You made a sale!",
-      body: `GHS ${order.amount} was paid for your listing. GHS ${sellerEarning} is pending.`,
+      body: `GHS ${commissionBase} merchandise was paid for your listing. GHS ${sellerEarning} is pending.`,
       data: { order_id: order._id },
       read: false,
       created_at: now,

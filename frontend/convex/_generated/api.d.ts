@@ -13,6 +13,7 @@ import type * as functions_account from "../functions/account.js";
 import type * as functions_admin from "../functions/admin.js";
 import type * as functions_books from "../functions/books.js";
 import type * as functions_categories from "../functions/categories.js";
+import type * as functions_delivery from "../functions/delivery.js";
 import type * as functions_fashion from "../functions/fashion.js";
 import type * as functions_favorites from "../functions/favorites.js";
 import type * as functions_feedback from "../functions/feedback.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   "functions/admin": typeof functions_admin;
   "functions/books": typeof functions_books;
   "functions/categories": typeof functions_categories;
+  "functions/delivery": typeof functions_delivery;
   "functions/fashion": typeof functions_fashion;
   "functions/favorites": typeof functions_favorites;
   "functions/feedback": typeof functions_feedback;

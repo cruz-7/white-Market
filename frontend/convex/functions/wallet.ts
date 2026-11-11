@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import {
   calculateAccountWeight,
   creditBalance,
@@ -199,6 +199,7 @@ export const withdraw = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const user = await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!(args.amount > 0)) throw new Error("Amount must be greater than 0");
 

@@ -1,6 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import {
+  isVerifiedStudent,
+  requireProfile,
+  requireUserId,
+  requireVerifiedStudent,
+} from "../lib/auth";
 import { productShape } from "../lib/shapes";
 import { requireAdmin } from "../lib/auth";
 import { processSellerReferralQualification } from "./referrals";
@@ -82,13 +87,14 @@ export const list = query({
     const sellerById = new Map(sellers.filter(Boolean).map((s) => [s!._id, s!]));
     const categoryById = new Map(categories.filter(Boolean).map((c) => [c!._id, c!]));
 
-    return products.map((product) =>
+    return Promise.all(products.map(async (product) =>
       productShape(
         product,
         sellerById.get(product.seller_id) ?? null,
-        product.category_id ? (categoryById.get(product.category_id) ?? null) : null
+        product.category_id ? (categoryById.get(product.category_id) ?? null) : null,
+        await isVerifiedStudent(ctx, product.seller_id)
       )
-    );
+    ));
   },
 });
 
@@ -125,9 +131,14 @@ export const trending = query({
     const sellers = await Promise.all(sellerIds.map((id) => ctx.db.get(id)));
     const sellerById = new Map(sellers.filter(Boolean).map((s) => [s!._id, s!]));
 
-    return scored.map(({ product }) =>
-      productShape(product, sellerById.get(product.seller_id) ?? null, null)
-    );
+    return Promise.all(scored.map(async ({ product }) =>
+      productShape(
+        product,
+        sellerById.get(product.seller_id) ?? null,
+        null,
+        await isVerifiedStudent(ctx, product.seller_id)
+      )
+    ));
   },
 });
 
@@ -139,7 +150,7 @@ export const get = query({
 
     const seller = await ctx.db.get(product.seller_id);
     const category = product.category_id ? await ctx.db.get(product.category_id) : null;
-    return productShape(product, seller, category);
+    return productShape(product, seller, category, await isVerifiedStudent(ctx, product.seller_id));
   },
 });
 
@@ -201,7 +212,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!args.title.trim()) throw new Error("Title is required");
     if (!(args.price > 0)) throw new Error("Price must be greater than 0");
@@ -264,6 +275,7 @@ export const update = mutation({
     if (product.seller_id !== userId && profile.role !== "admin") {
       throw new Error("Not authorized to update this product");
     }
+    if (product.seller_id === userId) await requireVerifiedStudent(ctx, userId);
 
     const { id, ...updates } = args;
     const patch: Record<string, unknown> = { updated_at: Date.now() };

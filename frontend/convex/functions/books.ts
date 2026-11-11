@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { round2 } from "../lib/money";
 import { toIso } from "../lib/shapes";
 
@@ -237,7 +237,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!args.title.trim()) throw new Error("Title is required");
     if (!(args.price > 0)) throw new Error("Price must be greater than 0");
@@ -298,6 +298,7 @@ export const update = mutation({
     const book = await ctx.db.get(args.id);
     if (!book) throw new Error("Book not found");
     if (book.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
 
     const { id, ...rest } = args;
     const patch: Record<string, unknown> = { updated_at: Date.now() };
@@ -318,6 +319,7 @@ export const remove = mutation({
     const book = await ctx.db.get(args.id);
     if (!book) throw new Error("Book not found");
     if (book.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
     await ctx.db.delete(args.id);
     return { message: "Book deleted" };
   },
@@ -330,6 +332,7 @@ export const markSold = mutation({
     const book = await ctx.db.get(args.id);
     if (!book) throw new Error("Book not found");
     if (book.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
 
     await ctx.db.patch(args.id, { is_sold: true, updated_at: Date.now() });
     const updated = await ctx.db.get(args.id);

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { round2 } from "../lib/money";
 import { toIso } from "../lib/shapes";
 
@@ -187,7 +187,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!args.service_type) throw new Error("Service type is required");
     if (!args.title.trim()) throw new Error("Title is required");
@@ -236,6 +236,7 @@ export const update = mutation({
     const service = await ctx.db.get(args.id);
     if (!service) throw new Error("Service not found");
     if (service.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
 
     const { id, ...rest } = args;
     const patch: Record<string, unknown> = { updated_at: Date.now() };
@@ -256,6 +257,7 @@ export const remove = mutation({
     const service = await ctx.db.get(args.id);
     if (!service) throw new Error("Service not found");
     if (service.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
     await ctx.db.delete(args.id);
     return { message: "Service deleted" };
   },
@@ -268,6 +270,7 @@ export const toggle = mutation({
     const service = await ctx.db.get(args.id);
     if (!service) throw new Error("Service not found");
     if (service.seller_id !== userId) throw new Error("Not authorized");
+    if (service.is_active === false) await requireVerifiedStudent(ctx, userId);
 
     await ctx.db.patch(args.id, {
       is_active: service.is_active === false,
@@ -328,7 +331,7 @@ export const book = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     const service = await ctx.db.get(args.id);
     if (!service) throw new Error("Service not found");

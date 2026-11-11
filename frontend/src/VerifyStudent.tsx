@@ -21,6 +21,7 @@ function VerifyStudent() {
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<VerificationStatus | null>(null);
   const [documentType, setDocumentType] = useState<"student_id" | "admission_letter">("student_id");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
 
   useEffect(() => {
     fetchStatus();
@@ -42,8 +43,12 @@ function VerifyStudent() {
   };
 
   const handleSubmit = async () => {
+    if (!documentFile) {
+      toast.error("Choose your student ID or admission letter first.");
+      return;
+    }
     setSubmitting(true);
-    const result = await verificationApi.submitRequest({ document_type: documentType });
+    const result = await verificationApi.submitDocument(documentFile, documentType);
     setSubmitting(false);
 
     if (result.error) {
@@ -67,7 +72,7 @@ function VerifyStudent() {
   }
 
   // Show verified status
-  if (status?.verified || status?.verification_status === "approved") {
+  if (status?.verified) {
     return (
       <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#eef7f1,_#f5f5f5_45%)]">
         <div className="container py-8 max-w-xl mx-auto">
@@ -83,13 +88,8 @@ function VerifyStudent() {
               <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
               <h2 className="mt-4 text-2xl font-bold text-green-800">Verified UG Student</h2>
               <p className="mt-2 text-green-700">
-                Your student status has been verified. You now have a trusted seller badge!
+                Your student status has been verified. You can now buy and sell on White Market.
               </p>
-              {status.is_school_email && (
-                <p className="mt-2 text-sm text-green-600">
-                  Verified automatically via your school email address.
-                </p>
-              )}
             </CardContent>
           </Card>
         </div>
@@ -114,7 +114,7 @@ function VerifyStudent() {
               <Clock3 className="h-16 w-16 text-amber-500 mx-auto" />
               <h2 className="mt-4 text-2xl font-bold text-amber-800">Verification Pending</h2>
               <p className="mt-2 text-amber-700">
-                Your verification request is under review. This usually takes 24-48 hours.
+                Your verification request is under review. You can browse while you wait; buying and selling unlock after approval.
               </p>
               <p className="mt-4 text-sm text-amber-600">
                 You'll receive a notification once your verification is approved.
@@ -145,7 +145,7 @@ function VerifyStudent() {
               <p className="mt-2 text-red-700">
                 Your verification was not approved. Please try again with a clearer document.
               </p>
-              <Button className="mt-4" onClick={fetchStatus}>
+              <Button className="mt-4" onClick={() => setStatus((current) => current ? { ...current, verification_status: "none" } : current)}>
                 Try Again
               </Button>
             </CardContent>
@@ -171,7 +171,7 @@ function VerifyStudent() {
             <ShieldCheck className="h-12 w-12 text-primary mx-auto mb-2" />
             <CardTitle className="text-2xl">Verify Your Student Status</CardTitle>
             <CardDescription>
-              Get a verified badge to increase buyer trust and visibility
+              Submit your student ID or admission letter for manual review. Buying and selling unlock after approval.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -179,10 +179,9 @@ function VerifyStudent() {
             <div className="rounded-lg bg-green-50 p-4">
               <h3 className="font-semibold text-green-800 mb-2">Why verify?</h3>
               <ul className="text-sm text-green-700 space-y-1">
-                <li>✓ Trusted seller badge on your profile</li>
-                <li>✓ Higher visibility in search results</li>
-                <li>✓ More buyer confidence in purchases</li>
-                <li>✓ Access to seller analytics</li>
+                <li>✓ Verified Student badge on your profile</li>
+                <li>✓ Buy and sell on the marketplace</li>
+                <li>✓ List products, books, fashion, and services</li>
               </ul>
             </div>
 
@@ -238,8 +237,25 @@ function VerifyStudent() {
                 Upload a clear photo of your {documentType === "student_id" ? "Student ID" : "Admission Letter"}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Supported formats: JPG, PNG (max 5MB)
+                Supported formats: PDF, JPG, PNG, WebP (max 5MB)
               </p>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (file && file.size > 5 * 1024 * 1024) {
+                    toast.error("Verification documents must be 5MB or smaller.");
+                    event.target.value = "";
+                    setDocumentFile(null);
+                    return;
+                  }
+                  setDocumentFile(file);
+                }}
+                className="mt-3 block w-full max-w-sm text-sm text-slate-600"
+                aria-label="Upload student verification document"
+              />
+              {documentFile && <p className="mt-2 text-xs text-slate-600">{documentFile.name}</p>}
             </div>
 
             {/* Submit Button */}
@@ -247,7 +263,7 @@ function VerifyStudent() {
               className="w-full" 
               size="lg"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || !documentFile}
             >
               {submitting ? (
                 <>

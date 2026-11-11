@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
-import { requireProfile, requireUserId } from "../lib/auth";
+import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { round2 } from "../lib/money";
 import { toIso } from "../lib/shapes";
 import type { Doc } from "../_generated/dataModel";
@@ -291,7 +291,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    await requireProfile(ctx, userId);
+    await requireVerifiedStudent(ctx, userId);
 
     if (!args.title.trim()) throw new Error("Title is required");
     if (!(args.price > 0)) throw new Error("Price must be greater than 0");
@@ -351,6 +351,7 @@ export const update = mutation({
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Item not found");
     if (item.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
 
     const { id, ...rest } = args;
     const patch: Record<string, unknown> = { updated_at: Date.now() };
@@ -372,6 +373,7 @@ export const remove = mutation({
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Item not found");
     if (item.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
     if (item.reserved_order_id) throw new Error("Cancel the pending checkout before removing this item");
     await ctx.db.patch(args.id, { is_active: false, updated_at: Date.now() });
     return { message: "Item removed" };
@@ -385,6 +387,7 @@ export const markSold = mutation({
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Item not found");
     if (item.seller_id !== userId) throw new Error("Not authorized");
+    await requireVerifiedStudent(ctx, userId);
     if (item.reserved_order_id) throw new Error("Cancel the pending checkout before marking this item sold");
 
     await ctx.db.patch(args.id, { is_sold: true, is_active: false, updated_at: Date.now() });
@@ -401,6 +404,7 @@ export const toggle = mutation({
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Item not found");
     if (item.seller_id !== userId) throw new Error("Not authorized");
+    if (item.is_active === false) await requireVerifiedStudent(ctx, userId);
     if (item.reserved_order_id && item.is_active !== false) {
       throw new Error("Cancel the pending checkout before deactivating this item");
     }

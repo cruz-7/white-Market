@@ -61,6 +61,28 @@ export async function requireAdmin(ctx: AnyCtx): Promise<Doc<"users">> {
   return profile;
 }
 
+export async function isVerifiedStudent(ctx: AnyCtx, userId: Id<"users">): Promise<boolean> {
+  const profile = await ctx.db.get(userId);
+  if (!profile?.verified) return false;
+  const verifications = await ctx.db
+    .query("verifications")
+    .withIndex("by_user", (q) => q.eq("user_id", userId))
+    .collect();
+  return verifications.some((verification) => verification.status === "approved");
+}
+
+export async function requireVerifiedStudent(
+  ctx: AnyCtx,
+  userId?: Id<"users">
+): Promise<Doc<"users">> {
+  const profile = await requireProfile(ctx, userId);
+
+  if (!(await isVerifiedStudent(ctx, profile._id))) {
+    throw new Error("Student verification is required to buy or sell. Submit your student ID or admission letter for admin review.");
+  }
+  return profile;
+}
+
 export function isAdmin(profile: Doc<"users"> | null | undefined): boolean {
   return profile?.role === "admin";
 }

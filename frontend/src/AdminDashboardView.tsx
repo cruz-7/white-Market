@@ -6,7 +6,7 @@ import {
   AlertTriangle, CheckCircle, Shield, DollarSign, Activity, Package, Eye, ArrowUpRight, ArrowDownRight,
   TrendingUp, Users, CreditCard, Star, Bell, Layers, Briefcase, Gift,
   RefreshCw, Trash2, Ban, Unlock, XCircle, Check, Plus,
-  Wrench, UserCheck, Banknote, FolderTree, Trophy, MessageSquare
+  Wrench, UserCheck, Banknote, FolderTree, Trophy, MessageSquare, Truck
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { toast } from "sonner";
@@ -39,13 +39,14 @@ import {
   Service,
   Verification
 } from "./api";
+import DeliveryAdminPanel from "./DeliveryAdminPanel";
 
 type Props = Readonly<{
   user: LocalUser;
 }>;
 
 type AdminRole = "operations" | "finance" | "compliance" | "content" | "growth";
-type TabType = "dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "categories" | "services" | "referrals" | "notifications" | "settings" | "feedback" | "payouts" | "leaderboard";
+type TabType = "dashboard" | "users" | "products" | "orders" | "disputes" | "verification" | "deliveries" | "categories" | "services" | "referrals" | "notifications" | "settings" | "feedback" | "payouts" | "leaderboard";
 type ActivityType = "all" | "orders" | "payments" | "disputes" | "verification" | "products";
 type ActivityRecordType = Exclude<ActivityType, "all">;
 type PriorityLevel = "critical" | "high" | "medium" | "low";
@@ -1005,7 +1006,7 @@ export default function AdminDashboardView({ user }: Props) {
     try {
       const result = await verificationApi.approve(verificationId);
       if (result.error) throw new Error(result.error);
-      toast.success("Seller verified successfully");
+      toast.success("Student verified successfully");
       await fetchSecondaryData(true);
     } catch (error) {
       console.error("Failed to verify seller:", error);
@@ -1023,6 +1024,30 @@ export default function AdminDashboardView({ user }: Props) {
       console.error("Failed to reject verification:", error);
       toast.error(error instanceof Error ? error.message : "Failed to reject verification");
     }
+  };
+
+  const handleDownloadVerificationDocument = async (verificationId: string) => {
+    const result = await verificationApi.downloadDocument(verificationId);
+    if (result.error || !result.data) {
+      toast.error(result.error || "Could not load verification document");
+      return;
+    }
+
+    const extension = result.data.type === "application/pdf"
+      ? "pdf"
+      : result.data.type === "image/png"
+        ? "png"
+        : result.data.type === "image/webp"
+          ? "webp"
+          : "jpg";
+    const url = URL.createObjectURL(result.data);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `student-verification-${verificationId}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
   
   const handleRestoreProduct = async (productId: string) => {
@@ -1184,8 +1209,8 @@ export default function AdminDashboardView({ user }: Props) {
         link.download = `admin-${tab}-${new Date().toISOString().slice(0, 10)}.csv`;
         link.click();
         URL.revokeObjectURL(url);
-      } else if (tab === "users" && ["ban", "unban", "verify"].includes(bulkAction)) {
-        const result = await adminApi.bulkUsers(ids, bulkAction as "ban" | "unban" | "verify");
+      } else if (tab === "users" && ["ban", "unban"].includes(bulkAction)) {
+        const result = await adminApi.bulkUsers(ids, bulkAction as "ban" | "unban");
         if (result.error) throw new Error(result.error);
       } else if (tab === "products" && ["approve", "reject", "delete"].includes(bulkAction)) {
         const result = await adminApi.bulkProducts(ids, bulkAction as "approve" | "reject" | "delete");
@@ -1232,7 +1257,7 @@ export default function AdminDashboardView({ user }: Props) {
       ["Gross Merchandise Value", gmv.toFixed(2), prevGmv.toFixed(2), fmtDelta(percentDelta(gmv, prevGmv))],
       ["Recorded Platform Commission", revenue.toFixed(2), prevRevenue.toFixed(2), fmtDelta(percentDelta(revenue, prevRevenue))],
       ["Active Sellers", String(activeSellers.length), "-", "-"],
-      ["Verified Sellers", String(verifiedSellers.length), "-", "-"],
+      ["Verified Students", String(verifiedSellers.length), "-", "-"],
       ["Open Disputes", String(openDisputes.length), "-", "-"],
       ["Dispute Rate (selected period)", `${disputeRate.toFixed(2)}%`, "-", "-"],
     ].map((row) => row.join(",")).join("\n");
@@ -1299,6 +1324,7 @@ export default function AdminDashboardView({ user }: Props) {
     { id: "orders", label: "Orders", Icon: ShoppingCart },
     { id: "disputes", label: "Disputes", Icon: CircleHelp },
     { id: "verification", label: "Verification", Icon: Shield },
+    { id: "deliveries", label: "Campus Delivery", Icon: Truck },
     { id: "categories", label: "Categories", Icon: Layers },
     { id: "services", label: "Services", Icon: Briefcase },
     { id: "referrals", label: "Referrals", Icon: Gift },
@@ -2226,7 +2252,6 @@ export default function AdminDashboardView({ user }: Props) {
                         <option value="">Bulk Actions</option>
                         <option value="ban">Ban Selected</option>
                         <option value="unban">Unban Selected</option>
-                        <option value="verify">Verify Users</option>
                         <option value="export">Export Selected</option>
                       </select>
                       <Button size="sm" onClick={handleBulkAction} disabled={!bulkAction} className="h-8">Apply</Button>
@@ -2642,7 +2667,22 @@ export default function AdminDashboardView({ user }: Props) {
                               <p className="text-xs text-slate-500">{v.user?.email}</p>
                             </div>
                           </td>
-                          <td className="py-2 pr-4 capitalize">{v.document_type?.replace("_", " ")}</td>
+                          <td className="py-2 pr-4 capitalize">
+                            <div>{v.document_type?.replace("_", " ")}</div>
+                            {v.has_document && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mt-1"
+                                onClick={() => handleDownloadVerificationDocument(v.id)}
+                              >
+                                <FileText className="mr-1 h-3 w-3" /> Download document
+                              </Button>
+                            )}
+                            {!v.has_document && (
+                              <p className="mt-1 text-xs text-amber-700">Document unavailable</p>
+                            )}
+                          </td>
                           <td className="py-2 pr-4">
                             <Badge variant={v.status === "approved" ? "default" : v.status === "rejected" ? "destructive" : "secondary"}>
                               {v.status}
@@ -2654,7 +2694,7 @@ export default function AdminDashboardView({ user }: Props) {
                           <td className="py-2 pr-4">
                             {v.status === "pending" && (
                               <div className="flex gap-1">
-                                <Button size="sm" onClick={() => handleVerifySeller(v.id)}>
+                                <Button size="sm" disabled={!v.has_document} onClick={() => handleVerifySeller(v.id)}>
                                   <Check className="mr-1 h-3 w-3" /> Approve
                                 </Button>
                                 <Button size="sm" variant="outline" onClick={() => handleRejectVerification(v.id)}>
@@ -2679,6 +2719,9 @@ export default function AdminDashboardView({ user }: Props) {
             </Card>
           )}
           
+          {/* Categories Tab */}
+          {tab === "deliveries" && <DeliveryAdminPanel />}
+
           {/* Categories Tab */}
           {tab === "categories" && (
             <Card>
