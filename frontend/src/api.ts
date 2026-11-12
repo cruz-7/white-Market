@@ -7,6 +7,7 @@
  */
 
 import { api as generatedApi } from "../convex/_generated/api";
+import type { Id } from "../convex/_generated/dataModel";
 import { convex, convexAccessToken, getConvexAuthBridge } from "./convex-client";
 const api = generatedApi.functions;
 
@@ -341,7 +342,7 @@ export const productsApi = {
     category_id?: string;
     condition?: string;
     campus?: string;
-    stock_quantity?: number;
+    stock_quantity: number;
     negotiable?: boolean;
   }) =>
     run(() =>
@@ -409,6 +410,7 @@ export interface Order {
   item_amount?: number;
   delivery_fee?: number;
   delivery_method?: string;
+  payment_method?: string;
   delivery_status?: string;
   status: "pending" | "paid" | "cancelled" | "completed" | "disputed";
   created_at: string;
@@ -502,6 +504,8 @@ export interface DeliveryRecord {
   meeting_point?: string;
   delivery_fee: number;
   status: string;
+  admin_intervention_required?: boolean;
+  admin_intervention_reason?: string;
   product_name: string;
   events: { event: string; note?: string; at?: string }[];
 }
@@ -513,13 +517,11 @@ export const deliveryApi = {
     order_id: string;
     method: "campus_pickup" | "delivery";
     destination_id?: string;
-    zone_id?: string;
     meeting_point?: string;
   }) => run(() => convex.mutation(api.delivery.setDeliveryOption, {
     order_id: params.order_id as any,
     method: params.method,
     destination_id: params.destination_id as any,
-    zone_id: params.zone_id as any,
     meeting_point: params.meeting_point,
   })),
   buyerDeliveryOption: (orderId: string) =>
@@ -547,8 +549,18 @@ export const deliveryApi = {
   ) => run(() => convex.mutation(api.delivery.setZoneFee, {
     id: id as any, fee, rider_compensation, transport_cost, confirmed_tested, is_active,
   })),
-  setLocation: (params: { id?: string; name: string; category: string; is_active: boolean }) =>
-    run(() => convex.mutation(api.delivery.setLocation, { ...params, id: params.id as any })),
+  setLocation: (params: {
+    id?: string; name: string; category: string; is_active: boolean;
+    zone_id?: string; clear_zone?: boolean;
+  }) =>
+    run(() => convex.mutation(api.delivery.setLocation, {
+      ...params,
+      id: params.id as Id<"delivery_locations"> | undefined,
+      zone_id: params.zone_id as Id<"delivery_zones"> | undefined,
+    })),
+  adminEligibleRiders: () => run(() => convex.query(api.delivery.adminEligibleRiders, {})),
+  reassignDelivery: (id: string, rider_id: string) =>
+    run(() => convex.mutation(api.delivery.reassignDelivery, { id: id as any, rider_id: rider_id as any })),
   adminDeliveries: () => run(() => convex.query(api.delivery.adminDeliveries, {})),
   adminComplaints: () => run(() => convex.query(api.delivery.adminComplaints, {})),
   resolveComplaint: (id: string, resolution: string, suspend_rider?: boolean) =>
@@ -567,6 +579,53 @@ export const deliveryApi = {
       return { error: toMessage(error) };
     }
   },
+};
+
+export const deliveryRoutingApi = {
+  adminDashboard: () =>
+    run(() => convex.query(api.deliveryRouting.adminRoutingDashboard, {})),
+  saveConfig: (config: {
+    provider: string;
+    zone_basis: string;
+    nearby_max_distance_m: number;
+    intermediate_max_distance_m: number;
+    nearby_max_time_seconds: number;
+    intermediate_max_time_seconds: number;
+    bicycle_rental_hourly_cost: number;
+    rider_compensation_base: number;
+    rider_compensation_per_minute: number;
+    delivery_margin_fixed: number;
+    delivery_margin_percent: number;
+    repositioning_minutes: number;
+    parking_allowance: number;
+  }) => run(() => convex.mutation(api.deliveryRouting.saveRoutingConfig, config)),
+  saveCoordinates: (coordinates: {
+    id: string;
+    latitude: number;
+    longitude: number;
+    coordinate_source: string;
+    coordinate_reference: string;
+    meeting_point_name: string;
+    coordinate_review_status: string;
+  }) => run(() => convex.mutation(api.deliveryRouting.saveLocationCoordinates, {
+    ...coordinates, id: coordinates.id as Id<"delivery_locations">,
+  })),
+  testRoute: (origin_id: string, destination_id: string) =>
+    run(() => convex.action(api.deliveryRouting.testRoute, {
+      origin_id: origin_id as Id<"delivery_locations">,
+      destination_id: destination_id as Id<"delivery_locations">,
+    })),
+  reviewRoute: (review: {
+    id: string;
+    review_status: string;
+    review_note: string;
+    override_distance_meters?: number;
+    override_duration_seconds?: number;
+    override_estimated_total?: number;
+    override_note?: string;
+  }) => run(() => convex.mutation(api.deliveryRouting.reviewRoute, {
+    ...review, id: review.id as Id<"delivery_route_reviews">,
+  })),
 };
 
 // ==================== PAYMENTS API ====================

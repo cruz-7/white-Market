@@ -1,3 +1,5 @@
+import { requirePaystackSecretKey } from "./paystackMode";
+
 const BASE_URL = "https://api.paystack.co";
 
 export interface PaystackTransactionData {
@@ -31,11 +33,10 @@ export interface PaystackTransfer {
 }
 
 function secretKey(): string {
-  const key = process.env.PAYSTACK_SECRET_KEY;
-  if (!key) {
-    throw new Error("PAYSTACK_SECRET_KEY is not configured");
-  }
-  return key;
+  return requirePaystackSecretKey(
+    process.env.PAYSTACK_SECRET_KEY,
+    process.env.CONVEX_DEPLOYMENT ?? ""
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

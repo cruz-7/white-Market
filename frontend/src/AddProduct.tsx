@@ -38,6 +38,7 @@ function AddProduct() {
     title: "",
     description: "",
     price: "",
+    stock_quantity: "1",
     category_id: "",
     image_url: "",
   });
@@ -75,6 +76,7 @@ function AddProduct() {
           title: data.title || "",
           description: data.description || "",
           price: data.price?.toString() || "",
+          stock_quantity: data.stock_quantity?.toString() ?? "",
           category_id: data.category_id || "",
           image_url: data.image_url || "",
         });
@@ -156,6 +158,12 @@ function AddProduct() {
       return;
     }
 
+    const stockQuantity = Number(form.stock_quantity);
+    if (!form.stock_quantity.trim() || !Number.isInteger(stockQuantity) || stockQuantity < 0) {
+      toast.error("Enter a non-negative whole-number quantity available for sale.");
+      return;
+    }
+
     if (!form.category_id) {
       toast.error("Please select a category");
       return;
@@ -167,11 +175,13 @@ function AddProduct() {
       title: string;
       description?: string;
       price: number;
+      stock_quantity: number;
       image_url?: string;
       category_id: string;
     } = {
       title: form.title.trim(),
       price,
+      stock_quantity: stockQuantity,
       category_id: form.category_id,
       ...(form.description.trim() ? { description: form.description.trim() } : {}),
       ...(form.image_url ? { image_url: form.image_url } : {}),
@@ -330,6 +340,24 @@ function AddProduct() {
                         className="pl-7"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="stock-quantity" className="text-slate-900">
+                      Available quantity <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="stock-quantity"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.stock_quantity}
+                      onChange={(e) => setForm((prev) => ({ ...prev, stock_quantity: e.target.value }))}
+                      className="mt-1.5 max-w-xs"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      One unit is reserved when a buyer starts checkout and returned if the order is cancelled.
+                    </p>
                   </div>
 
                   <div>

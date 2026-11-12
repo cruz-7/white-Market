@@ -4,6 +4,13 @@ import { internalMutation, internalQuery, mutation, query } from "../_generated/
 import { isVerifiedStudent, requireProfile, requireUserId } from "../lib/auth";
 import { ensureWallet, round2 } from "../lib/money";
 import { toIso } from "../lib/shapes";
+import {
+  DELIVERY_LAUNCH_ENABLED,
+  isApprovedRider,
+  isDeliveryEnabled,
+  isOperationalDelivery,
+  latestRiderApplication,
+} from "../lib/deliveryPolicy";
 import { completePaidOrder } from "./orders";
 
 const INITIAL_LOCATIONS = [
@@ -20,6 +27,25 @@ const INITIAL_LOCATIONS = [
   ["Private Hostels", "Pentagon Hostel / African Union Hall"], ["Private Hostels", "TF Hostel / James Topp Nelson Yankah Hall"],
   ["Private Hostels", "Evandy Hostel / United Nations Hall"], ["Private Hostels", "Bani Hostel"],
   ["Private Hostels", "Vikings Hostel"], ["Other", "Other private hostel"], ["Other", "Other campus location"],
+] as const;
+
+const OSM_COORDINATE_CANDIDATES = [
+  ["Legon Hall", 5.649542, -0.188025, "427645339", "Legon Hall"],
+  ["Akuafo Hall", 5.649716, -0.186009, "421358833", "Akuafo Hall Main"],
+  ["Commonwealth Hall", 5.650902, -0.192649, "497853937", "Commonwealth Hall"],
+  ["Volta Hall", 5.651862, -0.189519, "320072537", "Volta Hall"],
+  ["Mensah Sarbah Hall", 5.645788, -0.186443, "497853938", "Mensah Sarbah Hall"],
+  ["International Students Hostel 1", 5.639794, -0.185132, "278303018", "International Students Hostel 1, ISH 1"],
+  ["International Students Hostel 2", 5.641573, -0.186081, "278303020", "International Students Hostel 2, ISH 2"],
+  ["Legon Hall Annex C", 5.647419, -0.188906, "394125207", "Legon Hall Annex C (Graduate Hostel)"],
+  ["Mensah Sarbah Hall Annex C", 5.645389, -0.185275, "278303055", "Mensah Sarbah Annex C"],
+  ["Mensah Sarbah Hall Annex D", 5.645440, -0.185698, "278303047", "Mensah Sarbah Annex D"],
+  ["Akuafo Hall Annex C", 5.647433, -0.185234, "278303060", "Akuafo Hall Annex C"],
+  ["Akuafo Hall Annex D", 5.647430, -0.185922, "278303061", "Akuafo Hall Annex D"],
+  ["Bani Hostel", 5.663372, -0.180048, "368856637", "Bani Hostel"],
+  ["Valco Graduate Hostel Phase 1", 5.644770, -0.186812, "278303038", "Valco Trust Hostel Phase 1"],
+  ["Valco Graduate Hostel Phase 2", 5.644228, -0.186780, "278303034", "Valco Trust Hostel Phase 2"],
+  ["Vikings Hostel", 5.644370, -0.185657, "486634897", "Vikings Hostel"],
 ] as const;
 
 async function requireAdmin(ctx: any) {
@@ -50,6 +76,61 @@ async function logEvent(
   await ctx.db.patch(delivery._id, { updated_at: now });
 }
 
+async function suspendRiderAndFlagDeliveries(
+  ctx: any,
+  adminId: any,
+  riderId: any,
+  reason: string,
+  now: number,
+) {
+  const applications = await ctx.db.query("rider_applications")
+    .withIndex("by_user", (q: any) => q.eq("user_id", riderId)).collect();
+  for (const application of applications) {
+    if (application.status === "approved") {
+      await ctx.db.patch(application._id, {
+        status: "suspended", rejection_reason: reason,
+        reviewed_by: adminId, reviewed_at: now, updated_at: now,
+      });
+    }
+  }
+  const deliveries = await ctx.db.query("deliveries")
+    .withIndex("by_rider", (q: any) => q.eq("rider_id", riderId)).collect();
+  for (const delivery of deliveries) {
+    if (!isOperationalDelivery(delivery.status)) continue;
+    await ctx.db.patch(delivery._id, {
+      admin_intervention_required: true,
+      admin_intervention_reason: reason,
+      admin_intervention_at: now,
+      updated_at: now,
+    });
+    await logEvent(ctx, delivery, adminId, "admin", "rider_suspended_delivery_flagged", reason);
+    for (const recipient of new Set([delivery.buyer_id, delivery.seller_id])) {
+      await ctx.db.insert("notifications", {
+        user_id: recipient,
+        type: "delivery_admin_intervention",
+        title: "Delivery needs admin attention",
+        body: "Your delivery is paused while an administrator assigns a replacement rider.",
+        data: { order_id: delivery.order_id, delivery_id: delivery._id },
+        read: false,
+        created_at: now,
+      });
+    }
+  }
+}
+
+async function isDeliveryCurrentlyEnabled(ctx: any): Promise<boolean> {
+  const [settings, zones, locations] = await Promise.all([
+    ctx.db.query("delivery_settings").first(),
+    ctx.db.query("delivery_zones").collect(),
+    ctx.db.query("delivery_locations").collect(),
+  ]);
+  return isDeliveryEnabled(
+    DELIVERY_LAUNCH_ENABLED && settings?.is_enabled === true,
+    zones,
+    locations,
+  );
+}
+
 export const ensureDefaults = mutation({
   args: {},
   handler: async (ctx) => {
@@ -64,6 +145,20 @@ export const ensureDefaults = mutation({
         locationNames.add(name);
       }
     }
+    const seededLocations = await ctx.db.query("delivery_locations").collect();
+    for (const [name, latitude, longitude, wayId, osmName] of OSM_COORDINATE_CANDIDATES) {
+      const location = seededLocations.find((candidate) => candidate.name === name);
+      if (location && (location.latitude === undefined || location.longitude === undefined)) {
+        await ctx.db.patch(location._id, {
+          latitude,
+          longitude,
+          coordinate_source: "OpenStreetMap named-way centroid (unverified candidate)",
+          coordinate_reference: `https://www.openstreetmap.org/way/${wayId} — ${osmName}`,
+          coordinate_review_status: "needs_review",
+          updated_at: Date.now(),
+        });
+      }
+    }
     const existingZones = await ctx.db.query("delivery_zones").collect();
     const zoneNames = new Set(existingZones.map((zone) => zone.name));
     for (const name of ["Nearby", "Intermediate", "Farther"]) {
@@ -75,23 +170,36 @@ export const ensureDefaults = mutation({
         zoneNames.add(name);
       }
     }
-    return { message: "Delivery defaults are ready; delivery remains disabled until all zone fees are configured." };
+    const settings = await ctx.db.query("delivery_settings").first();
+    if (!settings) {
+      await ctx.db.insert("delivery_settings", {
+        is_enabled: false, updated_by: admin._id, updated_at: Date.now(),
+      });
+    }
+    return { message: "Delivery defaults are ready; delivery remains disabled." };
   },
 });
 
 export const publicOptions = query({
   args: {},
   handler: async (ctx) => {
-    const locations = (await ctx.db.query("delivery_locations").collect())
+    const allLocations = (await ctx.db.query("delivery_locations").collect())
       .filter((location) => location.is_active)
       .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
     const zones = (await ctx.db.query("delivery_zones").collect())
       .filter((zone) => zone.is_active)
       .map((zone) => ({ id: zone._id, name: zone.name, fee: zone.fee, configured: zone.is_configured }));
+    const availableZones = new Map(zones.filter((zone) => zone.configured && zone.fee > 0).map((zone) => [zone.id, zone]));
+    const locations = allLocations.flatMap((location) => {
+      const zone = location.zone_id ? availableZones.get(location.zone_id) : undefined;
+      return zone ? [{
+        id: location._id, name: location.name, category: location.category,
+        zone_id: zone.id, zone_name: zone.name, fee: zone.fee,
+      }] : [];
+    });
     return {
-      delivery_enabled: zones.length === 3 && zones.every((zone) => zone.configured && zone.fee >= 0),
-      locations: locations.map(({ _id, name, category }) => ({ id: _id, name, category })),
-      zones,
+      delivery_enabled: await isDeliveryCurrentlyEnabled(ctx),
+      locations,
     };
   },
 });
@@ -100,9 +208,15 @@ export const adminConfiguration = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
+    const zones = await ctx.db.query("delivery_zones").collect();
+    const zonesById = new Map(zones.map((zone) => [zone._id, zone]));
     return {
-      locations: await ctx.db.query("delivery_locations").collect(),
-      zones: await ctx.db.query("delivery_zones").collect(),
+      locations: (await ctx.db.query("delivery_locations").collect()).map((location) => ({
+        ...location,
+        zone_name: location.zone_id ? zonesById.get(location.zone_id)?.name : undefined,
+      })),
+      zones,
+      delivery_enabled: false,
     };
   },
 });
@@ -138,19 +252,37 @@ export const setZoneFee = mutation({
 });
 
 export const setLocation = mutation({
-  args: { id: v.optional(v.id("delivery_locations")), name: v.string(), category: v.string(), is_active: v.boolean() },
+  args: {
+    id: v.optional(v.id("delivery_locations")), name: v.string(), category: v.string(),
+    is_active: v.boolean(), zone_id: v.optional(v.id("delivery_zones")),
+    clear_zone: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
     const name = args.name.trim();
     const category = args.category.trim();
     if (!name || !category) throw new Error("Destination name and category are required");
+    if (args.zone_id) {
+      const zone = await ctx.db.get(args.zone_id);
+      if (!zone) throw new Error("Delivery zone not found");
+    }
+    const zone_id = args.clear_zone ? undefined : args.zone_id;
+    if (!args.id && args.is_active && !zone_id) {
+      throw new Error("Assign an active delivery zone before adding an active destination");
+    }
     const now = Date.now();
     if (args.id) {
       if (!await ctx.db.get(args.id)) throw new Error("Destination not found");
-      await ctx.db.patch(args.id, { name, category, is_active: args.is_active, updated_at: now });
+      await ctx.db.patch(args.id, {
+        name, category, is_active: args.is_active,
+        ...(args.zone_id || args.clear_zone ? { zone_id } : {}),
+        updated_at: now,
+      });
       return { id: args.id };
     }
-    const id = await ctx.db.insert("delivery_locations", { name, category, is_active: args.is_active, created_at: now, updated_at: now });
+    const id = await ctx.db.insert("delivery_locations", {
+      name, category, zone_id, is_active: args.is_active, created_at: now, updated_at: now,
+    });
     return { id };
   },
 });
@@ -244,11 +376,18 @@ export const reviewRiderApplication = mutation({
     if (args.action === "approved" && !await isVerifiedStudent(ctx, application.user_id)) {
       throw new Error("Only currently verified students can be approved as riders");
     }
+    const reason = args.reason?.trim();
+    if (args.action === "suspended" && !reason) throw new Error("A suspension reason is required");
     const now = Date.now();
     await ctx.db.patch(application._id, {
-      status: args.action, rejection_reason: args.action === "rejected" ? (args.reason?.trim() || "Application not approved") : undefined,
+      status: args.action,
+      rejection_reason: args.action === "rejected" ? (reason || "Application not approved")
+        : args.action === "suspended" ? reason : undefined,
       reviewed_by: admin._id, reviewed_at: now, updated_at: now,
     });
+    if (args.action === "suspended") {
+      await suspendRiderAndFlagDeliveries(ctx, admin._id, application.user_id, reason!, now);
+    }
     return { status: args.action };
   },
 });
@@ -259,9 +398,10 @@ export const availableJobs = query({
     const userId = await requireUserId(ctx);
     const applications = await ctx.db.query("rider_applications")
       .withIndex("by_user", (q) => q.eq("user_id", userId)).collect();
-    if (!applications.some((application) => application.status === "approved") || !await isVerifiedStudent(ctx, userId)) {
+    if (!isApprovedRider(applications) || !await isVerifiedStudent(ctx, userId)) {
       throw new Error("An approved rider application and verified student status are required");
     }
+    if (!await isDeliveryCurrentlyEnabled(ctx)) return [];
     const deliveries = (await ctx.db.query("deliveries").withIndex("by_status", (q) => q.eq("status", "awaiting_rider")).collect())
       .filter((delivery) => delivery.rider_id === undefined);
     return Promise.all(deliveries.map(async (delivery) => {
@@ -305,6 +445,8 @@ export const myDeliveries = query({
         rider_id: delivery.rider_id,
         destination_name: delivery.destination_name, zone_name: delivery.zone_name, meeting_point: delivery.meeting_point,
         delivery_fee: delivery.delivery_fee, status: delivery.status,
+        admin_intervention_required: delivery.admin_intervention_required ?? false,
+        admin_intervention_reason: delivery.admin_intervention_reason,
         product_name: product?.title ?? fashion?.title ?? "Marketplace order",
         events: events.sort((a, b) => a.created_at - b.created_at).map((event) => ({ event: event.event, note: event.note, at: toIso(event.created_at) })),
       };
@@ -315,7 +457,7 @@ export const myDeliveries = query({
 export const setDeliveryOption = mutation({
   args: {
     order_id: v.id("orders"), method: v.string(), destination_id: v.optional(v.id("delivery_locations")),
-    zone_id: v.optional(v.id("delivery_zones")), meeting_point: v.optional(v.string()),
+    meeting_point: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
@@ -327,13 +469,15 @@ export const setDeliveryOption = mutation({
     let destination: any = null;
     let zone: any = null;
     if (args.method === "delivery") {
-      if (!args.destination_id || !args.zone_id) throw new Error("Choose a destination and delivery zone");
+      if (!args.destination_id) throw new Error("Choose a delivery destination");
       destination = await ctx.db.get(args.destination_id);
-      zone = await ctx.db.get(args.zone_id);
-      if (!destination?.is_active || !zone?.is_active || !zone.is_configured) throw new Error("Delivery is not available for this destination or zone yet");
-      const activeZones = (await ctx.db.query("delivery_zones").collect()).filter((candidate) => candidate.is_active);
-      if (activeZones.length !== 3 || activeZones.some((candidate) => !candidate.is_configured)) {
-        throw new Error("Campus delivery is not enabled until administrators configure all three tested zone prices");
+      if (!destination?.is_active || !destination.zone_id) {
+        throw new Error("This destination has not been assigned a delivery zone");
+      }
+      zone = await ctx.db.get(destination.zone_id);
+      if (!await isDeliveryCurrentlyEnabled(ctx) ||
+        !zone?.is_active || !zone.is_configured || zone.fee <= 0) {
+        throw new Error("Campus delivery is currently disabled");
       }
       deliveryFee = zone.fee;
     }
@@ -396,14 +540,16 @@ export const acceptJob = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     const riderApps = await ctx.db.query("rider_applications").withIndex("by_user", (q) => q.eq("user_id", userId)).collect();
-    const app = riderApps.find((application) => application.status === "approved");
+    const app = riderApps.sort((a, b) => b.created_at - a.created_at)[0];
     if (!app || !await isVerifiedStudent(ctx, userId)) throw new Error("Approved rider status and verified student status are required");
+    if (app.status !== "approved") throw new Error("Rider account is not approved");
+    if (!await isDeliveryCurrentlyEnabled(ctx)) throw new Error("Campus delivery is currently disabled");
     const delivery = await ctx.db.get(args.id);
     if (!delivery || delivery.status !== "awaiting_rider" || delivery.rider_id) throw new Error("This delivery is no longer available");
     const order = await ctx.db.get(delivery.order_id);
     if (!order || order.status !== "paid") throw new Error("Only paid delivery requests can be accepted");
     const otherActive = await ctx.db.query("deliveries").withIndex("by_rider", (q) => q.eq("rider_id", userId)).collect();
-    if (otherActive.some((item) => !["completed", "cancelled", "disputed"].includes(item.status))) {
+    if (otherActive.some((item) => isOperationalDelivery(item.status))) {
       throw new Error("Complete your active delivery before accepting another job");
     }
     const profile = await requireProfile(ctx, userId);
@@ -430,6 +576,7 @@ export const confirmPickup = mutation({
     const userId = await requireUserId(ctx);
     const delivery = await ctx.db.get(args.id);
     if (!delivery || delivery.seller_id !== userId) throw new Error("Not authorized to confirm this pickup");
+    if (delivery.admin_intervention_required) throw new Error("An administrator must reassign this delivery before handoff");
     if (delivery.status !== "awaiting_pickup") throw new Error("Delivery is not awaiting seller handoff");
     const now = Date.now();
     await ctx.db.patch(delivery._id, { status: "picked_up", picked_up_at: now, updated_at: now });
@@ -444,8 +591,9 @@ export const updateJobStatus = mutation({
     const userId = await requireUserId(ctx);
     const delivery = await ctx.db.get(args.id);
     if (!delivery || delivery.rider_id !== userId) throw new Error("Only the assigned rider can update this delivery");
+    if (delivery.admin_intervention_required) throw new Error("An administrator must reassign this delivery before it can continue");
     const application = await ctx.db.query("rider_applications").withIndex("by_user", (q) => q.eq("user_id", userId)).collect();
-    if (!application.some((item) => item.status === "approved")) throw new Error("Rider account is not approved");
+    if (!isApprovedRider(application) || !await isVerifiedStudent(ctx, userId)) throw new Error("Rider account is not approved");
     const allowed: Record<string, string[]> = { picked_up: ["in_transit"], in_transit: ["delivered"] };
     if (!allowed[delivery.status]?.includes(args.status)) throw new Error("Invalid delivery status transition");
     if (args.status === "delivered" && !args.note?.trim()) throw new Error("Add a public handoff note (do not include room numbers)");
@@ -469,6 +617,7 @@ export const confirmReceipt = mutation({
     const userId = await requireUserId(ctx);
     const delivery = await ctx.db.get(args.id);
     if (!delivery || delivery.buyer_id !== userId) throw new Error("Only the buyer can confirm receipt");
+    if (delivery.admin_intervention_required) throw new Error("An administrator must reassign this delivery before receipt can be confirmed");
     if (delivery.status !== "delivered") throw new Error("The rider must report handoff before receipt can be confirmed");
     const order = await ctx.db.get(delivery.order_id);
     if (!order || order.status !== "paid") throw new Error("This order cannot be completed");
@@ -548,12 +697,104 @@ export const adminDeliveries = query({
         commission: transaction?.commission,
         seller_earning: transaction?.seller_earning,
         rider_compensation_paid: Boolean(transaction?.rider_compensation_paid_at),
+        admin_intervention_required: delivery.admin_intervention_required ?? false,
+        admin_intervention_reason: delivery.admin_intervention_reason,
         assigned_at: toIso(delivery.assigned_at),
         picked_up_at: toIso(delivery.picked_up_at), delivered_at: toIso(delivery.delivered_at),
         events: (await ctx.db.query("delivery_events").withIndex("by_delivery", (q) => q.eq("delivery_id", delivery._id)).collect())
           .sort((a, b) => a.created_at - b.created_at).map((event) => ({ event: event.event, actor_id: event.actor_id, note: event.note, at: toIso(event.created_at) })),
       };
     }));
+  },
+});
+
+export const adminEligibleRiders = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const applications = await ctx.db.query("rider_applications").collect();
+    const byUser = new Map<string, typeof applications>();
+    for (const application of applications) {
+      const current = byUser.get(application.user_id) ?? [];
+      current.push(application);
+      byUser.set(application.user_id, current);
+    }
+    const candidates = [];
+    for (const userApplications of byUser.values()) {
+      const application = latestRiderApplication(userApplications);
+      if (!application || application.status !== "approved" || !await isVerifiedStudent(ctx, application.user_id)) continue;
+      const assigned = await ctx.db.query("deliveries")
+        .withIndex("by_rider", (q) => q.eq("rider_id", application.user_id)).collect();
+      if (assigned.some((delivery) => isOperationalDelivery(delivery.status))) continue;
+      candidates.push({
+        id: application.user_id,
+        legal_name: application.legal_name,
+        phone: application.phone,
+      });
+    }
+    return candidates.sort((a, b) => a.legal_name.localeCompare(b.legal_name));
+  },
+});
+
+export const reassignDelivery = mutation({
+  args: { id: v.id("deliveries"), rider_id: v.id("users") },
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    const delivery = await ctx.db.get(args.id);
+    if (!delivery || !delivery.admin_intervention_required) {
+      throw new Error("This delivery is not awaiting admin reassignment");
+    }
+    if (!isOperationalDelivery(delivery.status)) throw new Error("This delivery is no longer active");
+    const openComplaints = await ctx.db.query("delivery_complaints")
+      .withIndex("by_delivery", (q) => q.eq("delivery_id", delivery._id)).collect();
+    if (openComplaints.some((complaint) => complaint.status === "open")) {
+      throw new Error("Resolve the open delivery complaint before reassigning this delivery");
+    }
+    if (delivery.rider_id === args.rider_id) throw new Error("Choose a different replacement rider");
+    const applications = await ctx.db.query("rider_applications")
+      .withIndex("by_user", (q) => q.eq("user_id", args.rider_id)).collect();
+    const application = latestRiderApplication(applications);
+    if (!application || application.status !== "approved" || !await isVerifiedStudent(ctx, args.rider_id)) {
+      throw new Error("Replacement rider must have an approved application and verified student status");
+    }
+    const assigned = await ctx.db.query("deliveries")
+      .withIndex("by_rider", (q) => q.eq("rider_id", args.rider_id)).collect();
+    if (assigned.some((item) => item._id !== delivery._id && isOperationalDelivery(item.status))) {
+      throw new Error("Replacement rider must finish their current delivery first");
+    }
+    const now = Date.now();
+    const previousRiderId = delivery.rider_id;
+    await ctx.db.patch(delivery._id, {
+      rider_id: args.rider_id,
+      rider_name_snapshot: application.legal_name,
+      rider_phone_snapshot: application.phone,
+      status: "awaiting_pickup",
+      assigned_at: now,
+      picked_up_at: undefined,
+      delivered_at: undefined,
+      admin_intervention_required: false,
+      admin_intervention_reason: undefined,
+      admin_intervention_at: undefined,
+      updated_at: now,
+    });
+    await logEvent(
+      ctx, delivery, admin._id, "admin", "delivery_rider_reassigned",
+      `Previous rider ${previousRiderId ?? "unassigned"} replaced with ${args.rider_id}; seller must confirm handoff.`,
+    );
+    const recipients = new Set([delivery.buyer_id, delivery.seller_id, args.rider_id]);
+    if (previousRiderId) recipients.add(previousRiderId);
+    for (const recipient of recipients) {
+      await ctx.db.insert("notifications", {
+        user_id: recipient,
+        type: "delivery_rider_reassigned",
+        title: "Delivery rider reassigned",
+        body: "An administrator assigned a replacement rider. The seller must confirm the new handoff.",
+        data: { order_id: delivery.order_id, delivery_id: delivery._id },
+        read: false,
+        created_at: now,
+      });
+    }
+    return { status: "awaiting_pickup" };
   },
 });
 
@@ -578,9 +819,9 @@ export const resolveComplaint = mutation({
     const now = Date.now();
     await ctx.db.patch(complaint._id, { status: "resolved", resolution, resolved_by: admin._id, updated_at: now });
     if (args.suspend_rider && delivery.rider_id) {
-      const app = await ctx.db.query("rider_applications").withIndex("by_user", (q) => q.eq("user_id", delivery.rider_id!)).collect();
-      const active = app.find((item) => item.status === "approved");
-      if (active) await ctx.db.patch(active._id, { status: "suspended", reviewed_by: admin._id, reviewed_at: now, updated_at: now });
+      await suspendRiderAndFlagDeliveries(
+        ctx, admin._id, delivery.rider_id, `Suspended after complaint: ${resolution}`, now,
+      );
     }
     await logEvent(ctx, delivery, admin._id, "admin", "complaint_resolved", resolution);
     return { status: "resolved" };

@@ -34,6 +34,9 @@ export const orderContext = internalQuery({
     if (!order || !profile) throw new Error("Order or user profile not found");
     if (order.buyer_id !== args.user_id) throw new Error("You can only pay for your own orders");
     await requireVerifiedStudent(ctx, args.user_id);
+    if (order.status === "pending" && order.product_id && order.stock_reserved !== true) {
+      throw new Error("This order has no stock reservation. Cancel it and create a new order before paying.");
+    }
     return { order, email: profile.email ?? "" };
   },
 });
@@ -197,6 +200,9 @@ export const walletPay = mutation({
     }
     if (order.status === "cancelled") throw new Error("This order was cancelled");
     if (!(order.amount > 0)) throw new Error("Invalid order amount");
+    if (order.product_id && order.stock_reserved !== true) {
+      throw new Error("This order has no stock reservation. Cancel it and create a new order before paying.");
+    }
     const fashion = order.fashion_id ? await ctx.db.get(order.fashion_id) : null;
     if (order.fashion_id && (
       !fashion ||
@@ -232,6 +238,7 @@ export const walletPay = mutation({
 
     await ctx.db.patch(order._id, {
       status: "paid",
+      stock_reserved: false,
       paid_at: now,
       updated_at: now,
       payment_method: "wallet",

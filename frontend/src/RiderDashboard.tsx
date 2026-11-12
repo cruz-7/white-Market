@@ -112,17 +112,18 @@ export default function RiderDashboard({ user }: { user: LocalUser | null }) {
             <div key={delivery.id} className="rounded-lg border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div><p className="font-medium">{delivery.product_name}</p><p className="text-sm">{delivery.destination_name} · {delivery.status.replace(/_/g, " ")}</p></div>
-                {delivery.rider_id === user.id && delivery.status === "picked_up" && <Button onClick={() => action(delivery.id, "in_transit")}>Start delivery</Button>}
-                {delivery.rider_id === user.id && delivery.status === "in_transit" && <Button onClick={() => action(delivery.id, "delivered")}>Report handoff</Button>}
-                {delivery.seller_id === user.id && delivery.status === "awaiting_pickup" && <Button onClick={async () => {
+                {delivery.rider_id === user.id && !delivery.admin_intervention_required && delivery.status === "picked_up" && <Button onClick={() => action(delivery.id, "in_transit")}>Start delivery</Button>}
+                {delivery.rider_id === user.id && !delivery.admin_intervention_required && delivery.status === "in_transit" && <Button onClick={() => action(delivery.id, "delivered")}>Report handoff</Button>}
+                {delivery.seller_id === user.id && !delivery.admin_intervention_required && delivery.status === "awaiting_pickup" && <Button onClick={async () => {
                   const result = await deliveryApi.confirmPickup(delivery.id);
                   if (result.error) toast.error(result.error); else toast.success("Seller handoff recorded.");
                 }}>Confirm handoff to rider</Button>}
-                {delivery.buyer_id === user.id && delivery.status === "delivered" && <Button onClick={async () => {
+                {delivery.buyer_id === user.id && !delivery.admin_intervention_required && delivery.status === "delivered" && <Button onClick={async () => {
                   const result = await deliveryApi.confirmReceipt(delivery.id);
                   if (result.error) toast.error(result.error); else toast.success("Receipt confirmed and order completed.");
                 }}>Confirm receipt</Button>}
-                {delivery.status !== "completed" && delivery.status !== "cancelled" && delivery.status !== "disputed" && (delivery.buyer_id === user.id || delivery.seller_id === user.id) && <Button variant="outline" onClick={async () => {
+                {delivery.admin_intervention_required && (delivery.buyer_id === user.id || delivery.seller_id === user.id || delivery.rider_id === user.id) && <p className="w-full rounded bg-amber-50 p-2 text-sm text-amber-900">This delivery is paused for administrator reassignment. {delivery.admin_intervention_reason}</p>}
+                {delivery.status !== "completed" && delivery.status !== "cancelled" && delivery.status !== "disputed" && !delivery.admin_intervention_required && (delivery.buyer_id === user.id || delivery.seller_id === user.id) && <Button variant="outline" onClick={async () => {
                   const reason = window.prompt("Brief issue category (missing, damaged, late, other):")?.trim();
                   if (!reason) return;
                   const details = window.prompt("Describe the delivery issue:")?.trim();

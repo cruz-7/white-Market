@@ -242,6 +242,7 @@ function toLocalOrder(
     itemAmount: Number(order.item_amount ?? order.amount ?? 0),
     deliveryFee: Number(order.delivery_fee ?? 0),
     deliveryMethod: order.delivery_method === "delivery" ? "delivery" : "campus_pickup",
+    paymentMethod: order.payment_method,
     status: order.status,
     created_at: order.created_at || new Date().toISOString(),
   } as Order;
@@ -889,6 +890,10 @@ function MarketplacePage() {
     if (!user) return navigate("/auth?role=user");
     const product = allProducts.find((p) => p.id === productId);
     if (!product || product.stock_status === "out_of_stock") return;
+    if (product.stock_quantity === undefined) {
+      toast.error("The seller must confirm available stock before this item can be purchased.");
+      return;
+    }
     const created = await ordersApi.create({ product_id: product.id });
     if (created.error || !created.data) {
       toast.error(created.error || "Failed to create order");
@@ -1171,7 +1176,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                     )}
                     {p.stock_status === "unknown" && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-slate-700/90 backdrop-blur-sm px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
-                        Availability not specified
+                        Stock needs confirmation
                       </span>
                     )}
                   </div>
@@ -1260,7 +1265,7 @@ toast.info("Featured listing slots: GHS 50, GHS 75, and GHS 100.");
                   <Button 
                     size="sm" 
                     className="h-11 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all"
-                    disabled={p.stock_status === "out_of_stock"}
+                    disabled={p.stock_status === "out_of_stock" || p.stock_quantity === undefined}
                     onClick={() => createOrder(p.id)}
                   >
                     <ShoppingCart className="h-4 w-4 mr-2" />
@@ -1443,14 +1448,14 @@ function ProductDetailPage() {
               <p className="mt-2 body-text">Sold by {product.sellerName}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <span className={`rounded-full px-2 py-1 ${product.stock_status === "in_stock" ? "bg-green-100 text-green-700" : product.stock_status === "limited" ? "bg-amber-100 text-amber-700" : product.stock_status === "out_of_stock" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"}`}>
-                  {product.stock_status === "in_stock" ? "In Stock" : product.stock_status === "limited" ? "Limited Stock" : product.stock_status === "out_of_stock" ? "Sold Out" : "Availability not specified"}
+                  {product.stock_status === "in_stock" ? "In Stock" : product.stock_status === "limited" ? "Limited Stock" : product.stock_status === "out_of_stock" ? "Sold Out" : "Stock needs confirmation"}
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-1">{product.condition}</span>
               </div>
               {product.description && <p className="mt-4 whitespace-pre-wrap text-slate-600">{product.description}</p>}
               <p className="mt-3 text-3xl font-bold text-primary">GHS {product.price.toFixed(2)}</p>
               <div className="mt-6 flex gap-2">
-                <Button className="flex-1" onClick={createOrder}><ShoppingCart className="h-4 w-4" /> Buy Now</Button>
+                <Button className="flex-1" onClick={createOrder} disabled={product.stock_quantity === undefined || product.stock_status === "out_of_stock"}><ShoppingCart className="h-4 w-4" /> Buy Now</Button>
                 <Button variant="outline" className="flex-1" onClick={openMessage}><MessageCircle className="h-4 w-4" /> Message Seller</Button>
               </div>
             </CardContent>
@@ -1935,12 +1940,10 @@ function CheckoutPage() {
   const [order, setOrder] = useState<Order | null>(() => getOrders().find((item) => item.id === orderId) || null);
   const [deliveryOptions, setDeliveryOptions] = useState<{
     delivery_enabled: boolean;
-    locations: { id: string; name: string; category: string }[];
-    zones: { id: string; name: string; fee: number; configured: boolean }[];
+    locations: { id: string; name: string; category: string; zone_name: string; fee: number }[];
   } | null>(null);
   const [deliveryMethod, setDeliveryMethod] = useState<"campus_pickup" | "delivery">("campus_pickup");
   const [destinationId, setDestinationId] = useState("");
-  const [zoneId, setZoneId] = useState("");
   const [meetingPoint, setMeetingPoint] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [deliveryChoiceDirty, setDeliveryChoiceDirty] = useState(false);
@@ -1989,7 +1992,6 @@ function CheckoutPage() {
       if (result.data) {
         setDeliveryMethod("delivery");
         setDestinationId(result.data.destination_id ?? "");
-        setZoneId(result.data.zone_id ?? "");
         setMeetingPoint(result.data.meeting_point ?? "");
       } else if (result.error) {
         console.error("[checkout] Failed to load saved delivery selection:", result.error);
@@ -2005,11 +2007,12 @@ function CheckoutPage() {
   const shortfall = Math.max(0, order.amount - wallet.balance);
   const itemAmount = order.itemAmount ?? order.amount - (order.deliveryFee ?? 0);
   const deliveryChoiceUnsaved = deliveryChoiceDirty;
+  const selectedDestination = deliveryOptions?.locations.find((location) => location.id === destinationId);
 
   const saveDeliveryChoice = async () => {
     if (!orderId || !order) return;
-    if (deliveryMethod === "delivery" && (!destinationId || !zoneId)) {
-      toast.error("Select a delivery destination and zone.");
+    if (deliveryMethod === "delivery" && !destinationId) {
+      toast.error("Select a delivery destination.");
       return;
     }
     setSavingDelivery(true);
@@ -2017,7 +2020,6 @@ function CheckoutPage() {
       order_id: order.id,
       method: deliveryMethod,
       destination_id: deliveryMethod === "delivery" ? destinationId : undefined,
-      zone_id: deliveryMethod === "delivery" ? zoneId : undefined,
       meeting_point: deliveryMethod === "delivery" ? meetingPoint : undefined,
     });
     setSavingDelivery(false);
@@ -2047,7 +2049,9 @@ function CheckoutPage() {
       return;
     }
 
-    saveOrders(getOrders().map((item) => (item.id === order.id ? { ...item, status: "paid" as const } : item)));
+    saveOrders(getOrders().map((item) => (item.id === order.id
+      ? { ...item, status: "paid" as const, paymentMethod: "wallet" }
+      : item)));
     await Promise.all([userApi.getWallet(), userApi.getTransactions()]).then(([walletRes, txRes]) => {
       if (walletRes.data) {
         saveWallet({
@@ -2115,16 +2119,13 @@ function CheckoutPage() {
                 {deliveryMethod === "delivery" && <>
                   <select className="w-full rounded-md border bg-background p-2 text-sm" value={destinationId} onChange={(event) => { setDestinationId(event.target.value); setDeliveryChoiceDirty(true); }} aria-label="Delivery destination">
                     <option value="">Select destination</option>
-                    {deliveryOptions.locations.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.category}</option>)}
+                    {deliveryOptions.locations.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.category} · {location.zone_name} · GHS {location.fee.toFixed(2)}</option>)}
                   </select>
-                  <select className="w-full rounded-md border bg-background p-2 text-sm" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setDeliveryChoiceDirty(true); }} aria-label="Delivery zone">
-                    <option value="">Select delivery zone</option>
-                    {deliveryOptions.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name} · GHS {zone.fee.toFixed(2)}</option>)}
-                  </select>
+                  {selectedDestination && <p className="text-sm text-muted-foreground">Zone: {selectedDestination.zone_name} · Delivery fee: GHS {selectedDestination.fee.toFixed(2)}</p>}
                   <Input value={meetingPoint} onChange={(event) => { setMeetingPoint(event.target.value); setDeliveryChoiceDirty(true); }} placeholder="Public meeting point instructions (no room number)" maxLength={180} />
                 </>}
               </>
-            ) : <p className="text-xs text-muted-foreground">Campus delivery is not available yet. Administrators will enable it after all three test-based zone fees are configured.</p>}
+            ) : <p className="text-xs text-muted-foreground">Campus delivery is intentionally disabled while destination mappings and delivery operations are reviewed. Campus pickup remains available.</p>}
             <Button className="w-full" variant="outline" onClick={saveDeliveryChoice} disabled={savingDelivery || (deliveryMethod === "delivery" && !deliveryOptions?.delivery_enabled)}>{savingDelivery ? "Saving..." : "Save delivery choice"}</Button>
           </CardContent></Card>
           <Card className="shadow-sm"><CardContent className="p-6"><p className="label-text">Wallet Balance</p><p className="text-2xl font-bold">GHS {wallet.balance.toFixed(2)}</p>{deliveryChoiceUnsaved && <p className="mt-2 text-sm text-amber-700">Save your delivery choice before paying.</p>}{wallet.balance >= order.amount ? <Button className="mt-4 w-full" onClick={payNow} disabled={loading || deliveryChoiceUnsaved}>{loading ? "Processing..." : "Pay with Wallet"}</Button> : <><p className="mt-3 text-sm text-red-500">Shortfall: GHS {shortfall.toFixed(2)}</p><Button className="mt-3 w-full" onClick={() => navigate("/dashboard")}>Top Up to Continue</Button></>}<Button variant="outline" className="mt-3 w-full" onClick={payWithPaystack} disabled={loading || deliveryChoiceUnsaved}>{loading ? "Opening secure checkout..." : "Pay by Card or Mobile Money"}</Button></CardContent></Card>

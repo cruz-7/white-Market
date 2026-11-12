@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   X,
   Save,
@@ -42,19 +43,24 @@ export function QuickEditProduct({ product, onSave, onClose }: QuickEditProductP
   const [title, setTitle] = useState(product.title);
   const [price, setPrice] = useState(product.price.toString());
   const [stockQuantity, setStockQuantity] = useState(
-    product.stock_quantity?.toString() || "0"
+    product.stock_quantity?.toString() ?? ""
   );
   const [isActive, setIsActive] = useState(product.is_active ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const handleSave = async () => {
+    const parsedStock = Number(stockQuantity);
+    if (!stockQuantity.trim() || !Number.isInteger(parsedStock) || parsedStock < 0) {
+      toast.error("Enter a non-negative whole-number available quantity.");
+      return;
+    }
     setIsSaving(true);
     try {
       await onSave(product.id, {
         title: title.trim(),
         price: Number.parseFloat(price),
-        stock_quantity: Number.parseInt(stockQuantity, 10),
+        stock_quantity: parsedStock,
         is_active: isActive,
       });
       setShowSuccess(true);
@@ -71,6 +77,9 @@ export function QuickEditProduct({ product, onSave, onClose }: QuickEditProductP
 
   const getStockStatus = () => {
     const qty = Number.parseInt(stockQuantity, 10);
+    if (!stockQuantity.trim() || !Number.isFinite(qty)) {
+      return { label: "Set quantity", color: "bg-slate-100 text-slate-700", icon: AlertCircle };
+    }
     if (qty === 0) return { label: "Out of Stock", color: "bg-red-100 text-red-700", icon: XCircle };
     if (qty < 5) return { label: "Low Stock", color: "bg-yellow-100 text-yellow-700", icon: AlertCircle };
     return { label: "In Stock", color: "bg-green-100 text-green-700", icon: CheckCircle };
@@ -220,7 +229,7 @@ export function QuickEditProduct({ product, onSave, onClose }: QuickEditProductP
           <div className="space-y-3">
             <label className="text-sm font-medium flex items-center gap-2">
               <Hash className="w-4 h-4" />
-              Stock Quantity
+              Available Quantity
             </label>
             <div className="flex gap-3">
               <Input
@@ -236,6 +245,9 @@ export function QuickEditProduct({ product, onSave, onClose }: QuickEditProductP
                 {stockStatus.label}
               </Badge>
             </div>
+            <p className="text-xs text-muted-foreground">
+              One unit is reserved when a buyer starts checkout and returned if the order is cancelled.
+            </p>
             <div className="flex gap-2">
               {[0, 5, 10, 25, 50, 100].map((qty) => (
                 <button

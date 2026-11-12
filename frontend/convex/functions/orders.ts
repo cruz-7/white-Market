@@ -5,6 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import { requireProfile, requireUserId, requireVerifiedStudent } from "../lib/auth";
 import { orderShape } from "../lib/shapes";
 import { computeCommission, round2 } from "../lib/money";
+import { releaseOneUnit, reserveOneUnit } from "../lib/inventory";
 import { processBuyerReferralQualification } from "./referrals";
 
 export const create = mutation({
@@ -35,6 +36,9 @@ export const create = mutation({
     }
 
     const now = Date.now();
+    const remainingStock = product
+      ? reserveOneUnit(product.stock_quantity)
+      : undefined;
     const orderId = await ctx.db.insert("orders", {
       product_id: args.product_id,
       fashion_id: args.fashion_id,
@@ -46,10 +50,14 @@ export const create = mutation({
       delivery_method: "campus_pickup",
       delivery_status: "campus_pickup",
       status: "pending",
+      stock_reserved: !!product && product.stock_quantity !== undefined,
       created_at: now,
       updated_at: now,
     });
 
+    if (product && product.stock_quantity !== undefined) {
+      await ctx.db.patch(product._id, { stock_quantity: remainingStock, updated_at: now });
+    }
     if (fashion) {
       await ctx.db.patch(fashion._id, { reserved_order_id: orderId, updated_at: now });
     }
@@ -156,10 +164,21 @@ export const updateStatus = mutation({
       throw new Error(`Cannot cancel an order that is already ${order.status}`);
     }
 
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       status: "cancelled",
-      updated_at: Date.now(),
+      stock_reserved: false,
+      updated_at: now,
     });
+
+    if (order.stock_reserved && order.product_id) {
+      const product = await ctx.db.get(order.product_id);
+      if (!product) throw new Error("Reserved listing was removed; contact support to complete cancellation");
+      await ctx.db.patch(product._id, {
+        stock_quantity: releaseOneUnit(product.stock_quantity, order.stock_reserved),
+        updated_at: now,
+      });
+    }
 
     const delivery = await ctx.db.query("deliveries").withIndex("by_order", (q) => q.eq("order_id", args.id)).first();
     if (delivery && delivery.status === "awaiting_rider") {
@@ -367,6 +386,7 @@ export async function applyOrderPayment(
 
   await ctx.db.patch(orderId, {
     status: "paid",
+    stock_reserved: false,
     paid_at: now,
     updated_at: now,
     commission,

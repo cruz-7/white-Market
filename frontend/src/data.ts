@@ -64,6 +64,7 @@ export type Order = {
   itemAmount?: number;
   deliveryFee?: number;
   deliveryMethod?: "campus_pickup" | "delivery";
+  paymentMethod?: string;
   status: OrderStatus;
   created_at: string;
   reviewed?: boolean;

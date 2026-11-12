@@ -14,6 +14,7 @@ import type * as functions_admin from "../functions/admin.js";
 import type * as functions_books from "../functions/books.js";
 import type * as functions_categories from "../functions/categories.js";
 import type * as functions_delivery from "../functions/delivery.js";
+import type * as functions_deliveryRouting from "../functions/deliveryRouting.js";
 import type * as functions_fashion from "../functions/fashion.js";
 import type * as functions_favorites from "../functions/favorites.js";
 import type * as functions_feedback from "../functions/feedback.js";
@@ -34,9 +35,13 @@ import type * as functions_verification from "../functions/verification.js";
 import type * as functions_wallet from "../functions/wallet.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_deliveryPolicy from "../lib/deliveryPolicy.js";
+import type * as lib_deliveryRouting from "../lib/deliveryRouting.js";
 import type * as lib_ids from "../lib/ids.js";
+import type * as lib_inventory from "../lib/inventory.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_paystack from "../lib/paystack.js";
+import type * as lib_paystackMode from "../lib/paystackMode.js";
 import type * as lib_shapes from "../lib/shapes.js";
 
 import type {
@@ -52,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   "functions/books": typeof functions_books;
   "functions/categories": typeof functions_categories;
   "functions/delivery": typeof functions_delivery;
+  "functions/deliveryRouting": typeof functions_deliveryRouting;
   "functions/fashion": typeof functions_fashion;
   "functions/favorites": typeof functions_favorites;
   "functions/feedback": typeof functions_feedback;
@@ -72,9 +78,13 @@ declare const fullApi: ApiFromModules<{
   "functions/wallet": typeof functions_wallet;
   http: typeof http;
   "lib/auth": typeof lib_auth;
+  "lib/deliveryPolicy": typeof lib_deliveryPolicy;
+  "lib/deliveryRouting": typeof lib_deliveryRouting;
   "lib/ids": typeof lib_ids;
+  "lib/inventory": typeof lib_inventory;
   "lib/money": typeof lib_money;
   "lib/paystack": typeof lib_paystack;
+  "lib/paystackMode": typeof lib_paystackMode;
   "lib/shapes": typeof lib_shapes;
 }>;
 

@@ -9,12 +9,30 @@ import {
 import { productShape } from "../lib/shapes";
 import { requireAdmin } from "../lib/auth";
 import { processSellerReferralQualification } from "./referrals";
+import { validateStockQuantity } from "../lib/inventory";
+import type { MutationCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 
 type Sort = "price_asc" | "price_desc" | "newest" | "oldest";
 
 function matchesText(haystack: string | undefined, needle: string): boolean {
   if (!haystack) return false;
   return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+async function ensureNoPendingOrdersForProduct(
+  ctx: MutationCtx,
+  productId: Id<"products">,
+): Promise<void> {
+  const pendingOrder = await ctx.db
+    .query("orders")
+    .withIndex("by_product_status", (q) =>
+      q.eq("product_id", productId).eq("status", "pending"),
+    )
+    .first();
+  if (pendingOrder) {
+    throw new Error("This listing has a pending order. Cancel or complete it before removing the listing.");
+  }
 }
 
 export const list = query({
@@ -207,7 +225,7 @@ export const create = mutation({
     category_id: v.optional(v.id("categories")),
     condition: v.optional(v.string()),
     campus: v.optional(v.string()),
-    stock_quantity: v.optional(v.number()),
+    stock_quantity: v.number(),
     negotiable: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -216,6 +234,7 @@ export const create = mutation({
 
     if (!args.title.trim()) throw new Error("Title is required");
     if (!(args.price > 0)) throw new Error("Price must be greater than 0");
+    validateStockQuantity(args.stock_quantity);
 
     const now = Date.now();
     const productId = await ctx.db.insert("products", {
@@ -276,6 +295,7 @@ export const update = mutation({
       throw new Error("Not authorized to update this product");
     }
     if (product.seller_id === userId) await requireVerifiedStudent(ctx, userId);
+    validateStockQuantity(args.stock_quantity);
 
     const { id, ...updates } = args;
     const patch: Record<string, unknown> = { updated_at: Date.now() };
@@ -301,6 +321,7 @@ export const remove = mutation({
       throw new Error("Not authorized to delete this product");
     }
 
+    await ensureNoPendingOrdersForProduct(ctx, product._id);
     await ctx.db.delete(args.id);
     return { message: "Product deleted" };
   },
@@ -311,6 +332,7 @@ export const adminRemove = mutation({
   args: { id: v.id("products") },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
+    await ensureNoPendingOrdersForProduct(ctx, args.id);
     await ctx.db.delete(args.id);
     return { message: "Product removed" };
   },

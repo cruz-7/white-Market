@@ -18,7 +18,6 @@ import {
   SortAsc,
   SortDesc,
   Calendar,
-  CreditCard,
   Truck,
   Eye,
   MoreVertical,
@@ -27,8 +26,6 @@ import {
   Share2,
   Heart,
   TrendingUp,
-  Zap,
-  Shield,
   Clock as ClockIcon,
   MapPin as LocationIcon,
   User,
@@ -52,6 +49,7 @@ import { Avatar, AvatarFallback } from "./avatar";
 import { getOrders, LocalUser, Order, timeAgo } from "./data";
 import { SellerRating } from "./SellerRating";
 import { ratingsApi } from "./api";
+import { getPaymentInfo } from "./order-display";
 
 type Props = {
   user: LocalUser | null;
@@ -127,18 +125,6 @@ function getEstimatedDelivery(status: OrderStatus, createdAt: string): string {
     default:
       return "Processing";
   }
-}
-
-// Get payment method icon and label
-function getPaymentInfo(order: Order): { icon: any; label: string; color: string } {
-  // Simulate payment method based on order data
-  const methods = [
-    { icon: CreditCard, label: "Card Payment", color: "text-blue-600" },
-    { icon: Zap, label: "Mobile Money", color: "text-green-600" },
-    { icon: Shield, label: "Wallet", color: "text-purple-600" },
-  ];
-  const index = Math.abs(order.id.charCodeAt(0)) % methods.length;
-  return methods[index];
 }
 
 // Status configuration for professional look
@@ -330,7 +316,7 @@ const OrderCard = ({
   const statusConfig = STATUS_CONFIG[normalizeOrderStatus(order.status)] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   const friendlyId = generateFriendlyOrderId(order.id);
-  const paymentInfo = getPaymentInfo(order);
+  const paymentInfo = getPaymentInfo(order.paymentMethod);
   const PaymentIcon = paymentInfo.icon;
   const estimatedDelivery = getEstimatedDelivery(normalizeOrderStatus(order.status), order.created_at);
   
@@ -396,7 +382,7 @@ const OrderCard = ({
                   <span className="text-sm text-gray-600">{order.sellerName}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
-                  <PaymentIcon className={`w-4 h-4 ${paymentInfo.color}`} />
+                  {PaymentIcon && <PaymentIcon className={`w-4 h-4 ${paymentInfo.color}`} />}
                   <span className="text-sm text-gray-600">{paymentInfo.label}</span>
                 </div>
                 <p className="font-bold text-xl text-gray-900 mt-2">GHS {order.amount.toLocaleString()}</p>
@@ -490,7 +476,7 @@ const OrderCard = ({
                   <span>{order.sellerName}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <PaymentIcon className={`w-3 h-3 ${paymentInfo.color}`} />
+                  {PaymentIcon && <PaymentIcon className={`w-3 h-3 ${paymentInfo.color}`} />}
                   <span>{paymentInfo.label}</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -545,7 +531,7 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
   const statusConfig = STATUS_CONFIG[normalizeOrderStatus(order.status)] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   const friendlyId = generateFriendlyOrderId(order.id);
-  const paymentInfo = getPaymentInfo(order);
+  const paymentInfo = getPaymentInfo(order.paymentMethod);
   const PaymentIcon = paymentInfo.icon;
   const estimatedDelivery = getEstimatedDelivery(normalizeOrderStatus(order.status), order.created_at);
   const [showRatingForm, setShowRatingForm] = useState(false);
@@ -634,7 +620,7 @@ const OrderDetailsModal = ({ order, onClose }: { order: Order | null; onClose: (
                   <span>Seller: {order.sellerName}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-sm text-gray-600">
-                  <PaymentIcon className={`w-4 h-4 ${paymentInfo.color}`} />
+                  {PaymentIcon && <PaymentIcon className={`w-4 h-4 ${paymentInfo.color}`} />}
                   <span>{paymentInfo.label}</span>
                 </div>
                 <p className="font-bold text-2xl mt-3 text-gray-900">GHS {order.amount.toLocaleString()}</p>

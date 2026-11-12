@@ -1357,6 +1357,15 @@ export default function AdminDashboardView({ user }: Props) {
             <p className="text-xs text-slate-400">Signed in as {user.full_name}</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate("/marketplace")}
+              className="border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white"
+            >
+              <Store className="mr-1 h-4 w-4" />
+              Marketplace
+            </Button>
             <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
               <RefreshCw className={`mr-1 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} /> 
               {isRefreshing ? "Refreshing..." : "Refresh"}

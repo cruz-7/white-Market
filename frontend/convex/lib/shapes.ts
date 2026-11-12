@@ -97,6 +97,7 @@ export function orderShape(
     item_amount: order.item_amount ?? order.amount - (order.delivery_fee ?? 0),
     delivery_fee: order.delivery_fee ?? 0,
     delivery_method: order.delivery_method ?? "campus_pickup",
+    payment_method: order.payment_method,
     commission: order.commission,
     seller_earning: order.seller_earning,
     status: order.status,

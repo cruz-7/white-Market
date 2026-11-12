@@ -245,6 +245,7 @@ export function EnhancedProductManagement({
         title: `${product.title} (Copy)`,
         description: product.description,
         price: product.price,
+        stock_quantity: product.stock_quantity ?? 1,
         category_id: product.category_id,
         image_url: product.image_url,
       });

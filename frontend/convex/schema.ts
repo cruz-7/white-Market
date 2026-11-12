@@ -141,11 +141,13 @@ export default defineSchema({
     is_rated: v.optional(v.boolean()),
     paid_at: v.optional(v.number()),
     completed_at: v.optional(v.number()),
+    stock_reserved: v.optional(v.boolean()),
     created_at: v.optional(v.number()),
     updated_at: v.optional(v.number()),
   })
     .index("by_buyer", ["buyer_id"])
     .index("by_seller", ["seller_id"])
+    .index("by_product_status", ["product_id", "status"])
     .index("by_status", ["status"]),
 
   /** Current balances. One row per user. */
@@ -259,6 +261,13 @@ export default defineSchema({
   delivery_locations: defineTable({
     name: v.string(),
     category: v.string(),
+    zone_id: v.optional(v.id("delivery_zones")),
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+    coordinate_source: v.optional(v.string()),
+    coordinate_reference: v.optional(v.string()),
+    meeting_point_name: v.optional(v.string()),
+    coordinate_review_status: v.optional(v.string()),
     is_active: v.boolean(),
     created_at: v.number(),
     updated_at: v.number(),
@@ -274,6 +283,74 @@ export default defineSchema({
     updated_by: v.id("users"),
     updated_at: v.number(),
   }).index("by_active", ["is_active"]),
+
+  delivery_settings: defineTable({
+    is_enabled: v.boolean(),
+    updated_by: v.optional(v.id("users")),
+    updated_at: v.number(),
+  }),
+
+  delivery_routing_config: defineTable({
+    provider: v.string(),
+    zone_basis: v.string(),
+    nearby_max_distance_m: v.number(),
+    intermediate_max_distance_m: v.number(),
+    nearby_max_time_seconds: v.number(),
+    intermediate_max_time_seconds: v.number(),
+    bicycle_rental_hourly_cost: v.number(),
+    rider_compensation_base: v.number(),
+    rider_compensation_per_minute: v.number(),
+    delivery_margin_fixed: v.number(),
+    delivery_margin_percent: v.number(),
+    repositioning_minutes: v.number(),
+    parking_allowance: v.number(),
+    pricing_reviewed: v.boolean(),
+    updated_by: v.optional(v.id("users")),
+    updated_at: v.number(),
+  }),
+
+  delivery_route_usage: defineTable({
+    utc_day: v.string(),
+    requests_reserved: v.number(),
+    updated_at: v.number(),
+  }).index("by_day", ["utc_day"]),
+
+  delivery_route_reviews: defineTable({
+    origin_id: v.id("delivery_locations"),
+    destination_id: v.id("delivery_locations"),
+    origin_name: v.string(),
+    destination_name: v.string(),
+    origin_latitude: v.number(),
+    origin_longitude: v.number(),
+    destination_latitude: v.number(),
+    destination_longitude: v.number(),
+    provider: v.string(),
+    attribution: v.optional(v.string()),
+    routing_status: v.string(),
+    review_status: v.string(),
+    distance_meters: v.optional(v.number()),
+    duration_seconds: v.optional(v.number()),
+    origin_snap_distance_meters: v.optional(v.number()),
+    destination_snap_distance_meters: v.optional(v.number()),
+    estimated_zone: v.optional(v.string()),
+    estimated_bicycle_rental_cost: v.optional(v.number()),
+    estimated_rider_compensation: v.optional(v.number()),
+    estimated_repositioning_allowance: v.optional(v.number()),
+    estimated_parking_allowance: v.optional(v.number()),
+    estimated_margin: v.optional(v.number()),
+    estimated_total: v.optional(v.number()),
+    override_distance_meters: v.optional(v.number()),
+    override_duration_seconds: v.optional(v.number()),
+    override_estimated_total: v.optional(v.number()),
+    override_note: v.optional(v.string()),
+    review_note: v.optional(v.string()),
+    reviewed_by: v.optional(v.id("users")),
+    reviewed_at: v.optional(v.number()),
+    created_at: v.number(),
+    updated_at: v.number(),
+  })
+    .index("by_created", ["created_at"])
+    .index("by_origin_destination", ["origin_id", "destination_id"]),
 
   deliveries: defineTable({
     order_id: v.id("orders"),
@@ -296,6 +373,9 @@ export default defineSchema({
     picked_up_at: v.optional(v.number()),
     delivered_at: v.optional(v.number()),
     completed_at: v.optional(v.number()),
+    admin_intervention_required: v.optional(v.boolean()),
+    admin_intervention_reason: v.optional(v.string()),
+    admin_intervention_at: v.optional(v.number()),
     created_at: v.number(),
     updated_at: v.number(),
   })
